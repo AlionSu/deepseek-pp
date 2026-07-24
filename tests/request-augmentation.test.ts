@@ -273,6 +273,49 @@ describe('augmentRequestBody', () => {
     expect(extractVisibleUserPrompt(body.prompt ?? '')).toBe('/writer');
   });
 
+  it('injects a local index Skill into the system context rather than the visible prompt', () => {
+    const skillDir = '/skills/github-personal-manager';
+    const result = augmentRequestBody(JSON.stringify({
+      prompt: '/demo',
+      parent_message_id: null,
+      thinking_enabled: false,
+    }), {
+      memories: [],
+      skills: [{
+        name: 'demo',
+        description: 'Local demo skill used to verify system-context injection.',
+        instructions: '# Local Skill: demo\nIndex form: true\n## Activation Notice\nRead SKILL.md before acting.\n',
+        memoryEnabled: false,
+        remote: {
+          provider: 'local',
+          sourceId: 'local-demo',
+          path: skillDir,
+          originalName: 'demo',
+          importedAt: 0,
+          updatedAt: 0,
+          includedFiles: [],
+          omittedFiles: [],
+          warnings: [],
+          localDirectory: skillDir,
+        },
+      }],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: [],
+      messageCount: 0,
+      locale: 'zh-CN',
+    });
+
+    const body = JSON.parse(result?.body ?? '{}') as { prompt?: string };
+    // 本地索引 Skill 的 localDirectory 必须回传，供 content.ts 钉死 cwd。
+    expect(result?.activeLocalSkillDir).toBe(skillDir);
+    // 索引 + 激活指令应进入系统上下文（如同 ## Tools 段），而非可见用户输入。
+    expect(body.prompt).toContain('## 本地 Skill 激活（Local Skill Activated）');
+    expect(body.prompt).toContain('local_file_read');
+    // 真实用户 query 仍为可见用户输入；索引不再占据可见用户输入位（修复 Bug ② framing 倒置）。
+    expect(extractVisibleUserPrompt(body.prompt ?? '')).toBe('/demo');
+  });
+
   it('injects only global memories plus memories from the current project', () => {
     const result = augmentRequestBody(JSON.stringify({
       prompt: 'remember the project rule',

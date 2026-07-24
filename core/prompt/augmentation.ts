@@ -17,6 +17,9 @@ export interface PromptAugmentationOptions {
   thinkingEnabled?: boolean;
   identityOnly?: boolean;
   visibleUserPrompt?: string;
+  // 本地索引 Skill 的「激活指令 + 索引」系统上下文：镶入系统指令区（如同 ## Tools 段），
+  // 用于修复隐式命中被当作可见用户输入（被动闲聊）而不遵循读盘指令的问题（Bug ②）。
+  skillSystemContext?: string | null;
   presetContent?: string | null;
   projectContext?: string | null;
   toolDescriptors?: readonly ToolDescriptor[];
@@ -40,6 +43,7 @@ export function buildPromptAugmentation(
     memories = [],
     thinkingEnabled = false,
     identityOnly = false,
+    skillSystemContext = null,
     presetContent = null,
     projectContext = null,
     locale = DEFAULT_LOCALE,
@@ -73,6 +77,7 @@ export function buildPromptAugmentation(
     : '';
   const system = [
     baseSystem,
+    skillSystemContext ? renderSkillSystemContext(skillSystemContext, locale) : '',
     standaloneMemories,
     renderProjectContext(projectContext),
     systemPromptEnabled ? renderWebSearchGuidance(toolDescriptors, locale) : '',
@@ -103,6 +108,11 @@ function renderForcedResponseLanguage(
     ? translate(locale, 'prompt.responseLanguageEnglish')
     : translate(locale, 'prompt.responseLanguageChinese');
   return translate(locale, 'prompt.forceResponseLanguage', { language });
+}
+
+function renderSkillSystemContext(context: string, locale: SupportedLocale): string {
+  const header = translate(locale, 'prompt.localSkillSystemContextHeader');
+  return `${header}\n\n${context}`;
 }
 
 export function renderToolSchemas(

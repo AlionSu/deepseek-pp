@@ -52,6 +52,8 @@ export interface DeepSeekRequestBody extends Record<string, unknown> {
 interface ResolvedSkills {
   combinedPrompt: string;
   memoryEnabled: boolean;
+  // 已激活 Skill 的名称（用于系统上下文的反急躁 / 读盘指令文案）。
+  skillName: string;
 }
 
 export function augmentRequestBody(
@@ -142,6 +144,7 @@ export function augmentDecodedRequestBody(
         resolved = {
           combinedPrompt: composeLocalSkillPrompt(picked),
           memoryEnabled: picked.memoryEnabled,
+          skillName: picked.name,
         };
       }
     }
@@ -149,19 +152,46 @@ export function augmentDecodedRequestBody(
 
   if (resolved) {
     const scopedMemories = filterMemoriesByProjectScope(state.memories, state.projectId);
-    const { augmented, usedMemoryIds } = buildPromptAugmentation(resolved.combinedPrompt, {
-      memories: scopedMemories,
-      thinkingEnabled,
-      identityOnly: !resolved.memoryEnabled,
-      visibleUserPrompt: originalPrompt,
-      presetContent,
-      projectContext: state.projectContext,
-      toolDescriptors: state.toolDescriptors,
-      locale,
-      memoryEnabled: promptSettings.memoryEnabled,
-      systemPromptEnabled: promptSettings.systemPromptEnabled,
-      forceResponseLanguage,
-    });
+    const isLocalIndexActivated = activeLocalSkillDir !== undefined;
+
+    let augmented: string;
+    let usedMemoryIds: number[];
+    if (isLocalIndexActivated) {
+      // 本地索引 Skill（显式 / 隐式命中）：将「激活指令 + 索引」镶入系统上下文（如同 systemChat 的 ## Tools 段），
+      // 真实用户 query 保留为可见用户输入，避免被模型当作被动闲聊而不遵循读盘指令（修复 Bug ② framing 倒置）。
+      const { augmented: a, usedMemoryIds: m } = buildPromptAugmentation(originalPrompt, {
+        memories: scopedMemories,
+        thinkingEnabled,
+        identityOnly: !resolved.memoryEnabled,
+        skillSystemContext: buildLocalSkillSystemContext(resolved, activeLocalSkillDir, locale),
+        presetContent,
+        projectContext: state.projectContext,
+        toolDescriptors: state.toolDescriptors,
+        locale,
+        memoryEnabled: promptSettings.memoryEnabled,
+        systemPromptEnabled: promptSettings.systemPromptEnabled,
+        forceResponseLanguage,
+      });
+      augmented = a;
+      usedMemoryIds = m;
+    } else {
+      // 非本地索引 Skill（builtin/github/bundled）：保持既有行为，索引作为可见用户输入注入。
+      const { augmented: a, usedMemoryIds: m } = buildPromptAugmentation(resolved.combinedPrompt, {
+        memories: scopedMemories,
+        thinkingEnabled,
+        identityOnly: !resolved.memoryEnabled,
+        visibleUserPrompt: originalPrompt,
+        presetContent,
+        projectContext: state.projectContext,
+        toolDescriptors: state.toolDescriptors,
+        locale,
+        memoryEnabled: promptSettings.memoryEnabled,
+        systemPromptEnabled: promptSettings.systemPromptEnabled,
+        forceResponseLanguage,
+      });
+      augmented = a;
+      usedMemoryIds = m;
+    }
 
     body.prompt = augmented;
     return {
@@ -232,6 +262,21 @@ function composeLocalSkillPrompt(skill: AugmentationSkill): string {
   return prompt;
 }
 
+// 构建本地索引 Skill 的系统上下文：激活指令（含反急躁、强制先读 SKILL.md）+ 索引本体。
+// 作为系统指令注入（非可见用户输入），模型会服从其中"先读盘再执行"的约束（修复 Bug ② framing 倒置）。
+function buildLocalSkillSystemContext(
+  resolved: ResolvedSkills,
+  skillDir: string | undefined,
+  locale: SupportedLocale,
+): string {
+  const skillMdPath = skillDir ? `${skillDir}/SKILL.md` : 'SKILL.md';
+  const directive = translate(locale, 'prompt.localSkillActivationDirective', {
+    skillName: resolved.skillName,
+    skillMdPath,
+  });
+  return `${directive}\n\n${resolved.combinedPrompt}`;
+}
+
 // 隐式分支：从本地索引 Skill 中按用户输入打分，返回命中的 Skill 对象（或 null）。
 function selectImplicitLocalSkill(skills: AugmentationSkill[], query: string): AugmentationSkill | null {
   const candidates: LocalSkillIndex[] = skills
@@ -271,6 +316,7 @@ function resolveSkills(
           ? wrapUserInput(combinedInstructions, userArgs, locale)
           : combinedInstructions,
         memoryEnabled: primarySkill.memoryEnabled || secondSkill.memoryEnabled,
+        skillName: primarySkill.name,
       };
     }
   }
@@ -280,6 +326,7 @@ function resolveSkills(
       ? wrapUserInput(primaryPrompt, args, locale)
       : primaryPrompt,
     memoryEnabled: primarySkill.memoryEnabled,
+    skillName: primarySkill.name,
   };
 }
 

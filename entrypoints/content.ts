@@ -1147,6 +1147,7 @@ async function handleAugmentRequestBody(data: {
     activeToolAuthorizations.set(requestId, authorization);
     toolAuthorizationRequestAliases.set(mainRequestId, requestId);
     const project = await resolveProjectContextForRequestBody(bodyWithMultimodalMedia);
+
     const result = augmentDecodedRequestBody(bodyWithMultimodalMedia, {
       memories: currentMemories,
       skills: currentSkills,

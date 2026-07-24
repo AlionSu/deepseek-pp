@@ -327,31 +327,73 @@ export default function SkillPage() {
     const sourceId = skill.remote?.sourceId;
     if (!sourceId) return;
     const defaultPath = skill.remote?.localDirectory ?? skill.remote?.localRootPath ?? '';
+    // 立即进入加载态：禁用本地 Skill 的「更新」按钮并显示转圈，消除"点不动"观感。
+    setSourceActions((current) => ({
+      ...current,
+      [sourceId]: { status: 'updating', message: t('sidepanel.skillPage.syncing') },
+    }));
     try {
       const response = await sidepanelRuntimeClient.request({
         type: 'UPDATE_LOCAL_SKILL_SOURCE',
         payload: { sourceId },
-      }, { unavailableMessage: t('sidepanel.skillPage.backendUnavailable') });
+      }, {
+        unavailableMessage: t('sidepanel.skillPage.backendUnavailable'),
+        // 关键点：文件夹被挪动/失效时 updateLocalSkillSource 返回 {ok:false, error}（而非抛异常）。
+        // 不传 acceptFailure 会让 runtime-client 把 ok:false 当成故障抛异常，从而跳过下面的
+        // !response.ok 重定位引导分支、且不弹重选对话框。传 true 让响应正常返回，进入 relocate 流程。
+        acceptFailure: true,
+      });
       if (response && !response.ok) {
         // 原文件夹已挪动/失效：引导用户重新选择新路径后重定位（保留 source.id，关联不断裂）。
         const newRootPath = await pickNewLocalFolder(defaultPath);
         if (!newRootPath) {
+          // 用户取消重选：清掉加载态，给温和提示。
+          setSourceActions((current) => {
+            const next = { ...current };
+            delete next[sourceId];
+            return next;
+          });
           showOperationError(new Error(t('sidepanel.skillPage.relocatePrompt')));
           return;
         }
         const relocateResponse = await sidepanelRuntimeClient.request({
           type: 'RELOCATE_LOCAL_SKILL_SOURCE',
           payload: { sourceId, newRootPath },
-        }, { unavailableMessage: t('sidepanel.skillPage.backendUnavailable') });
+        }, {
+          acceptFailure: true,
+          unavailableMessage: t('sidepanel.skillPage.backendUnavailable'),
+        });
         if (relocateResponse && !relocateResponse.ok) {
+          // 重定位失败：清加载态后，由顶部 banner 提示具体错误（保持与原行为一致）。
+          setSourceActions((current) => {
+            const next = { ...current };
+            delete next[sourceId];
+            return next;
+          });
           showOperationError(new Error(relocateResponse.error));
           return;
         }
+        setSourceActions((current) => {
+          const next = { ...current };
+          delete next[sourceId];
+          return next;
+        });
         await load();
         return;
       }
+      setSourceActions((current) => {
+        const next = { ...current };
+        delete next[sourceId];
+        return next;
+      });
       await load();
     } catch (error) {
+      // 顶层异常（transport/不可用等）：清掉加载态后，用顶部 banner 提示（保持与原行为一致）。
+      setSourceActions((current) => {
+        const next = { ...current };
+        delete next[sourceId];
+        return next;
+      });
       showOperationError(error);
     }
   };
@@ -505,6 +547,7 @@ export default function SkillPage() {
         onDelete={handleDelete}
         onToggleEnabled={handleToggleEnabled}
         onUpdateLocal={handleUpdateLocalSkill}
+        sourceActions={sourceActions}
       />
       <SkillSection
         title={t('sidepanel.skillPage.sectionCustom')}
@@ -532,7 +575,7 @@ export default function SkillPage() {
   );
 }
 
-function ThirdPartySkillSection({ groups, expandedGroups, onToggleGroup, onToggleGroupEnabled, onDelete, onToggleEnabled, onUpdateLocal }: {
+function ThirdPartySkillSection({ groups, expandedGroups, onToggleGroup, onToggleGroupEnabled, onDelete, onToggleEnabled, onUpdateLocal, sourceActions }: {
   groups: ThirdPartySkillGroup[];
   expandedGroups: Record<string, boolean>;
   onToggleGroup: (groupId: string) => void;
@@ -540,6 +583,7 @@ function ThirdPartySkillSection({ groups, expandedGroups, onToggleGroup, onToggl
   onDelete: (name: string) => void;
   onToggleEnabled: (skill: Skill) => void;
   onUpdateLocal?: (skill: Skill) => void;
+  sourceActions: Record<string, SourceActionState>;
 }) {
   const { t } = useI18n();
   if (groups.length === 0) return null;
@@ -629,15 +673,20 @@ function ThirdPartySkillSection({ groups, expandedGroups, onToggleGroup, onToggl
                 className="space-y-2 p-3 pt-2 animate-slide-down"
                 style={{ borderTop: '1px solid var(--ds-border)' }}
               >
-                {group.skills.map((skill, index) => (
+                {group.skills.map((skill, index) => {
+                  const localAction = skill.remote?.sourceId ? sourceActions[skill.remote.sourceId] : undefined;
+                  const localBusy = localAction?.status === 'updating' || localAction?.status === 'checking';
+                  return (
                   <SkillCard
                     key={`${group.id}:${skill.name}:${index}`}
                     skill={skill}
                     onDelete={skill.source === 'remote' ? () => onDelete(skill.name) : undefined}
                     onToggleEnabled={() => onToggleEnabled(skill)}
                     onUpdate={skill.remote?.provider === 'local' && onUpdateLocal ? () => onUpdateLocal(skill) : undefined}
+                    busy={localBusy}
                   />
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

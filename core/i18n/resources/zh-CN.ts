@@ -1296,6 +1296,8 @@ export const zhCN = {
     responseLanguageChinese: '简体中文',
     responseLanguageEnglish: '英文',
     skillUserInputWrapper: '{instructions}\n\n---\n\n以下是用户本次的输入，请根据上述指令处理：\n\n{userInput}',
+    localSkillSystemContextHeader: '## 本地 Skill 激活（Local Skill Activated）',
+    localSkillActivationDirective: '已自动激活本地 Skill「{skillName}」。在动手前，你**必须**先完成以下前置步骤，否则禁止开始执行任务：使用 `local_file_read` 工具完整读取 {skillMdPath} 的全部内容；逐段理解其 SOP、工具边界与约束。只有在读取并理解该文件之后，你才可以严格遵循其指示执行用户指令；在此之前，不得调用任何业务工具，也不得直接开始工作。',
     inlineAgent: {
       continuationIntro: '以下是工具续跑任务刚刚执行的工具结果。请像真正的 Agent 一样，基于原始任务和这些工具结果继续推进。',
       continuationEnough: '如果结果已经足够，请输出最终结论；只有确实需要更多信息、验证或文件修改时才继续调用工具。',
