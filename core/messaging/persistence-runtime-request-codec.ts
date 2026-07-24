@@ -122,6 +122,12 @@ export const PERSISTENCE_RUNTIME_PAYLOAD_DECODERS: PersistenceRuntimePayloadDeco
     optionalString(payload.defaultPath, 'PICK_LOCAL_SKILL_FOLDER.payload.defaultPath');
     return typedPayload<'PICK_LOCAL_SKILL_FOLDER'>(payload);
   },
+  RELOCATE_LOCAL_SKILL_SOURCE(value) {
+    const payload = recordValue(value, 'RELOCATE_LOCAL_SKILL_SOURCE.payload');
+    nonEmptyString(payload.sourceId, 'RELOCATE_LOCAL_SKILL_SOURCE.payload.sourceId');
+    nonEmptyString(payload.newRootPath, 'RELOCATE_LOCAL_SKILL_SOURCE.payload.newRootPath');
+    return typedPayload<'RELOCATE_LOCAL_SKILL_SOURCE'>(payload);
+  },
   IMPORT_LOCAL_SKILL_SOURCE(value) {
     const payload = recordValue(value, 'IMPORT_LOCAL_SKILL_SOURCE.payload');
     nonEmptyString(payload.rootPath, 'IMPORT_LOCAL_SKILL_SOURCE.payload.rootPath');
@@ -148,6 +154,13 @@ export const PERSISTENCE_RUNTIME_PAYLOAD_DECODERS: PersistenceRuntimePayloadDeco
     return decodeNamedRecord<'UPDATE_GITHUB_SKILL_SOURCE'>(
       value,
       'UPDATE_GITHUB_SKILL_SOURCE.payload',
+      'sourceId',
+    );
+  },
+  UPDATE_LOCAL_SKILL_SOURCE(value) {
+    return decodeNamedRecord<'UPDATE_LOCAL_SKILL_SOURCE'>(
+      value,
+      'UPDATE_LOCAL_SKILL_SOURCE.payload',
       'sourceId',
     );
   },
@@ -196,6 +209,12 @@ export const PERSISTENCE_RUNTIME_PAYLOAD_DECODERS: PersistenceRuntimePayloadDeco
       );
     }
     return typedPayload<'SAVE_PROMPT_INJECTION_SETTINGS'>(payload);
+  },
+  SAVE_SKILL_AUTO_ACTIVATION_SETTINGS(value) {
+    const payload = recordValue(value, 'SAVE_SKILL_AUTO_ACTIVATION_SETTINGS.payload');
+    optionalBoolean(payload.firstMessage, 'SAVE_SKILL_AUTO_ACTIVATION_SETTINGS.payload.firstMessage');
+    optionalBoolean(payload.everyMessage, 'SAVE_SKILL_AUTO_ACTIVATION_SETTINGS.payload.everyMessage');
+    return typedPayload<'SAVE_SKILL_AUTO_ACTIVATION_SETTINGS'>(payload);
   },
   SAVE_SAVED_ITEM(value) {
     const payload = recordValue(value, 'SAVE_SAVED_ITEM.payload');

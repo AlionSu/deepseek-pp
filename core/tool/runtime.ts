@@ -320,7 +320,7 @@ async function resolveToolCallPayload(
     };
   }
 
-  const resolved = parseExternalizedToolPayload(body, call.payload.invocationName);
+  const resolved = parseExternalizedToolPayload(body, call.payload.invocationName, call.localSkillDir);
   if (resolved.parseError) {
     return {
       ...call,

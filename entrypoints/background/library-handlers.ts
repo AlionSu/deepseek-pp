@@ -8,6 +8,7 @@ import type {
   SystemPromptPreset,
 } from '../../core/types';
 import type { PromptInjectionSettings } from '../../core/prompt/settings';
+import type { SkillAutoActivationSettings } from '../../core/skill/auto-activation-settings';
 import type { VoiceCapabilityState, VoiceSettings } from '../../core/voice/settings';
 import {
   definePersistencePayloadRuntimeCommandHandler,
@@ -23,6 +24,8 @@ export interface LibraryRuntimeHandlerDependencies {
   getActivePreset(): Promise<SystemPromptPreset | null>;
   getPromptInjectionSettings(): Promise<PromptInjectionSettings>;
   savePromptInjectionSettings(settings: Partial<PromptInjectionSettings>): Promise<PromptInjectionSettings>;
+  getSkillAutoActivationSettings(): Promise<SkillAutoActivationSettings>;
+  saveSkillAutoActivationSettings(settings: Partial<SkillAutoActivationSettings>): Promise<SkillAutoActivationSettings>;
   getAllSavedItems(): Promise<SavedItem[]>;
   saveSavedItem(input: SavedItemInput): Promise<SavedItem>;
   deleteSavedItem(id: string): Promise<void>;
@@ -65,6 +68,14 @@ export function createLibraryRuntimeHandlers(
     )),
     definePersistencePayloadRuntimeCommandHandler('SAVE_PROMPT_INJECTION_SETTINGS', async (settings, context) => {
       const saved = await dependencies.savePromptInjectionSettings(settings);
+      await dependencies.broadcastStateUpdate(context.tabId);
+      return saved;
+    }),
+    definePayloadlessRuntimeCommandHandler('GET_SKILL_AUTO_ACTIVATION_SETTINGS', () => (
+      dependencies.getSkillAutoActivationSettings()
+    )),
+    definePersistencePayloadRuntimeCommandHandler('SAVE_SKILL_AUTO_ACTIVATION_SETTINGS', async (settings, context) => {
+      const saved = await dependencies.saveSkillAutoActivationSettings(settings);
       await dependencies.broadcastStateUpdate(context.tabId);
       return saved;
     }),

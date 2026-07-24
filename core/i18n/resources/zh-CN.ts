@@ -108,6 +108,15 @@ export const zhCN = {
         disableSkill: '停用 {name}',
         editSkill: '编辑 {name}',
         deleteSkill: '删除 {name}',
+        updateSkill: '更新本地 Skill（重读索引）',
+      },
+      autoActivation: {
+        title: '自动激活',
+        description: '开启后，DeepSeek++ 会根据对话内容自动匹配并激活本地 Skill；关闭则只有你显式调用 /技能名 时才能激活。',
+        firstMessage: '新对话首条消息自动激活',
+        firstMessageDescription: '仅在新对话的第一条消息上自动匹配并激活本地 Skill。',
+        everyMessage: '当前对话每条消息自动激活',
+        everyMessageDescription: '对当前对话的每一条消息都自动匹配并激活；开启时联动开启“首条消息”。',
       },
       form: {
         namePlaceholder: '名称（如 my-skill）',
@@ -336,6 +345,7 @@ export const zhCN = {
       updatesFound: '发现上游更新',
       backendUnavailable: 'Skill 存储不可用，请重新加载扩展后再试。',
       operationFailed: 'Skill 操作失败：{error}',
+      relocatePrompt: '原文件夹已挪动或不存在，请重新选择本地 Skill 文件夹。',
     },
     settings: {
       title: '设置',

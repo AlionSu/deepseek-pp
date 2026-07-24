@@ -1,4 +1,5 @@
 import type { ToolCall, ToolError, ToolPayload } from './types';
+import { enforceLocalSkillCwd } from './local-skill-cwd';
 
 const EXTERNALIZED_TOOL_PAYLOAD_MARKER = '__dppExternalToolPayload';
 const EXTERNALIZED_TOOL_PAYLOAD_VERSION = 1 as const;
@@ -103,6 +104,7 @@ export function clearExternalizedToolPayloadNamespace(namespace: string): void {
 export function parseExternalizedToolPayload(
   body: string,
   invocationName: string,
+  skillDir?: string,
 ): { payload: ToolPayload | null; parseError?: ToolError } {
   try {
     const parsed = body.length === 0 ? {} : JSON.parse(body);
@@ -115,7 +117,7 @@ export function parseExternalizedToolPayload(
         ),
       };
     }
-    return { payload: parsed as ToolPayload };
+    return { payload: enforceLocalSkillCwd(parsed as ToolPayload, invocationName, skillDir) };
   } catch (error) {
     return {
       payload: null,

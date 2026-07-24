@@ -108,6 +108,15 @@ export const en = {
         disableSkill: 'Disable {name}',
         editSkill: 'Edit {name}',
         deleteSkill: 'Delete {name}',
+        updateSkill: 'Update local Skill (re-read index)',
+      },
+      autoActivation: {
+        title: 'Auto-activation',
+        description: 'When on, DeepSeek++ matches and activates local Skills automatically from the conversation. When off, a Skill activates only when you explicitly call /skill-name.',
+        firstMessage: 'Auto-activate on first message of new chat',
+        firstMessageDescription: 'Only match and activate a local Skill on the first message of a new chat.',
+        everyMessage: 'Auto-activate on every message of current chat',
+        everyMessageDescription: 'Match and activate on every message of the current chat; enabling this also enables “first message”.',
       },
       form: {
         namePlaceholder: 'Name, e.g. my-skill',
@@ -336,6 +345,7 @@ export const en = {
       updatesFound: 'Upstream updates found',
       backendUnavailable: 'Skill storage is unavailable. Reload the extension and try again.',
       operationFailed: 'Skill operation failed: {error}',
+      relocatePrompt: 'The original folder was moved or no longer exists. Please reselect the local Skill folder.',
     },
     settings: {
       title: 'Settings',

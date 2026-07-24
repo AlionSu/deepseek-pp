@@ -4,6 +4,7 @@ import { createArtifactToolDescriptors } from '../core/artifact';
 import { isExternalizedToolPayload } from '../core/tool/externalized-payload';
 import { ToolProviderRegistry, type RuntimeToolProvider } from '../core/tool/provider-registry';
 import { createRuntimeToolRuntime } from '../core/tool/runtime';
+import type { ToolDescriptor } from '../core/tool/types';
 
 describe('createStreamingToolCallParser', () => {
   const descriptors = createArtifactToolDescriptors('en');
@@ -220,5 +221,51 @@ describe('createStreamingToolCallParser', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  // 方案A：当某个 local skill 处于激活态时，解析出的命令型工具调用必须贴上该 skill 的
+  // skillDir，最终在 background runtime 落实 cwd 硬强制（见 local-skill-cwd.ts）。
+  describe('local skill cwd enforcement (方案A)', () => {
+    const shellExecDescriptor: ToolDescriptor = {
+      id: 'shell_exec',
+      provider: { kind: 'local', id: 'local-shell', displayName: 'Local Shell', transport: 'in_process' },
+      name: 'shell_exec',
+      invocationName: 'shell_exec',
+      title: 'Shell Exec',
+      description: 'Run a shell command inside the active local skill directory',
+      inputSchema: { type: 'object', properties: { command: { type: 'string' } } },
+      execution: { mode: 'auto', enabled: true, risk: 'medium' },
+    };
+
+    it('stamps completed shell_exec calls with the active local skill dir', () => {
+      const parser = createStreamingToolCallParser([shellExecDescriptor], { activeLocalSkillDir: '/skills/demo' });
+      const result = parser.append('<shell_exec>{"command":"ls"}</shell_exec>');
+
+      expect(result.completed).toHaveLength(1);
+      expect(result.completed[0]).toMatchObject({
+        invocationName: 'shell_exec',
+        localSkillDir: '/skills/demo',
+      });
+    });
+
+    it('leaves localSkillDir undefined when no local skill is active', () => {
+      const parser = createStreamingToolCallParser([shellExecDescriptor]);
+      const result = parser.append('<shell_exec>{"command":"ls"}</shell_exec>');
+
+      expect(result.completed).toHaveLength(1);
+      expect(result.completed[0].localSkillDir).toBeUndefined();
+    });
+
+    it('stamps the local skill dir even when the tool call body is invalid JSON', () => {
+      const parser = createStreamingToolCallParser([shellExecDescriptor], { activeLocalSkillDir: '/skills/demo' });
+      const result = parser.append('<shell_exec>not-json</shell_exec>');
+
+      expect(result.completed).toHaveLength(1);
+      expect(result.completed[0]).toMatchObject({
+        invocationName: 'shell_exec',
+        localSkillDir: '/skills/demo',
+        parseError: { code: 'tool_call_json_invalid' },
+      });
+    });
   });
 });

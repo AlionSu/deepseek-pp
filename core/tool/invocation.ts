@@ -98,7 +98,7 @@ export function createToolCallFromInvocation(
   payload: ToolPayload,
   raw: string,
   catalog: ToolInvocationCatalog,
-  options?: { parseError?: ToolError; id?: string },
+  options?: { parseError?: ToolError; id?: string; localSkillDir?: string },
 ): ToolCall {
   const descriptor =
     catalog.descriptorByInvocationName.get(invocationName) ||
@@ -114,6 +114,7 @@ export function createToolCallFromInvocation(
     parseError: options?.parseError,
   };
   if (options?.id) call.id = options.id;
+  if (options?.localSkillDir) call.localSkillDir = options.localSkillDir;
   return call;
 }
 

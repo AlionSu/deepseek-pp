@@ -8,6 +8,7 @@ interface Props {
   onEdit?: () => void;
   onDelete?: () => void;
   onToggleEnabled?: () => void;
+  onUpdate?: () => void;
 }
 
 const SOURCE_LABELS: Record<string, { labelKey: LocaleMessageKey; tone: 'muted' | 'accent' }> = {
@@ -18,7 +19,7 @@ const SOURCE_LABELS: Record<string, { labelKey: LocaleMessageKey; tone: 'muted' 
   remote: { labelKey: 'sidepanel.skill.sources.remote', tone: 'muted' },
 };
 
-export default function SkillCard({ skill, onEdit, onDelete, onToggleEnabled }: Props) {
+export default function SkillCard({ skill, onEdit, onDelete, onToggleEnabled, onUpdate }: Props) {
   const { t } = useI18n();
   const badge = skill.remote?.provider === 'local'
     ? { labelKey: 'sidepanel.skill.sources.local' as LocaleMessageKey, tone: 'accent' as const }
@@ -95,6 +96,20 @@ export default function SkillCard({ skill, onEdit, onDelete, onToggleEnabled }: 
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d={SVG_PATHS.edit} />
+                </svg>
+              </button>
+            )}
+            {onUpdate && skill.remote?.provider === 'local' && (
+              <button
+                type="button"
+                title={t('sidepanel.skill.actions.updateSkill')}
+                aria-label={t('sidepanel.skill.actions.updateSkill')}
+                onClick={onUpdate}
+                className="ds-action-btn w-7 h-7 flex items-center justify-center"
+                style={{ borderRadius: 'var(--radius-ctrl)' }}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.582m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
             )}

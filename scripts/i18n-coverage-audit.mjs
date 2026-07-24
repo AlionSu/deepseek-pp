@@ -41,6 +41,15 @@ const pathAllowlist = new Map([
   ['scripts/render-product-assets.mjs', 'offline README and Chrome Web Store image generator intentionally contains fixed zh-CN marketing fixture copy; runtime UI remains locale-backed'],
   ['scripts/shell-smoke.mjs', 'unicode stdout fixture intentionally verifies non-ASCII shell output'],
   ['scripts/web-search-smoke.mjs', 'legacy smoke fixture intentionally simulates zh-CN web-search prompts and output'],
+  ['core/interceptor/fetch-hook.ts', 'local-skill activation path plumbing (c6e00d3): Chinese explanatory comments; no user-facing strings'],
+  ['core/interceptor/request-augmentation.ts', 'local-skill implicit activation / cwd enforcement (c6e00d3): Chinese explanatory comments; no user-facing strings'],
+  ['core/interceptor/streaming-tool-call-parser.ts', 'local-skill cwd enforcement in streaming tool parsing (c6e00d3): Chinese explanatory comments; no user-facing strings'],
+  ['core/skill/auto-activation-settings.ts', 'local-skill auto-activation settings (c6e00d3): Chinese explanatory comments; no user-facing strings'],
+  ['core/skill/local-importer.ts', 'local-skill importer / T8 relocation (c6e00d3): Chinese explanatory comments; no user-facing strings'],
+  ['core/skill/local-path-rewriter.ts', 'D1 local-skill path rewriter (c6e00d3): Chinese explanatory comments; no user-facing strings'],
+  ['core/skill/local-skill-scorer.ts', 'local-skill implicit scoring / scenarioAdjustment (c6e00d3): Chinese explanatory comments and Chinese scenario-label regex; no user-facing strings'],
+  ['core/tool/local-skill-cwd.ts', '方案A cwd enforcement pure function (c6e00d3): Chinese explanatory comments; no user-facing strings'],
+  ['core/tool/types.ts', 'local-skill cwd field doc (c6e00d3): Chinese explanatory comments; no user-facing strings'],
 ]);
 
 const lineAllowlist = [
@@ -98,6 +107,11 @@ const lineAllowlist = [
     path: 'scripts/automation-contract-smoke.mjs',
     includes: "['Agent', '任务']",
     reason: 'negative assertion checks README public-doc leakage fragments',
+  },
+  {
+    path: 'entrypoints/sidepanel/pages/SkillPage.tsx',
+    includes: '原文件夹已挪动/失效',
+    reason: 'local-skill T8 relocation UI comment; no user-facing string',
   },
 ];
 

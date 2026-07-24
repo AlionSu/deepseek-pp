@@ -197,6 +197,117 @@ export async function importLocalSkillSource(
   };
 }
 
+// 更新本地 Skill 源：重扫同一 rootPath 并就地重存。
+// 源 id 由 rootPath 推导，重导入保持稳定，因此会刷新索引层（name/description）并保留 skillDir 指针。
+// 用于 UI 的"更新"按钮（definition 文件改了 → 重读索引；整个文件夹挪动 → 路径失效时由 UI 引导重新选择）。
+export async function updateLocalSkillSource(
+  sourceId: string,
+  deps: LocalSkillImportDeps,
+): Promise<LocalSkillImportResponse> {
+  if (!sourceId) throw new Error('Local Skill source id must be a non-empty string.');
+  const sources = await getAllSkillSources();
+  const source = sources.find((candidate) => candidate.id === sourceId);
+  if (!source || source.provider !== 'local') {
+    throw new Error('Local Skill source was not found');
+  }
+  const localSource = source as LocalSkillSource;
+  // 原文件夹被挪动/失效时，importLocalSkillSource 会抛错（如"未找到 SKILL.md"）。
+  // 这里转成 { ok: false }，使 UI 的 UPDATE 响应进入 !response.ok 分支、引导用户重选路径并触发 T8 重定位，
+  // 而不是让 runtime client 直接 reject 导致 relocate 流程无法启动。
+  try {
+    return await importLocalSkillSource(
+      { rootPath: localSource.rootPath, selectedPaths: localSource.skillPaths },
+      deps,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      importBlock: { code: 'shell_discovery_failed' },
+    };
+  }
+}
+
+// 重定位本地 Skill 源：原文件夹被挪动/改名后，按用户重新选择的新路径重导。
+// 关键：原地更新现有 source 记录、保留原 source.id（稳定关联），避免激活引用、禁用状态、用户设置断裂。
+// 不调用 importLocalSkillSource（后者会按新 rootPath 生成新 id，导致旧引用失效）。
+// 路径校验/缺失源报错复用既有文案（:160 / :211）。
+export async function relocateLocalSkillSource(
+  sourceId: string,
+  newRootPath: string,
+  deps: LocalSkillImportDeps,
+): Promise<LocalSkillImportResponse> {
+  if (!sourceId) throw new Error('Local Skill source id must be a non-empty string.');
+  if (!newRootPath?.trim()) throw new Error('New root path must be a non-empty string.');
+  const sources = await getAllSkillSources();
+  const source = sources.find((candidate) => candidate.id === sourceId);
+  if (!source || source.provider !== 'local') {
+    throw new Error('Local Skill source was not found');
+  }
+  const localSource = source as LocalSkillSource;
+
+  let loaded: LoadedLocalSource;
+  try {
+    loaded = await loadLocalSkillSource(newRootPath.trim(), new Set(localSource.skillPaths), undefined, deps);
+  } catch (error) {
+    if (error instanceof LocalSkillImportBlockedError) {
+      return { ok: false, error: error.message, importBlock: error.importBlock };
+    }
+    throw error;
+  }
+  const selected = loaded.skills.filter((skill) => localSource.skillPaths.includes(skill.item.path));
+  const importedPaths = new Set(selected.map((skill) => skill.item.path));
+  const missingPaths = localSource.skillPaths.filter((path) => !importedPaths.has(path));
+  if (missingPaths.length > 0) {
+    throw new Error(`Selected local Skill paths were not found: ${missingPaths.join(', ')}`);
+  }
+  if (selected.length === 0) {
+    throw new Error('Selected local Skill paths were not found.');
+  }
+
+  const now = Date.now();
+  // 以旧 source 为基底保留 id/provider/importedAt，覆写来自新路径加载结果的字段。
+  const updated: LocalSkillSource = {
+    ...localSource,
+    rootPath: loaded.preview.source.rootPath,
+    displayName: loaded.preview.source.displayName,
+    directoryName: loaded.preview.source.directoryName,
+    warnings: loaded.preview.source.warnings,
+    skillPaths: selected.map((skill) => skill.item.path),
+    importedSkillNames: selected.map((skill) => skill.skill.name),
+    updatedAt: now,
+    lastCheckedAt: now,
+  };
+  const incomingSkills = selected.map((loadedSkill) => ({
+    ...loadedSkill.skill,
+    remote: loadedSkill.skill.remote ? {
+      ...loadedSkill.skill.remote,
+      // 重定位原地更新、保留原 source.id（见 updated 的构造）。新路径加载得到的
+      // remote.sourceId 是新 id，必须与保留的旧 id 对齐，否则 stageUpsert 的
+      // "remote 必须匹配 source" 断言（registry.ts:315）会拒绝落盘。
+      sourceId: updated.id,
+      importedAt: loadedSkill.skill.remote.importedAt || now,
+      updatedAt: now,
+      lastCheckedAt: now,
+    } : undefined,
+  }));
+  const result = await deps.runLocalStateMutation(() => (
+    stageUpsertLocalSkillSourceAlreadyLocked(updated, incomingSkills)
+  ));
+
+  return {
+    ok: true,
+    source: {
+      ...updated,
+      importedSkillNames: result.imported.map((skill) => skill.name),
+    },
+    imported: result.imported,
+    replaced: result.replaced,
+    renamed: result.renamed,
+    warnings: loaded.preview.warnings,
+  };
+}
+
 async function loadLocalSkillSource(
   rootPath: string,
   selectedPaths?: Set<string>,
@@ -567,6 +678,14 @@ function parseFile(value: unknown): RemoteSkillFile {
   };
 }
 
+// 索引形态标记：用于运行时区分"索引导入"（方案2）与"旧版固化快照"两种 instructions。
+// 见 request-augmentation.ts 的 isLocalIndexSkill（T10 迁移兼容）。
+export const LOCAL_INDEX_MARKER = 'Index form: true';
+
+export function isLocalIndexInstructions(instructions: string | undefined): boolean {
+  return typeof instructions === 'string' && instructions.includes(LOCAL_INDEX_MARKER);
+}
+
 function buildLocalImportedInstructions(input: {
   source: LocalSkillSource;
   skillPath: string;
@@ -578,6 +697,9 @@ function buildLocalImportedInstructions(input: {
   scriptFiles: RemoteSkillFile[];
 }): string {
   const { source, skillPath, directory, directoryPath, parsed, resources, omittedFiles, scriptFiles } = input;
+  // 方案2：导入只登记"索引"（name/description + skillDir 指针 + 激活硬提示 + D4 边界），
+  // 不再内联 SKILL.md 正文与文本资源全文。真正读盘由 Agent 在激活时经 local_file_read 完成
+  // （见 request-augmentation.ts 的本地 Skill 激活分支）。
   const header = [
     `# Local Skill: ${parsed.name}`,
     '',
@@ -586,30 +708,22 @@ function buildLocalImportedInstructions(input: {
     `- Source: ${source.displayName}`,
     `- Root path: ${source.rootPath}`,
     `- Skill path: ${skillPath}`,
-    `- Skill directory: ${directory || '.'}`,
     `- Skill directory path: ${directoryPath}`,
     parsed.version ? `- Upstream version: ${parsed.version}` : '',
     parsed.lastUpdated ? `- Upstream updated: ${parsed.lastUpdated}` : '',
+    `- ${LOCAL_INDEX_MARKER}`,
     `- Bundled supporting files: ${resources.length}`,
     scriptFiles.length > 0 ? `- Local executable/script files: ${scriptFiles.length}` : '',
     omittedFiles.length > 0 ? `- Supporting files available on demand: ${omittedFiles.length}` : '',
+    '',
+    '## Activation Notice',
+    '',
+    'This Skill was imported by reference from a local folder. Its full SKILL.md body and supporting file contents are NOT inlined here.',
+    'When this Skill is activated (explicit `/' + parsed.name + '` or an implicit scoring match), you MUST read the local definition before doing any work:',
+    `- Read the Skill definition file with the local file tool: ${directoryPath}/SKILL.md`,
+    '- Parse and follow it fully before starting the task.',
+    '- Resolve every relative path inside it against the Skill directory path above (double-base rule).',
   ].filter(Boolean).join('\n');
-
-  const executionBoundary = [
-    '## Local Execution Boundary',
-    '',
-    '- This Skill was imported by reference from a local folder. The extension did not execute any local script during import.',
-    '- If the task requires a bundled script, use Shell MCP only when the tool list exposes the needed shell tool. Do not invent command results.',
-    `- Run commands with cwd set to the Skill directory path: ${directoryPath}`,
-    '- Use shell_status first when command syntax or platform-specific quoting matters.',
-    '- Treat paths shown here as local user-machine paths. Do not expose or rewrite them unless the user asks.',
-  ].join('\n');
-
-  const body = [
-    '## Upstream SKILL.md',
-    '',
-    parsed.body.trim(),
-  ].join('\n');
 
   const scripts = scriptFiles.length === 0 ? '' : [
     '## Local Script Files',
@@ -619,27 +733,35 @@ function buildLocalImportedInstructions(input: {
     ...scriptFiles.map((file) => `- ${relativeToSkillDirectory(file.path, directory)} (${file.bytes} bytes)`),
   ].join('\n');
 
-  const resourceDocs = resources.length === 0 ? '' : [
-    '## Bundled Supporting Files',
-    '',
-    'These text files come from the same local Skill directory and supplement agents, references, templates, or examples referenced by the original SKILL.md.',
-    '',
-    ...resources.map((resource) => [
-      `### ${relativeToSkillDirectory(resource.path, directory)}`,
-      '',
-      resource.content.trim(),
-    ].join('\n')),
-  ].join('\n\n');
-
   const omitted = omittedFiles.length === 0 ? '' : [
     '## Supporting Files Available on Demand',
     '',
-    'These files remain in the referenced local Skill directory and were not bundled into the prompt because of count or size limits. Read them with Shell MCP when the upstream instructions need them.',
+    'These files remain in the referenced local Skill directory and were not bundled into the prompt because of count or size limits. Read them with the local file tool when the upstream instructions need them.',
     '',
     ...omittedFiles.map((file) => `- ${relativeToSkillDirectory(file.path, directory)} (${file.bytes} bytes)`),
   ].join('\n');
 
-  return [header, executionBoundary, body, scripts, resourceDocs, omitted].filter(Boolean).join('\n\n---\n\n');
+  const executionBoundary = buildLocalExecutionBoundary(directoryPath);
+
+  return [header, scripts, omitted, executionBoundary].filter(Boolean).join('\n\n---\n\n');
+}
+
+// D4 动态软提示（兜底层）：按 skillDir 生成"本地执行边界"说明。
+// 导入与激活均使用本函数，保证路径解析规则 / cwd 硬设 / 越界禁止一致。
+export function buildLocalExecutionBoundary(skillDir: string): string {
+  return [
+    '## Local Execution Boundary',
+    '',
+    '- This Skill was imported by reference from a local folder. The extension did not execute any local script during import.',
+    '- If the task requires a bundled script, use Shell MCP only when the tool list exposes the needed shell tool. Do not invent command results.',
+    `- Run commands with cwd set to the Skill directory path: ${skillDir}`,
+    `- Resolve every relative path inside this Skill against the Skill directory path: ${skillDir}`,
+    '- Use the double-base rule: first try relative to the referencing file, then relative to the Skill directory path.',
+    '- Never use `..` to escape the Skill directory path.',
+    '- Treat paths shown here as local user-machine paths. Do not expose or rewrite them unless the user asks.',
+    `- Before relying on this Skill, verify the definition file exists: run local_file_stat on \`${skillDir}/SKILL.md\`.`,
+    '- If the definition file is missing or moved, stop and tell the user the Skill definition file is unavailable; suggest using the Skill Update action to re-specify the path.',
+  ].join('\n');
 }
 
 function relativeToSkillDirectory(path: string, directory: string): string {

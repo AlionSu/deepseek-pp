@@ -104,6 +104,9 @@ export interface ToolCall {
   parseError?: ToolError;
   source?: ToolCallSource;
   createdAt?: number;
+  // 激活 local skill 时由解析器写入：强制该调用在 Native Host 侧以 skillDir 为 cwd 执行。
+  // 经消息通道跨进程带到 background runtime，在 parseExternalizedToolPayload 落实。
+  localSkillDir?: string;
 }
 
 export interface ToolError {

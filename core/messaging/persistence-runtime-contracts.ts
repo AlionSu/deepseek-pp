@@ -22,6 +22,7 @@ import type {
   SystemPromptPreset,
 } from '../types';
 import type { PromptInjectionSettings } from '../prompt/settings';
+import type { SkillAutoActivationSettings } from '../skill/auto-activation-settings';
 import type { VoiceCapabilityState, VoiceSettings } from '../voice/settings';
 
 type DeclaredRuntimeRequest<TType extends MessageAction['type']> = Extract<
@@ -113,6 +114,14 @@ export interface PersistenceRuntimeCommandContracts {
     request: DeclaredRuntimeRequest<'IMPORT_LOCAL_SKILL_SOURCE'>;
     response: LocalSkillImportResponse;
   };
+  UPDATE_LOCAL_SKILL_SOURCE: {
+    request: DeclaredRuntimeRequest<'UPDATE_LOCAL_SKILL_SOURCE'>;
+    response: LocalSkillImportResponse;
+  };
+  RELOCATE_LOCAL_SKILL_SOURCE: {
+    request: DeclaredRuntimeRequest<'RELOCATE_LOCAL_SKILL_SOURCE'>;
+    response: LocalSkillImportResponse;
+  };
   CHECK_GITHUB_SKILL_SOURCE_UPDATES: {
     request: DeclaredRuntimeRequest<'CHECK_GITHUB_SKILL_SOURCE_UPDATES'>;
     response: GitHubSkillUpdatePreview;
@@ -152,6 +161,14 @@ export interface PersistenceRuntimeCommandContracts {
   SAVE_PROMPT_INJECTION_SETTINGS: {
     request: DeclaredRuntimeRequest<'SAVE_PROMPT_INJECTION_SETTINGS'>;
     response: PromptInjectionSettings;
+  };
+  GET_SKILL_AUTO_ACTIVATION_SETTINGS: {
+    request: DeclaredRuntimeRequest<'GET_SKILL_AUTO_ACTIVATION_SETTINGS'>;
+    response: SkillAutoActivationSettings;
+  };
+  SAVE_SKILL_AUTO_ACTIVATION_SETTINGS: {
+    request: DeclaredRuntimeRequest<'SAVE_SKILL_AUTO_ACTIVATION_SETTINGS'>;
+    response: SkillAutoActivationSettings;
   };
   GET_SAVED_ITEMS: {
     request: DeclaredRuntimeRequest<'GET_SAVED_ITEMS'>;

@@ -35,9 +35,10 @@ import {
   decodeAugmentableDeepSeekRequestBody,
   type DeepSeekRequestBody,
 } from '../core/interceptor/request-augmentation';
+import { DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS, normalizeSkillAutoActivationSettings, type SkillAutoActivationSettings } from '../core/skill/auto-activation-settings';
 import { containsInternalPromptMarker, sanitizeInternalPromptText } from '../core/prompt';
 import { createRestoredArtifactToolResult } from '../core/artifact';
-import type { ResponseCompletePayload, ResponseTokenSpeedPayload } from '../core/interceptor/fetch-hook';
+import { setActiveLocalSkillDir, type ResponseCompletePayload, type ResponseTokenSpeedPayload } from '../core/interceptor/fetch-hook';
 import { shouldIgnoreEmptyTokenSpeedProgress } from '../core/deepseek/stream-metrics';
 import { readDeepSeekChatSessionId } from '../core/deepseek/chat-session';
 import { createUsageProgressWriteCoordinator } from '../core/usage/progress-write-coordinator';
@@ -379,6 +380,7 @@ let currentSkills: Skill[] = [];
 let currentActivePreset: SystemPromptPreset | null = null;
 let currentModelType: ModelType = null;
 let currentPromptSettings: PromptInjectionSettings = DEFAULT_PROMPT_INJECTION_SETTINGS;
+let currentSkillAutoActivation: SkillAutoActivationSettings = DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS;
 let currentContentLocale: SupportedLocale = DEFAULT_LOCALE;
 let currentContentTranslator = createTranslator(DEFAULT_LOCALE);
 let currentToolDescriptors: ToolDescriptor[] = [];
@@ -1017,6 +1019,7 @@ function handleContentRuntimeMessage(
         message.modelType,
         currentToolDescriptors,
         normalizePromptInjectionSettings(message.promptSettings),
+        normalizeSkillAutoActivationSettings(message.skillAutoActivation),
       );
     } catch (error) {
       console.error('[DeepSeek++] memory state update rejected', error);
@@ -1155,9 +1158,11 @@ async function handleAugmentRequestBody(data: {
       messageCount: currentRequestMessageCount,
       locale: currentContentLocale,
       promptSettings: currentPromptSettings,
+      skillAutoActivation: currentSkillAutoActivation,
     });
 
     currentRequestMessageCount = result.messageCount;
+    setActiveLocalSkillDir(result.activeLocalSkillDir);
     if (result.usedMemoryIds.length > 0) {
       await sendRuntimeMessage({ type: 'TOUCH_MEMORIES', payload: { ids: result.usedMemoryIds } });
     }
@@ -1329,8 +1334,9 @@ async function loadAndSyncRuntimeState(
     ),
     sendRuntimeMessage<ModelType>({ type: 'GET_MODEL_TYPE' }),
     sendRuntimeMessage<PromptInjectionSettings>({ type: 'GET_PROMPT_INJECTION_SETTINGS' }),
+    sendRuntimeMessage<SkillAutoActivationSettings>({ type: 'GET_SKILL_AUTO_ACTIVATION_SETTINGS' }),
   ]).then(
-    ([memories, skills, activePreset, modelType, promptSettings]) => {
+    ([memories, skills, activePreset, modelType, promptSettings, skillAutoActivation]) => {
       if (!isCurrent()) return;
       syncToMainWorld(
         memories,
@@ -1339,6 +1345,7 @@ async function loadAndSyncRuntimeState(
         modelType ?? null,
         currentToolDescriptors,
         normalizePromptInjectionSettings(promptSettings),
+        normalizeSkillAutoActivationSettings(skillAutoActivation),
       );
     },
     (error: unknown) => {
@@ -4491,6 +4498,7 @@ function syncToMainWorld(
   modelType: ModelType,
   toolDescriptors: ToolDescriptor[],
   promptSettings: PromptInjectionSettings = currentPromptSettings,
+  skillAutoActivation: SkillAutoActivationSettings = currentSkillAutoActivation,
 ) {
   currentMemories = memories;
   currentSkills = skills;
@@ -4498,6 +4506,7 @@ function syncToMainWorld(
   currentModelType = modelType;
   currentToolDescriptors = toolDescriptors;
   currentPromptSettings = normalizePromptInjectionSettings(promptSettings);
+  currentSkillAutoActivation = normalizeSkillAutoActivationSettings(skillAutoActivation);
   toolOpenTagRe = buildToolOpenTagRegex(toolDescriptors);
   toolMarkerRe = buildToolMarkerRegex(toolDescriptors);
   const fallbackPromptDescriptors = toolDescriptors.filter(

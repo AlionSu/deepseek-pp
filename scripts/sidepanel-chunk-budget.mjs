@@ -13,10 +13,15 @@ if (requestedBrowsers.some((browser) => !browser)) {
   throw new Error('Usage: sidepanel-chunk-budget.mjs [--browser chrome|edge|firefox]');
 }
 
-// R6.4 pre-change Chrome baseline, captured from commit 87746a9 with WXT 0.20.26.
-// The initial shell is sidepanel.html's entry script plus every static modulepreload.
+// R6.4 Chrome baseline, re-captured after c6e00d3 (local-skill management feature)
+// with WXT 0.20.26. The initial shell is sidepanel.html's entry script plus every
+// static modulepreload. c6e00d3 added the local-skill activation / path-rewrite /
+// scoring / cwd-enforcement code that is statically reachable from the sidepanel
+// entry graph, growing the shell by ~1 KB. Re-baseline to the post-change size;
+// raw bytes are deterministic, and the gzip headroom below absorbs zlib encoder
+// variance across CI runs and browsers.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 366_157, gzip: 110_068 },
+  initialShell: { raw: 367_500, gzip: 110_700 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },

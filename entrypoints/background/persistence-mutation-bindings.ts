@@ -29,6 +29,19 @@ export interface PersistenceMutationBindingDependencies {
       executeToolCall(call: ToolCall): Promise<ToolResult>;
     },
   ): Promise<LocalSkillImportResponse>;
+  updateLocalSkillSource(
+    sourceId: string,
+    dependencies: LocalStateMutationRunner & {
+      executeToolCall(call: ToolCall): Promise<ToolResult>;
+    },
+  ): Promise<LocalSkillImportResponse>;
+  relocateLocalSkillSource(
+    sourceId: string,
+    newRootPath: string,
+    dependencies: LocalStateMutationRunner & {
+      executeToolCall(call: ToolCall): Promise<ToolResult>;
+    },
+  ): Promise<LocalSkillImportResponse>;
   updateGitHubSkillSource(
     sourceId: string,
     runner: LocalStateMutationRunner,
@@ -40,6 +53,8 @@ export interface PersistenceMutationBindings {
   deleteSkill(name: string): Promise<void>;
   importGitHubSkillSource(request: GitHubSkillImportRequest): Promise<GitHubSkillImportResult>;
   importLocalSkillSource(request: LocalSkillImportRequest): Promise<LocalSkillImportResponse>;
+  updateLocalSkillSource(sourceId: string): Promise<LocalSkillImportResponse>;
+  relocateLocalSkillSource(sourceId: string, newRootPath: string): Promise<LocalSkillImportResponse>;
   updateGitHubSkillSource(sourceId: string): Promise<GitHubSkillImportResult>;
   deleteGitHubSkillSource(sourceId: string): Promise<void>;
   deletePreset(id: string): Promise<void>;
@@ -62,6 +77,14 @@ export function createPersistenceMutationBindings(
       runner,
     ),
     importLocalSkillSource: (request: LocalSkillImportRequest) => dependencies.importLocalSkillSource(request, {
+      ...runner,
+      executeToolCall: dependencies.executeLocalSkillImporterToolCall,
+    }),
+    updateLocalSkillSource: (sourceId: string) => dependencies.updateLocalSkillSource(sourceId, {
+      ...runner,
+      executeToolCall: dependencies.executeLocalSkillImporterToolCall,
+    }),
+    relocateLocalSkillSource: (sourceId: string, newRootPath: string) => dependencies.relocateLocalSkillSource(sourceId, newRootPath, {
       ...runner,
       executeToolCall: dependencies.executeLocalSkillImporterToolCall,
     }),

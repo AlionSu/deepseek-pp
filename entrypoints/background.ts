@@ -29,6 +29,8 @@ import {
   importLocalSkillSource,
   pickLocalSkillFolder,
   previewLocalSkillSource,
+  relocateLocalSkillSource,
+  updateLocalSkillSource,
 } from '../core/skill/local-importer';
 import {
   getAllPresets,
@@ -116,6 +118,10 @@ import {
   savePromptInjectionSettings,
   shouldInjectPresetForTurn,
 } from '../core/prompt/settings';
+import {
+  getSkillAutoActivationSettings,
+  saveSkillAutoActivationSettings,
+} from '../core/skill/auto-activation-settings';
 import {
   detectVoiceCapabilities,
   getVoiceSettings,
@@ -363,6 +369,8 @@ const persistenceMutations = createPersistenceMutationBindings({
   stageDeleteProjectContextAndMemoriesAlreadyLocked,
   importGitHubSkillSource,
   importLocalSkillSource,
+  updateLocalSkillSource,
+  relocateLocalSkillSource,
   updateGitHubSkillSource,
   executeLocalSkillImporterToolCall,
 });
@@ -428,6 +436,8 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
           { executeToolCall: executeLocalSkillImporterToolCall },
         ),
         importLocalSkillSource: persistenceMutations.importLocalSkillSource,
+        updateLocalSkillSource: persistenceMutations.updateLocalSkillSource,
+        relocateLocalSkillSource: persistenceMutations.relocateLocalSkillSource,
         checkGitHubSkillSourceUpdates,
         updateGitHubSkillSource: persistenceMutations.updateGitHubSkillSource,
         deleteGitHubSkillSource: persistenceMutations.deleteGitHubSkillSource,
@@ -441,6 +451,8 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         getActivePreset,
         getPromptInjectionSettings,
         savePromptInjectionSettings,
+        getSkillAutoActivationSettings,
+        saveSkillAutoActivationSettings,
         getAllSavedItems,
         saveSavedItem,
         deleteSavedItem,
@@ -960,14 +972,15 @@ async function getDeepSeekTabsForAuthRefresh(preferredTabId?: number): Promise<c
 }
 
 async function broadcastStateUpdate(excludeTabId?: number) {
-  const [memories, skills, activePreset, modelType, promptSettings] = await Promise.all([
+  const [memories, skills, activePreset, modelType, promptSettings, skillAutoActivation] = await Promise.all([
     getAllMemories(),
     getAllSkills({ locale: currentBackgroundLocale }),
     getActivePreset(),
     getModelType(),
     getPromptInjectionSettings(),
+    getSkillAutoActivationSettings(),
   ]);
-  await broadcastToTabs({ type: 'STATE_UPDATED', memories, skills, activePreset, modelType, promptSettings }, excludeTabId);
+  await broadcastToTabs({ type: 'STATE_UPDATED', memories, skills, activePreset, modelType, promptSettings, skillAutoActivation }, excludeTabId);
 }
 
 async function notifyCommittedStateUpdate(excludeTabId?: number): Promise<void> {

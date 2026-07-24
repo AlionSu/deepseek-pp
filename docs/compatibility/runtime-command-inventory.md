@@ -1,20 +1,20 @@
 # Runtime Command Name Inventory
 
-Compatibility-run baseline: v1.10.0, commit `165ec46`, with 119 live-router names and 89 `MessageAction` names. Current authority includes the MCP Capability Plane settings contract. This annex is the name-level authority for `RT-001`; it freezes the 124 live names and 94 declared names while documenting, rather than accepting, the router/union split.
+Compatibility-run baseline: v1.10.0, commit `165ec46`, with 119 live-router names and 89 `MessageAction` names. Current authority includes the MCP Capability Plane settings contract. This annex is the name-level authority for `RT-001`; it freezes the 128 live names and 98 declared names while documenting, rather than accepting, the router/union split.
 
 ## Invariants
 
-- The production registry owns 124 live commands exactly once through typed handlers; no transitional case or legacy router remains.
-- `core/types.ts::MessageAction` declares 94 unique command names.
-- Ninety-two names are shared, 32 are live-router-only, and two are declared-only.
+- The production registry owns 128 live commands exactly once through typed handlers; no transitional case or legacy router remains.
+- `core/types.ts::MessageAction` declares 98 unique command names.
+- Ninety-six names are shared, 32 are live-router-only, and two are declared-only.
 - A live name and its legal behavior remain compatible until an explicit migration changes the contract.
 - `TOOL_CALL_EXECUTED` and `MEMORIES_UPDATED` are client-only notifications, not live background commands; direct background dispatch rejects them with `runtime_command_unknown`.
-- R3.1 / #351 establishes the typed handler seam and explicit unknown-command failure. R4.1–R4.4 migrate their exact `57 / 32 / 16 / 17` command slices without changing the frozen live-name surface.
+- R3.1 / #351 establishes the typed handler seam and explicit unknown-command failure. R4.1–R4.4 migrate their exact `61 / 32 / 16 / 17` command slices without changing the frozen live-name surface.
 - The ownership ledger below is authoritative for cutover scope. A live command appears exactly once; a task must not absorb a command assigned to another Issue.
 
-The production ownership model and the cutover ledger serve different purposes. `core/messaging/runtime-command-contracts.ts` is the single 126-name metadata and current-owner authority (`124 typed / 0 legacy / 2 client-only`), consumed by the dispatch registry; the sections below retain historical migration ownership (`2 / 57 / 32 / 16 / 17`). Contract tests fail on a duplicate, missing, or cross-owner name.
+The production ownership model and the cutover ledger serve different purposes. `core/messaging/runtime-command-contracts.ts` is the single 130-name metadata and current-owner authority (`128 typed / 0 legacy / 2 client-only`), consumed by the dispatch registry; the sections below retain historical migration ownership (`2 / 61 / 32 / 16 / 17`). Contract tests fail on a duplicate, missing, or cross-owner name.
 
-## Replanned Cutover Ownership — 124 Live Commands
+## Replanned Cutover Ownership — 128 Live Commands
 
 ### R3.1 / #351 — Typed seam bootstrap (2)
 
@@ -23,7 +23,7 @@ GET_CONFIG
 WHATS_NEW_DISMISSED
 ```
 
-### R4.1 / #360 — Persistence, library, and local preferences (57)
+### R4.1 / #360 — Persistence, library, and local preferences (61)
 
 ```text
 GET_MEMORIES
@@ -46,6 +46,10 @@ IMPORT_GITHUB_SKILL_SOURCE
 PREVIEW_LOCAL_SKILL_SOURCE
 PICK_LOCAL_SKILL_FOLDER
 IMPORT_LOCAL_SKILL_SOURCE
+UPDATE_LOCAL_SKILL_SOURCE
+RELOCATE_LOCAL_SKILL_SOURCE
+GET_SKILL_AUTO_ACTIVATION_SETTINGS
+SAVE_SKILL_AUTO_ACTIVATION_SETTINGS
 CHECK_GITHUB_SKILL_SOURCE_UPDATES
 UPDATE_GITHUB_SKILL_SOURCE
 DELETE_GITHUB_SKILL_SOURCE
@@ -165,9 +169,9 @@ RUN_AUTOMATION_NOW
 SCENARIOS_UPDATED
 ```
 
-`TOOL_CALL_EXECUTED` and `MEMORIES_UPDATED` remain declared-only compatibility records. They are not counted in the 124 live command owners and R3.1 must classify them explicitly rather than invent handlers.
+`TOOL_CALL_EXECUTED` and `MEMORIES_UPDATED` remain declared-only compatibility records. They are not counted in the 128 live command owners and R3.1 must classify them explicitly rather than invent handlers.
 
-## Live Background Router — 124
+## Live Background Router — 128
 
 ```text
 GET_MEMORIES
@@ -190,6 +194,10 @@ IMPORT_GITHUB_SKILL_SOURCE
 PREVIEW_LOCAL_SKILL_SOURCE
 PICK_LOCAL_SKILL_FOLDER
 IMPORT_LOCAL_SKILL_SOURCE
+UPDATE_LOCAL_SKILL_SOURCE
+RELOCATE_LOCAL_SKILL_SOURCE
+GET_SKILL_AUTO_ACTIVATION_SETTINGS
+SAVE_SKILL_AUTO_ACTIVATION_SETTINGS
 CHECK_GITHUB_SKILL_SOURCE_UPDATES
 UPDATE_GITHUB_SKILL_SOURCE
 DELETE_GITHUB_SKILL_SOURCE
@@ -296,7 +304,7 @@ RUN_AUTOMATION_NOW
 SCENARIOS_UPDATED
 ```
 
-## Declared `MessageAction` Union — 94
+## Declared `MessageAction` Union — 98
 
 ```text
 GET_MEMORIES
@@ -310,6 +318,10 @@ IMPORT_GITHUB_SKILL_SOURCE
 PREVIEW_LOCAL_SKILL_SOURCE
 PICK_LOCAL_SKILL_FOLDER
 IMPORT_LOCAL_SKILL_SOURCE
+UPDATE_LOCAL_SKILL_SOURCE
+RELOCATE_LOCAL_SKILL_SOURCE
+GET_SKILL_AUTO_ACTIVATION_SETTINGS
+SAVE_SKILL_AUTO_ACTIVATION_SETTINGS
 CHECK_GITHUB_SKILL_SOURCE_UPDATES
 UPDATE_GITHUB_SKILL_SOURCE
 DELETE_GITHUB_SKILL_SOURCE
@@ -441,4 +453,4 @@ MEMORIES_UPDATED
 
 ## Validation Method
 
-`tests/runtime-command-contract.test.ts` derives the typed registry and literal `MessageAction` names, then compares them with this inventory and the production 126-name contract map. It freezes `124/94/92/32/2`, current `82/42` payload access, `124/0/2` ownership, and `82 decoded / 0 direct-cast / 0 delegated`; it also proves the historical `2/57/32/16/17` cutover partition. `SCENARIOS_UPDATED` is the only released payload-less command extended with an optional request, preserving its old call and response. Serializable specimens cover every request/response/error family without creating another command-name authority.
+`tests/runtime-command-contract.test.ts` derives the typed registry and literal `MessageAction` names, then compares them with this inventory and the production 130-name contract map. It freezes `128/98/96/32/2`, current `82/42` payload access, `128/0/2` ownership, and `82 decoded / 0 direct-cast / 0 delegated`; it also proves the historical `2/61/32/16/17` cutover partition. `SCENARIOS_UPDATED` is the only released payload-less command extended with an optional request, preserving its old call and response. Serializable specimens cover every request/response/error family without creating another command-name authority.

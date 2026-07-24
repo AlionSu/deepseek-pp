@@ -48,6 +48,14 @@ const initialHookStateReady = new Promise<void>((resolve) => {
   resolveInitialHookState = resolve;
 });
 
+// 当前响应所属请求激活的 local skill 的 skillDir；由 content.ts 在 handleAugmentRequestBody
+// 捕获后写入，供响应解析期把 shell_exec / shell_session_begin 的 cwd 钉死到 skillDir（方案A）。
+let activeLocalSkillDir: string | undefined = undefined;
+
+export function setActiveLocalSkillDir(dir: string | undefined): void {
+  activeLocalSkillDir = dir || undefined;
+}
+
 interface HookState {
   toolDescriptors: ToolDescriptor[];
   onRequestBody: (body: string, requestId: string) => Promise<RequestBodyModification | null>;
@@ -435,7 +443,7 @@ function createStreamingResponseToolState(
   }
 
   const toolText = createStreamingToolTextAccumulator(descriptors);
-  const toolCalls = createStreamingToolCallParser(descriptors);
+  const toolCalls = createStreamingToolCallParser(descriptors, { activeLocalSkillDir });
   const notifiedToolSignatures = new Set<string>();
   let fallbackText = '';
   let fallbackTextTruncated = false;
