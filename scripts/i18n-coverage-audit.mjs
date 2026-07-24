@@ -50,6 +50,8 @@ const pathAllowlist = new Map([
   ['core/skill/local-skill-scorer.ts', 'local-skill implicit scoring / scenarioAdjustment (c6e00d3): Chinese explanatory comments and Chinese scenario-label regex; no user-facing strings'],
   ['core/tool/local-skill-cwd.ts', '方案A cwd enforcement pure function (c6e00d3): Chinese explanatory comments; no user-facing strings'],
   ['core/tool/types.ts', 'local-skill cwd field doc (c6e00d3): Chinese explanatory comments; no user-facing strings'],
+  ['core/prompt/augmentation.ts', 'local-skill system-context injection (this PR): Chinese explanatory comments; no user-facing strings'],
+  ['entrypoints/sidepanel/pages/SkillPage.tsx', 'local-skill update/relocation + loading feedback UI (this PR): Chinese explanatory comments; no user-facing strings'],
 ]);
 
 const lineAllowlist = [

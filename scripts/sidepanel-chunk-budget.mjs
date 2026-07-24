@@ -14,14 +14,16 @@ if (requestedBrowsers.some((browser) => !browser)) {
 }
 
 // R6.4 Chrome baseline, re-captured after c6e00d3 (local-skill management feature)
-// with WXT 0.20.26. The initial shell is sidepanel.html's entry script plus every
-// static modulepreload. c6e00d3 added the local-skill activation / path-rewrite /
-// scoring / cwd-enforcement code that is statically reachable from the sidepanel
-// entry graph, growing the shell by ~1 KB. Re-baseline to the post-change size;
-// raw bytes are deterministic, and the gzip headroom below absorbs zlib encoder
-// variance across CI runs and browsers.
+// with WXT 0.20.26, then re-baselined by f0610cb for that feature's activation /
+// path-rewrite / scoring / cwd-enforcement code, and again here for the
+// SkillPage / SkillCard update-button loading + busy + acceptFailure feedback
+// added on this PR. The initial shell is sidepanel.html's entry script plus every
+// static modulepreload. Those changes grew the shell again (raw 367_500 -> 368_719,
+// gzip 111_045 -> 111_301). Re-baseline to the new post-change size with a small
+// margin; raw bytes are deterministic, and the gzip headroom below absorbs zlib
+// encoder variance across CI runs and browsers.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 367_500, gzip: 110_700 },
+  initialShell: { raw: 369_000, gzip: 111_500 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
