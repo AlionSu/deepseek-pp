@@ -84,15 +84,22 @@ export async function uploadSyncGeneration(
   };
   const pointerContent = JSON.stringify(pointer);
 
-  const stagedWrites = await Promise.allSettled(sourceFiles.map(async (sourceFile) => {
-    await backend.put(
-      getSyncGenerationFileKey(generationId, sourceFile.key),
-      sourceFile.content,
-    );
-  }));
-  const stagedFailures = stagedWrites.flatMap((result, index) => result.status === 'rejected'
-    ? [{ key: sourceFiles[index].key, reason: result.reason }]
-    : []);
+  // Keep staging writes ordered. Some WebDAV and cloud backends apply a very
+  // small write-concurrency limit; parallel payload uploads can otherwise
+  // reject one member of a complete generation with a transient 503. We still
+  // attempt every payload so an error reports the full staging outcome, but a
+  // failure prevents both manifest and current-pointer publication.
+  const stagedFailures: Array<{ key: SyncFileKey; reason: unknown }> = [];
+  for (const sourceFile of sourceFiles) {
+    try {
+      await backend.put(
+        getSyncGenerationFileKey(generationId, sourceFile.key),
+        sourceFile.content,
+      );
+    } catch (reason) {
+      stagedFailures.push({ key: sourceFile.key, reason });
+    }
+  }
   if (stagedFailures.length > 0) {
     const detail = stagedFailures
       .map(({ key, reason }) => `${key}: ${errorMessage(reason)}`)
