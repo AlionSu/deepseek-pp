@@ -123,6 +123,28 @@ describe('sync generation publication', () => {
     );
   });
 
+  it('serializes staging writes before publishing the generation', async () => {
+    let activeWrites = 0;
+    let maximumActiveWrites = 0;
+    const backend: StorageBackend = {
+      async test() {},
+      async ensureStore() {},
+      async get() { return null; },
+      async put() {
+        activeWrites += 1;
+        maximumActiveWrites = Math.max(maximumActiveWrites, activeWrites);
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        activeWrites -= 1;
+      },
+    };
+
+    await expect(uploadSyncGeneration(backend, sourceFiles('serialized'), {
+      now: () => CREATED_AT,
+      createGenerationId: () => GENERATION_ID,
+    })).resolves.toBeDefined();
+    expect(maximumActiveWrites).toBe(1);
+  });
+
   it('turns a synchronous backend throw into one settled staged failure', async () => {
     const putCalls: string[] = [];
     const backend: StorageBackend = {
