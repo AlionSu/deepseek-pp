@@ -134,7 +134,12 @@ export async function readCurrentSyncGeneration(
     throw new Error('Sync generation pointer and manifest IDs do not match');
   }
 
-  const contents = await Promise.all(manifest.files.map(async (file) => {
+  // Read the generation in the same bounded order as it was staged. A
+  // low-concurrency WebDAV or cloud backend can reject one of six simultaneous
+  // payload reads with a transient 503. All files are still validated before
+  // this complete snapshot is returned to the local-apply caller.
+  const contents = new Map<SyncFileKey, string>();
+  for (const file of manifest.files) {
     const remoteKey = getSyncGenerationFileKey(manifest.generationId, file.key);
     const content = await backend.get(remoteKey);
     if (content === null) throw new Error(`Sync generation file is missing: ${file.key}`);
@@ -143,10 +148,10 @@ export async function readCurrentSyncGeneration(
       throw new Error(`Sync generation file size does not match: ${file.key}`);
     }
     await assertSha256Checksum(`Sync generation file ${file.key}`, content, file.checksum);
-    return [file.key, content] as const;
-  }));
+    contents.set(file.key, content);
+  }
 
-  return new Map(contents);
+  return contents;
 }
 
 async function createFileRecord(sourceFile: SyncGenerationSourceFile): Promise<SyncGenerationFileRecord> {
