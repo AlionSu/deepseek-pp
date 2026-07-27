@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1117-release-highlights">1.11.7 Highlights</a>
+  <a href="#1118-release-highlights">1.11.8 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.11.7 Release Highlights](#1117-release-highlights)
+- [1.11.8 Release Highlights](#1118-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -299,7 +299,20 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.11.7 Release Highlights
+## 1.11.8 Release Highlights
+
+1.11.8 improves optional cloud-sync reliability, reducing failures when a sync service is temporarily busy while an individual data file is uploaded or downloaded.
+
+| Area | Main changes |
+|------|--------------|
+| Cloud sync | Sync uploads and downloads process files in order, reducing failures when WebDAV, Google Drive, or OneDrive temporarily limits concurrent requests. |
+| Data integrity | Local memories, Skills, presets, projects, and saved items update only after one complete synced dataset has downloaded and passed validation. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.11.7 - 0.2.0)</summary>
+
+### 1.11.7 Release Highlights
 
 1.11.7 focuses on reliable long-conversation restoration and MCP connections, reducing cases where restored tool records disappear after a reload, navigation, or message remount, or saved MCP service state falls out of sync.
 
@@ -309,9 +322,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | Conversation display | Restored history keeps the slash command the user actually entered, without showing a Skill's internal expanded instructions in the conversation. |
 | MCP connection state | Discovery results and service health are saved together; an older refresh result cannot overwrite a newer connection configuration. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.6 - 0.2.0)</summary>
 
 ### 1.11.6 Release Highlights
 
