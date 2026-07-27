@@ -84,15 +84,22 @@ export async function uploadSyncGeneration(
   };
   const pointerContent = JSON.stringify(pointer);
 
-  const stagedWrites = await Promise.allSettled(sourceFiles.map(async (sourceFile) => {
-    await backend.put(
-      getSyncGenerationFileKey(generationId, sourceFile.key),
-      sourceFile.content,
-    );
-  }));
-  const stagedFailures = stagedWrites.flatMap((result, index) => result.status === 'rejected'
-    ? [{ key: sourceFiles[index].key, reason: result.reason }]
-    : []);
+  // Keep staging writes ordered. Some WebDAV and cloud backends apply a very
+  // small write-concurrency limit; parallel payload uploads can otherwise
+  // reject one member of a complete generation with a transient 503. We still
+  // attempt every payload so an error reports the full staging outcome, but a
+  // failure prevents both manifest and current-pointer publication.
+  const stagedFailures: Array<{ key: SyncFileKey; reason: unknown }> = [];
+  for (const sourceFile of sourceFiles) {
+    try {
+      await backend.put(
+        getSyncGenerationFileKey(generationId, sourceFile.key),
+        sourceFile.content,
+      );
+    } catch (reason) {
+      stagedFailures.push({ key: sourceFile.key, reason });
+    }
+  }
   if (stagedFailures.length > 0) {
     const detail = stagedFailures
       .map(({ key, reason }) => `${key}: ${errorMessage(reason)}`)
@@ -127,7 +134,12 @@ export async function readCurrentSyncGeneration(
     throw new Error('Sync generation pointer and manifest IDs do not match');
   }
 
-  const contents = await Promise.all(manifest.files.map(async (file) => {
+  // Read the generation in the same bounded order as it was staged. A
+  // low-concurrency WebDAV or cloud backend can reject one of six simultaneous
+  // payload reads with a transient 503. All files are still validated before
+  // this complete snapshot is returned to the local-apply caller.
+  const contents = new Map<SyncFileKey, string>();
+  for (const file of manifest.files) {
     const remoteKey = getSyncGenerationFileKey(manifest.generationId, file.key);
     const content = await backend.get(remoteKey);
     if (content === null) throw new Error(`Sync generation file is missing: ${file.key}`);
@@ -136,10 +148,10 @@ export async function readCurrentSyncGeneration(
       throw new Error(`Sync generation file size does not match: ${file.key}`);
     }
     await assertSha256Checksum(`Sync generation file ${file.key}`, content, file.checksum);
-    return [file.key, content] as const;
-  }));
+    contents.set(file.key, content);
+  }
 
-  return new Map(contents);
+  return contents;
 }
 
 async function createFileRecord(sourceFile: SyncGenerationSourceFile): Promise<SyncGenerationFileRecord> {
