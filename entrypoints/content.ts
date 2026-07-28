@@ -38,7 +38,7 @@ import {
 import { DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS, normalizeSkillAutoActivationSettings, type SkillAutoActivationSettings } from '../core/skill/auto-activation-settings';
 import { containsInternalPromptMarker, sanitizeInternalPromptText } from '../core/prompt';
 import { createRestoredArtifactToolResult } from '../core/artifact';
-import { setActiveLocalSkillDir, type ResponseCompletePayload, type ResponseTokenSpeedPayload } from '../core/interceptor/fetch-hook';
+import { type ResponseCompletePayload, type ResponseTokenSpeedPayload } from '../core/interceptor/fetch-hook';
 import { shouldIgnoreEmptyTokenSpeedProgress } from '../core/deepseek/stream-metrics';
 import { readDeepSeekChatSessionId } from '../core/deepseek/chat-session';
 import { createUsageProgressWriteCoordinator } from '../core/usage/progress-write-coordinator';
@@ -1163,7 +1163,6 @@ async function handleAugmentRequestBody(data: {
     });
 
     currentRequestMessageCount = result.messageCount;
-    setActiveLocalSkillDir(result.activeLocalSkillDir);
     if (result.usedMemoryIds.length > 0) {
       await sendRuntimeMessage({ type: 'TOUCH_MEMORIES', payload: { ids: result.usedMemoryIds } });
     }
@@ -1183,6 +1182,7 @@ async function handleAugmentRequestBody(data: {
         agentTaskPrompt: result.agentTaskPrompt,
         requestId,
         toolDescriptors: authorization.descriptors,
+        activeLocalSkillDir: result.activeLocalSkillDir,
       },
     });
   } catch (error) {

@@ -48,14 +48,6 @@ const initialHookStateReady = new Promise<void>((resolve) => {
   resolveInitialHookState = resolve;
 });
 
-// 当前响应所属请求激活的 local skill 的 skillDir；由 content.ts 在 handleAugmentRequestBody
-// 捕获后写入，供响应解析期把 shell_exec / shell_session_begin 的 cwd 钉死到 skillDir（方案A）。
-let activeLocalSkillDir: string | undefined = undefined;
-
-export function setActiveLocalSkillDir(dir: string | undefined): void {
-  activeLocalSkillDir = dir || undefined;
-}
-
 interface HookState {
   toolDescriptors: ToolDescriptor[];
   onRequestBody: (body: string, requestId: string) => Promise<RequestBodyModification | null>;
@@ -144,6 +136,10 @@ export interface RequestContext {
   promptOptions: ResponseCompletePayload['promptOptions'];
   suppressPageEvents: boolean;
   toolDescriptors: ToolDescriptor[];
+  // 当前请求（按 requestId 隔离）激活的 local skill 的 skillDir；
+  // 由 augment 阶段算出并经 RequestBodyModification 传入，响应解析期钉死 cwd。
+  // 请求级数据，不得用全局可变状态（评审 #1 并发隔离要求）。
+  activeLocalSkillDir?: string;
 }
 
 interface RequestContextOverrides {
@@ -158,6 +154,9 @@ export interface RequestBodyModification {
   agentTaskPrompt: string;
   requestId?: string;
   toolDescriptors?: ToolDescriptor[];
+  // augment 阶段算出的当前请求激活 local skill 的 skillDir；
+  // 随请求进入 RequestContext，供响应流解析期钉死 cwd（请求级隔离）。
+  activeLocalSkillDir?: string;
 }
 
 export function hookFetch(): () => void {
@@ -212,6 +211,9 @@ export function hookFetch(): () => void {
       originalPrompt: originalContext.originalPrompt,
       agentTaskPrompt: modified?.agentTaskPrompt ?? originalContext.agentTaskPrompt,
       toolDescriptors: modified?.toolDescriptors ?? fallbackToolDescriptors,
+      ...(modified?.activeLocalSkillDir !== undefined
+        ? { activeLocalSkillDir: modified.activeLocalSkillDir }
+        : {}),
     });
     const requestInit = modified ? { ...init, body: modified.body } : init;
     return interceptFetchResponse(originalFetch.call(this, input, requestInit), requestContext);
@@ -428,7 +430,7 @@ function stripBypassHookHeader(headers: HeadersInit | undefined): HeadersInit | 
 function createStreamingResponseToolState(
   descriptors: readonly ToolDescriptor[],
   getSource: () => ToolCallSource,
-  options: { suppressEvents?: boolean } = {},
+  options: { suppressEvents?: boolean; activeLocalSkillDir?: string } = {},
 ) {
   // Internal inline-agent continuation requests suppress all page-facing
   // events, so the streaming tool parsers' output is never consumed (the
@@ -443,7 +445,7 @@ function createStreamingResponseToolState(
   }
 
   const toolText = createStreamingToolTextAccumulator(descriptors);
-  const toolCalls = createStreamingToolCallParser(descriptors, { activeLocalSkillDir });
+  const toolCalls = createStreamingToolCallParser(descriptors, { activeLocalSkillDir: options.activeLocalSkillDir });
   const notifiedToolSignatures = new Set<string>();
   let fallbackText = '';
   let fallbackTextTruncated = false;
@@ -1072,7 +1074,10 @@ function createPassiveDeepSeekStreamState(requestContext: RequestContext): Passi
   const responseToolState = createStreamingResponseToolState(
     requestContext.toolDescriptors,
     () => createManualChatToolCallSource(requestContext, summary.responseMessageId),
-    { suppressEvents: requestContext.suppressPageEvents },
+    {
+      suppressEvents: requestContext.suppressPageEvents,
+      activeLocalSkillDir: requestContext.activeLocalSkillDir,
+    },
   );
   const speedTracker = createResponseTokenSpeedTracker(
     (progress) => {

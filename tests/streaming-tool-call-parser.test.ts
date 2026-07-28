@@ -269,3 +269,45 @@ describe('createStreamingToolCallParser', () => {
     });
   });
 });
+
+// 并发/重叠请求隔离回归（评审 #1：禁止全局可变状态导致 cwd 串扰）。
+// 两个重叠请求各自携带不同的 activeLocalSkillDir，必须以请求级隔离——
+// 先发请求拿到的 cwd 不得被后发请求覆盖，亦不得读到 undefined。
+describe('createStreamingToolCallParser 请求级 cwd 隔离（评审 #1）', () => {
+  const makeShellDescriptor = (dir: string): ToolDescriptor => ({
+    id: 'shell_exec',
+    provider: { kind: 'local', id: 'local-shell', displayName: 'Local Shell', transport: 'in_process' },
+    name: 'shell_exec',
+    invocationName: 'shell_exec',
+    title: 'Shell Exec',
+    description: 'Run a shell command inside the active local skill directory',
+    inputSchema: { type: 'object', properties: { command: { type: 'string' } } },
+    execution: { mode: 'auto', enabled: true, risk: 'medium' },
+  });
+
+  it('两个重叠请求各自 stamp 各自的 skillDir，互不串扰', () => {
+    // 模拟先发请求 A（skillDir=/skills/a）与后发请求 B（skillDir=/skills/b）
+    const parserA = createStreamingToolCallParser([makeShellDescriptor('/skills/a')], { activeLocalSkillDir: '/skills/a' });
+    const parserB = createStreamingToolCallParser([makeShellDescriptor('/skills/b')], { activeLocalSkillDir: '/skills/b' });
+
+    // 不依赖全局：分别解析各自的 tool call
+    const resA = parserA.append('<shell_exec>{"command":"ls"}</shell_exec>');
+    const resB = parserB.append('<shell_exec>{"command":"ls"}</shell_exec>');
+
+    expect(resA.completed[0]).toMatchObject({ invocationName: 'shell_exec', localSkillDir: '/skills/a' });
+    expect(resB.completed[0]).toMatchObject({ invocationName: 'shell_exec', localSkillDir: '/skills/b' });
+    // 关键不变量：A 绝不被 B 覆盖
+    expect(resA.completed[0].localSkillDir).not.toBe('/skills/b');
+  });
+
+  it('legacy fallback：无激活 Skill 的请求 cwd 为 undefined，且不污染其它请求', () => {
+    const parserLegacy = createStreamingToolCallParser([makeShellDescriptor('')], { activeLocalSkillDir: undefined });
+    const parserActive = createStreamingToolCallParser([makeShellDescriptor('/skills/a')], { activeLocalSkillDir: '/skills/a' });
+
+    const resLegacy = parserLegacy.append('<shell_exec>{"command":"ls"}</shell_exec>');
+    const resActive = parserActive.append('<shell_exec>{"command":"ls"}</shell_exec>');
+
+    expect(resLegacy.completed[0].localSkillDir).toBeUndefined();
+    expect(resActive.completed[0].localSkillDir).toBe('/skills/a');
+  });
+});
