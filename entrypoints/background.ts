@@ -541,8 +541,10 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         validateLocalSkillDirectory: async (dir: string): Promise<boolean> => {
           if (!dir) return false;
           const sources = await getAllSkillSources();
+          // 评审 #2：仅当 dir 属于某个已导入本地 Skill 的根路径（rootPath）时才视为可信。
+          // LocalSkillSource 的目录字段为 rootPath（不含 localDirectory），故以此比对。
           return sources.some(
-            (source) => source.provider === 'local' && source.localDirectory === dir,
+            (source) => source.provider === 'local' && source.rootPath === dir,
           );
         },
         closeToolAuthorization,

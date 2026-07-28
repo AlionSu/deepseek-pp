@@ -98,7 +98,7 @@ export function createToolCallFromInvocation(
   payload: ToolPayload,
   raw: string,
   catalog: ToolInvocationCatalog,
-  options?: { parseError?: ToolError; id?: string },
+  options?: { parseError?: ToolError; id?: string; localSkillDir?: string },
 ): ToolCall {
   const descriptor =
     catalog.descriptorByInvocationName.get(invocationName) ||
@@ -114,6 +114,10 @@ export function createToolCallFromInvocation(
     parseError: options?.parseError,
   };
   if (options?.id) call.id = options.id;
+  // localSkillDir 仅作为「请求级 cwd 提示」的可信内部注入点：来源为解析器的 activeLocalSkillDir
+  // （其上游为 requestContext.activeLocalSkillDir，由 content.ts 的 augment 结果经 fetch-hook 注入，
+  // 非页面/模型消息体）。页面字段的不可信路径已在 runtime.ts:resolveToolCallPayload 剥离（评审 #2）。
+  if (options?.localSkillDir) call.localSkillDir = options.localSkillDir;
   return call;
 }
 

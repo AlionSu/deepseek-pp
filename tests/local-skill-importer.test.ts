@@ -187,7 +187,7 @@ describe('local Skill importer', () => {
       scriptFiles: [{ path: 'scripts/run.py', bytes: 18 }],
     });
     expect(result.imported[0].instructions).toContain('Local Execution Boundary');
-    expect(result.imported[0].instructions).toContain('Run commands with cwd set to the Skill directory path: /Users/me/.codex/skills/demo');
+    expect(result.imported[0].instructions).toContain('Run commands with the initial cwd set to the Skill directory path: /Users/me/.codex/skills/demo');
     expect(result.imported[0].instructions).toContain('scripts/run.py');
     expect(result.imported[0].instructions).toContain('Index form: true');
     expect(result.imported[0].instructions).toContain('Activation Notice');
@@ -213,7 +213,7 @@ describe('local Skill importer', () => {
       localDirectory: '/Users/me/.codex/skills/nested',
       scriptFiles: [{ path: 'nested/scripts/run.py', bytes: 15 }],
     });
-    expect(imported.instructions).toContain('Run commands with cwd set to the Skill directory path: /Users/me/.codex/skills/nested');
+    expect(imported.instructions).toContain('Run commands with the initial cwd set to the Skill directory path: /Users/me/.codex/skills/nested');
     expect(imported.instructions).toContain('- scripts/run.py (15 bytes)');
     expect(imported.instructions).toContain('Index form: true');
     expect(imported.instructions).not.toContain('### references/child.md');

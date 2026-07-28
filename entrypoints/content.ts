@@ -1138,12 +1138,12 @@ async function handleAugmentRequestBody(data: {
         });
       },
     });
+    // 先授权（不带 dir），供下方 augment 的工具描述筛选使用。
     authorization = await createContentToolAuthorization({
       requestId,
       trigger: 'manual_chat',
       chatSessionId: readRequestChatSessionId(bodyWithMultimodalMedia),
       toolIntent: bodyWithMultimodalMedia.prompt.slice(0, 16_000),
-      localSkillDir: result.activeLocalSkillDir,
     });
     activeToolAuthorizations.set(requestId, authorization);
     toolAuthorizationRequestAliases.set(mainRequestId, requestId);
@@ -1167,6 +1167,20 @@ async function handleAugmentRequestBody(data: {
     if (result.usedMemoryIds.length > 0) {
       await sendRuntimeMessage({ type: 'TOUCH_MEMORIES', payload: { ids: result.usedMemoryIds } });
     }
+
+    // 评审 #2：从 augment 结果取得可信的 activeLocalSkillDir（非页面消息体），
+    // 用其重新授权，使 grant 绑定本地目录；background 侧再次校验其归属。
+    // 先关闭上一轮无 dir 的 grant 避免孤儿，再创建带 dir 的 grant，并重建别名映射。
+    await closeContentToolAuthorization(requestId);
+    authorization = await createContentToolAuthorization({
+      requestId,
+      trigger: 'manual_chat',
+      chatSessionId: readRequestChatSessionId(bodyWithMultimodalMedia),
+      toolIntent: bodyWithMultimodalMedia.prompt.slice(0, 16_000),
+      localSkillDir: result.activeLocalSkillDir,
+    });
+    activeToolAuthorizations.set(requestId, authorization);
+    toolAuthorizationRequestAliases.set(mainRequestId, requestId);
 
     const requestAlreadyEnded = pendingToolAuthorizationCorrelations.activate(mainRequestId);
     tracksPendingAlias = false;
