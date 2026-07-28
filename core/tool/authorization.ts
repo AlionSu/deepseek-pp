@@ -47,8 +47,9 @@ interface StoredToolAuthorizationGrant {
   calls: Record<string, StoredCallAuthorization>;
   issuedAt: number;
   expiresAt: number;
-  // background 在创建 grant 时校验并写入的本地 Skill 目录；
-  // 执行期 cwd 仅从此派生，页面/模型携带的 localSkillDir 一律忽略（评审 #2）。
+  // Local-skill directory validated and written by background when creating the
+  // grant. At execution time cwd is derived solely from this; any page/model-
+  // supplied localSkillDir is ignored (Review #2).
   localSkillDir?: string;
 }
 
@@ -72,8 +73,9 @@ export interface CreateToolAuthorizationInput {
   subject: ToolAuthorizationSubject;
   descriptors: readonly ToolDescriptor[];
   /**
-   * background 已校验的本地 Skill 目录（来自 augment 的 activeLocalSkillDir）。
-   * 非空时执行期 cwd 仅从此派生，页面/模型携带的 localSkillDir 被忽略（评审 #2）。
+   * Background-validated local-skill directory (from the augment's
+   * activeLocalSkillDir). When non-empty, execution-time cwd is derived solely
+   * from this; any page/model-supplied localSkillDir is ignored (Review #2).
    */
   localSkillDir?: string;
   now?: number;
@@ -322,9 +324,9 @@ export async function closeToolAuthorization(
 }
 
 /**
- * 读取 grant 上 background 已校验的本地 Skill 目录（评审 #2）。
- * 执行期 cwd 仅从此派生；页面/模型携带的 localSkillDir 一律忽略。
- * 仅暴露该字段，不返回整个 grant。
+ * Read the background-validated local-skill directory on the grant (Review #2).
+ * Execution-time cwd is derived solely from this; any page/model-supplied
+ * localSkillDir is ignored. Only this field is exposed, not the whole grant.
  */
 export async function getGrantLocalSkillDir(grantId: string): Promise<string | undefined> {
   const grant = await mutateState(async (state) => {

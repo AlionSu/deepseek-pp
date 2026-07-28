@@ -24,6 +24,7 @@ import {
   getToolAuthorizationAuditTrigger,
   ToolAuthorizationError,
 } from './authorization';
+import { enforceLocalSkillCwd } from './local-skill-cwd';
 
 export interface RuntimeToolCallOptions {
   timeoutMs?: number;
@@ -297,11 +298,27 @@ async function appendRuntimeToolHistory(
   }
 }
 
-async function resolveToolCallPayload(
+export async function resolveToolCallPayload(
   call: ToolCall,
   externalPayloadNamespace?: string,
 ): Promise<ToolCall> {
-  if (!isExternalizedToolPayload(call.payload)) return call;
+  // Review #2: cwd is derived solely from the grant owned by background,
+  // ignoring any page/model-supplied call.localSkillDir (untrusted).
+  // externalPayloadNamespace is the grant.id, emitted uniformly by the
+  // authorization layer (authorization.ts:227); both the normal branch and the
+  // externalized branch share the same derived directory.
+  const grantLocalSkillDir = externalPayloadNamespace
+    ? await getGrantLocalSkillDir(externalPayloadNamespace)
+    : undefined;
+
+  if (!isExternalizedToolPayload(call.payload)) {
+    // Normal XML / legacy DSML path (the most common execution route): inject
+    // the initial cwd hint. Do not re-trust any call-supplied field.
+    return {
+      ...call,
+      payload: enforceLocalSkillCwd(call.payload, call.invocationName ?? '', grantLocalSkillDir),
+    };
+  }
 
   const body = takeExternalizedToolPayloadText(
     call.payload.ref,
@@ -321,11 +338,6 @@ async function resolveToolCallPayload(
     };
   }
 
-  // 评审 #2：cwd 仅从 background 拥有的 grant 派生，忽略页面/模型携带的
-  // call.localSkillDir（不可信）。externalPayloadNamespace 即 grant.id。
-  const grantLocalSkillDir = externalPayloadNamespace
-    ? await getGrantLocalSkillDir(externalPayloadNamespace)
-    : undefined;
   const resolved = parseExternalizedToolPayload(body, call.payload.invocationName, grantLocalSkillDir);
   if (resolved.parseError) {
     return {

@@ -17,8 +17,9 @@ export interface PromptAugmentationOptions {
   thinkingEnabled?: boolean;
   identityOnly?: boolean;
   visibleUserPrompt?: string;
-  // 本地索引 Skill 的「激活指令 + 索引」系统上下文：镶入系统指令区（如同 ## Tools 段），
-  // 用于修复隐式命中被当作可见用户输入（被动闲聊）而不遵循读盘指令的问题（Bug ②）。
+  // System context for local indexed skills ("activation instruction + index"): injected into the
+  // system-instruction region (like the ## Tools section), fixing the issue where implicit matches were
+  // treated as visible user input (passive chit-chat) and ignored the disk-read instruction (Bug ②).
   skillSystemContext?: string | null;
   presetContent?: string | null;
   projectContext?: string | null;

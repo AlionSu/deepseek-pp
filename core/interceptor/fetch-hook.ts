@@ -136,9 +136,9 @@ export interface RequestContext {
   promptOptions: ResponseCompletePayload['promptOptions'];
   suppressPageEvents: boolean;
   toolDescriptors: ToolDescriptor[];
-  // 当前请求（按 requestId 隔离）激活的 local skill 的 skillDir；
-  // 由 augment 阶段算出并经 RequestBodyModification 传入，响应解析期钉死 cwd。
-  // 请求级数据，不得用全局可变状态（评审 #1 并发隔离要求）。
+  // The active local skill's skillDir for the current request (isolated by requestId);
+  // computed at augment time and passed via RequestBodyModification, pinning cwd during response parsing.
+  // Request-scoped data; never use global mutable state (Review #1 concurrency isolation requirement).
   activeLocalSkillDir?: string;
 }
 
@@ -154,8 +154,8 @@ export interface RequestBodyModification {
   agentTaskPrompt: string;
   requestId?: string;
   toolDescriptors?: ToolDescriptor[];
-  // augment 阶段算出的当前请求激活 local skill 的 skillDir；
-  // 随请求进入 RequestContext，供响应流解析期钉死 cwd（请求级隔离）。
+  // The current request's active local skill skillDir computed at augment time;
+  // travels with the request into RequestContext for cwd pinning during response-stream parsing (request-scoped isolation).
   activeLocalSkillDir?: string;
 }
 

@@ -1,9 +1,12 @@
-// 本地 Skill 激活打分（隐式分支）。
-// 以 core/mcp/capability-projection.ts 的评分范式为蓝本定制：复用 normalizeSearchText / tokenize，
-// 去掉 pinned 维度（无置顶概念），并新增"适用/不适用场景"调整（description 主导）。
-// 仅对本地索引 Skill 启用，不波及 builtin / bundled / imported-github。
+// Local-skill activation scoring (implicit branch).
+// Customized after the scoring paradigm in core/mcp/capability-projection.ts:
+// reuses normalizeSearchText / tokenize, drops the pinned dimension (no pinning
+// concept), and adds an "applicable / not-applicable scenario" adjustment
+// (description-led).
+// Enabled only for local indexed skills; does not affect builtin / bundled / imported-github.
 //
-// 设计来源：.workbuddy/memory/local-skill-scoring-spec.md（§3 权重表、§3.4 scenarioAdjustment、§3.5 阈值双闸）。
+// Design source: .workbuddy/memory/local-skill-scoring-spec.md (§3 weight table,
+// §3.4 scenarioAdjustment, §3.5 threshold dual-gate).
 
 import { normalizeSearchText, tokenize } from '../mcp/capability-projection';
 
@@ -14,13 +17,14 @@ export interface LocalSkillIndex {
   skillDir: string;
 }
 
-// 阈值双闸：最低激活分 + 显著领先差（防"两弱争激活"）。
+// Threshold dual-gate: minimum activation score + significant lead gap (prevents "two weak skills competing for activation").
 const ACTIVATION_THRESHOLD = 100;
 const MIN_LEAD_GAP = 50;
 
 function extractScenario(desc: string, labelRegex: RegExp): string {
-  // 标签后的冒号须同时兼容半角(:)与全角(：)，否则像「适用场景：生成周报」这类
-  // 用全角冒号的场景标注会被漏匹配（applicable/notApplicable 抽为空 → scenarioAdjustment 恒返 0）。
+  // The colon after the label must accept both half-width (:) and full-width (：);
+  // otherwise scenario labels using a full-width colon (e.g. "适用场景：生成周报")
+  // would be missed (applicable/notApplicable extracted empty -> scenarioAdjustment always 0).
   const pattern = new RegExp(
     labelRegex.source + String.raw`[：:]\s*([\s\S]*?)(?=\n#{1,3}\s|\n[A-Za-z一-龥]{2,}[：:]|$)`,
     'i',

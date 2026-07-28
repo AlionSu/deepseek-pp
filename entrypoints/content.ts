@@ -1138,7 +1138,7 @@ async function handleAugmentRequestBody(data: {
         });
       },
     });
-    // 先授权（不带 dir），供下方 augment 的工具描述筛选使用。
+    // Authorize first (without dir) for the augment's tool-descriptor filtering below.
     authorization = await createContentToolAuthorization({
       requestId,
       trigger: 'manual_chat',
@@ -1168,9 +1168,11 @@ async function handleAugmentRequestBody(data: {
       await sendRuntimeMessage({ type: 'TOUCH_MEMORIES', payload: { ids: result.usedMemoryIds } });
     }
 
-    // 评审 #2：从 augment 结果取得可信的 activeLocalSkillDir（非页面消息体），
-    // 用其重新授权，使 grant 绑定本地目录；background 侧再次校验其归属。
-    // 先关闭上一轮无 dir 的 grant 避免孤儿，再创建带 dir 的 grant，并重建别名映射。
+    // Review #2: obtain the trusted activeLocalSkillDir from the augment result
+    // (not the page message body), re-authorize with it so the grant binds the
+    // local directory; background re-validates its ownership.
+    // Close the previous dir-less grant first to avoid orphans, then create the
+    // dir-bound grant and rebuild the alias mapping.
     await closeContentToolAuthorization(requestId);
     authorization = await createContentToolAuthorization({
       requestId,
@@ -1262,7 +1264,7 @@ async function createContentToolAuthorization(input: {
   runId?: string;
   descriptorIds?: string[];
   toolIntent?: string;
-  /** background 已校验的本地 Skill 目录；页面/模型不可信（评审 #2） */
+  /** Background-validated local-skill directory; page/model untrusted (Review #2) */
   localSkillDir?: string;
 }): Promise<ToolAuthorizationGrantSummary> {
   return sendRuntimeMessageStrict<ToolAuthorizationGrantSummary>({

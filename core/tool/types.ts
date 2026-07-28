@@ -104,9 +104,12 @@ export interface ToolCall {
   parseError?: ToolError;
   source?: ToolCallSource;
   createdAt?: number;
-  // 激活 local skill 时由解析器写入：作为该调用（shell_exec / shell_session_begin）在 Native Host 侧
-  // 执行的「初始 cwd 提示」。经消息通道跨进程带到 background runtime，在 parseExternalizedToolPayload
-  // 用于初始化 cwd（非硬性持久绑定；评审 #4 路线 A）。可信来源为 background grant 派生值，页面字段已剥离。
+  // Written by the parser when a local skill is activated: serves as the
+  // "initial cwd hint" for this call (shell_exec / shell_session_begin) on the
+  // Native Host side. Carried cross-process via the message channel to the
+  // background runtime, where parseExternalizedToolPayload uses it to initialize
+  // cwd (not a hard persistent binding; Review #4 Route A). The trusted source is
+  // the background grant-derived value; page fields are stripped.
   localSkillDir?: string;
 }
 

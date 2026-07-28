@@ -537,12 +537,14 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         getAuthorizationDescriptors: getRuntimeAuthorizationDescriptors,
         refreshToolDescriptors: refreshRuntimeToolDescriptors,
         createToolAuthorization,
-        // 评审 #2：校验目录是否属于某个已导入本地 Skill（background 拥有、可信）。
+        // Review #2: validate whether a directory belongs to an imported local
+        // skill (owned and trusted by background).
         validateLocalSkillDirectory: async (dir: string): Promise<boolean> => {
           if (!dir) return false;
           const sources = await getAllSkillSources();
-          // 评审 #2：仅当 dir 属于某个已导入本地 Skill 的根路径（rootPath）时才视为可信。
-          // LocalSkillSource 的目录字段为 rootPath（不含 localDirectory），故以此比对。
+          // Review #2: treat dir as trusted only when it belongs to an imported
+          // local skill's root path (rootPath). LocalSkillSource's directory
+          // field is rootPath (no localDirectory), so compare against that.
           return sources.some(
             (source) => source.provider === 'local' && source.rootPath === dir,
           );

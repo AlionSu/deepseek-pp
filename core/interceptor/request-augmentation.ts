@@ -16,9 +16,10 @@ import { filterMemoriesByProjectScope } from '../memory/scope';
 
 export interface RequestAugmentationState {
   memories: Memory[];
-  // 扩展来源/描述/remote：运行时按来源分派，且本地索引 Skill 可经 remote.localDirectory 拿到 skillDir。
-  // source/description/remote 设为可选，保持对仅含 name/instructions/memoryEnabled 的既有调用（含测试）向后兼容；
-  // 真实调用方（content.ts）始终传入完整 Skill 对象。
+  // Extended source/description/remote: dispatched by source at runtime, and a local indexed skill can
+  // obtain its skillDir via remote.localDirectory. source/description/remote are optional to stay backward
+  // compatible with prior callers (including tests) that only supply name/instructions/memoryEnabled;
+  // the real caller (content.ts) always passes the full Skill object.
   skills: Array<
     Pick<Skill, 'name' | 'instructions' | 'memoryEnabled'> &
     Partial<Pick<Skill, 'source' | 'description' | 'remote'>>
@@ -31,7 +32,7 @@ export interface RequestAugmentationState {
   messageCount: number;
   locale?: SupportedLocale;
   promptSettings?: Partial<PromptInjectionSettings>;
-  // 自动激活（隐式打分）开关；缺省按 DEFAULT（首条消息开、每条消息关）。
+  // Auto-activation (implicit scoring) toggle; defaults to DEFAULT (first-message on, every-message off).
   skillAutoActivation?: SkillAutoActivationSettings;
 }
 
@@ -40,9 +41,10 @@ export interface RequestBodyAugmentationResult {
   agentTaskPrompt: string;
   usedMemoryIds: number[];
   messageCount: number;
-  // 若本次请求激活了某个本地索引 Skill，则其 skillDir；否则 undefined。
-  // 此为「会话初始 cwd 提示」：供调用方（content.ts）捕获后在响应解析期作为
-  // shell_exec / shell_session_begin 的初始 cwd 建议；非硬性持久绑定（评审 #4 路线 A）。
+  // The skillDir of any local indexed skill activated for this request; undefined otherwise.
+  // This is the "session-initial cwd hint": captured by the caller (content.ts) and used during response
+  // parsing as the initial cwd suggestion for shell_exec / shell_session_begin; not a hard persistent
+  // binding (Review #4 Route A).
   activeLocalSkillDir?: string;
 }
 
@@ -53,7 +55,7 @@ export interface DeepSeekRequestBody extends Record<string, unknown> {
 interface ResolvedSkills {
   combinedPrompt: string;
   memoryEnabled: boolean;
-  // 已激活 Skill 的名称（用于系统上下文的反急躁 / 读盘指令文案）。
+  // The activated skill's name (used for the anti-impatience / disk-read instruction copy in the system context).
   skillName: string;
 }
 
@@ -133,9 +135,10 @@ export function augmentDecodedRequestBody(
     }
     resolved = resolveSkills(state.skills, invocation.skillName, invocation.args, locale);
   } else {
-    // 隐式分支：无触发符时，对本地索引 Skill 按用户输入打分，取最高分且过阈值者激活。
-    // 受「自动激活」开关门控：
-    //   everyMessage ⇒ 每条消息都允许；否则 firstMessage ⇒ 仅首条消息允许；两者皆关 ⇒ 不激活。
+    // Implicit branch: with no trigger token, score local indexed skills against user input and activate
+    // the highest-scoring one above threshold.
+    // Gated by the "auto-activation" toggle:
+    //   everyMessage ⇒ allowed on every message; else firstMessage ⇒ only first message; both off ⇒ no activation.
     const auto = state.skillAutoActivation ?? DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS;
     const implicitAllowed = auto.everyMessage || (auto.firstMessage && isFirstMessage);
     if (implicitAllowed) {
@@ -158,8 +161,10 @@ export function augmentDecodedRequestBody(
     let augmented: string;
     let usedMemoryIds: number[];
     if (isLocalIndexActivated) {
-      // 本地索引 Skill（显式 / 隐式命中）：将「激活指令 + 索引」镶入系统上下文（如同 systemChat 的 ## Tools 段），
-      // 真实用户 query 保留为可见用户输入，避免被模型当作被动闲聊而不遵循读盘指令（修复 Bug ② framing 倒置）。
+      // Local indexed skill (explicit / implicit hit): inject "activation instruction + index" into the
+      // system context (like the ## Tools section of systemChat). The real user query stays as visible
+      // user input so the model does not treat it as passive chit-chat and ignore the disk-read instruction
+      // (fixes Bug ② framing inversion).
       const { augmented: a, usedMemoryIds: m } = buildPromptAugmentation(originalPrompt, {
         memories: scopedMemories,
         thinkingEnabled,
@@ -176,7 +181,7 @@ export function augmentDecodedRequestBody(
       augmented = a;
       usedMemoryIds = m;
     } else {
-      // 非本地索引 Skill（builtin/github/bundled）：保持既有行为，索引作为可见用户输入注入。
+      // Non-local indexed skill (builtin/github/bundled): keep prior behavior, index injected as visible user input.
       const { augmented: a, usedMemoryIds: m } = buildPromptAugmentation(resolved.combinedPrompt, {
         memories: scopedMemories,
         thinkingEnabled,
@@ -229,19 +234,23 @@ export function augmentDecodedRequestBody(
 type AugmentationSkill = RequestAugmentationState['skills'][number];
 
 function isLocalIndexSkill(skill: AugmentationSkill): boolean {
-  // 真实本地 Skill 落地为 source: 'remote' + remote.provider: 'local'（见 core/skill/local-importer.ts），
-  // 故以 remote.provider 作为判别符（与 UI 端 SkillCard / SkillPage 一致）；
-  // 不能用 source === 'local'——SkillSource 联合类型不含 'local'，既触发 TS 类型错误，又使真实本地 Skill 永远不匹配。
+  // A real local skill lands as source: 'remote' + remote.provider: 'local' (see core/skill/local-importer.ts),
+  // so use remote.provider as the discriminator (consistent with UI SkillCard / SkillPage);
+  // cannot use source === 'local' — the SkillSource union has no 'local' member, which would both trigger a
+  // TS type error and make real local skills never match.
   return skill.remote?.provider === 'local' && isLocalIndexInstructions(skill.instructions);
 }
 
-// 构建本地索引 Skill 的激活提示：索引 instructions + D4 边界（按 skillDir 动态生成）+ D1 防御性改写。
-// 真正读盘由 Agent 在激活时经 local_file_read 完成（扩展运行在浏览器沙箱，无本地同步读文件通道）。
+// Build the local indexed skill's activation prompt: index instructions + D4 boundary (dynamically
+// generated from skillDir) + D1 defensive rewrite. The real disk read is done by the Agent at activation
+// via local_file_read (the extension runs in a browser sandbox with no local synchronous file channel).
 //
-// 声明收窄（评审 #3 路线 A）：此处的 D1 改写仅作用于「注入的索引指令文本」（见 local-path-rewriter.ts
-// 文件头），不覆盖本地 Skill 真实 SKILL.md 正文及其 references 文件内容；真实正文相对引用
-// 依赖 Agent 遵循 D4 软提示的「double-base rule」自行解析。故本函数不构成"真实文件相对引用全覆盖"，
-// 而是声明自洽的"索引指令层防御性规范化 + Agent 层软提示兜底"。
+// Declaration narrowing (Review #3 Route A): the D1 rewrite here applies ONLY to the injected index-instruction
+// text (see the local-path-rewriter.ts file header); it does NOT cover the local skill's real SKILL.md body and
+// its reference file contents. Real-body relative references rely on the Agent following the D4 soft hint's
+// "double-base rule" to resolve themselves. Hence this function does not constitute "full real-file relative-
+// reference coverage", but a declaration-consistent "index-instruction-layer defensive normalization + Agent-
+// layer soft-hint fallback".
 function composeLocalSkillPrompt(skill: AugmentationSkill): string {
   const skillDir = skill.remote?.localDirectory ?? '';
   let prompt = skill.instructions;
@@ -268,8 +277,9 @@ function composeLocalSkillPrompt(skill: AugmentationSkill): string {
   return prompt;
 }
 
-// 构建本地索引 Skill 的系统上下文：激活指令（含反急躁、强制先读 SKILL.md）+ 索引本体。
-// 作为系统指令注入（非可见用户输入），模型会服从其中"先读盘再执行"的约束（修复 Bug ② framing 倒置）。
+// Build the local indexed skill's system context: activation instruction (anti-impatience, force-read
+// SKILL.md first) + index body. Injected as a system instruction (not visible user input), so the model
+// obeys its "read disk before executing" constraint (fixes Bug ② framing inversion).
 function buildLocalSkillSystemContext(
   resolved: ResolvedSkills,
   skillDir: string | undefined,
@@ -283,7 +293,7 @@ function buildLocalSkillSystemContext(
   return `${directive}\n\n${resolved.combinedPrompt}`;
 }
 
-// 隐式分支：从本地索引 Skill 中按用户输入打分，返回命中的 Skill 对象（或 null）。
+// Implicit branch: score local indexed skills against user input and return the matched skill object (or null).
 function selectImplicitLocalSkill(skills: AugmentationSkill[], query: string): AugmentationSkill | null {
   const candidates: LocalSkillIndex[] = skills
     .filter(isLocalIndexSkill)
@@ -336,7 +346,8 @@ function resolveSkills(
   };
 }
 
-// 本地索引 Skill 返回"索引指令 + D4 边界 + D1 防御性改写"；其余来源保持原固化 instructions（builtin/bundled/github 不变）。
+// Local indexed skills return "index instruction + D4 boundary + D1 defensive rewrite"; other sources keep
+// their original frozen instructions (builtin/bundled/github unchanged).
 function composeResolvedInstructions(skill: AugmentationSkill): string {
   if (isLocalIndexSkill(skill)) return composeLocalSkillPrompt(skill);
   return skill.instructions;

@@ -37,9 +37,9 @@ export interface ToolCallPayloadChunk {
 }
 
 export interface StreamingToolCallParserOptions {
-  // 当前响应所属请求的激活 local skill 的 skillDir；非空时解析出的 shell_exec /
-  // shell_session_begin 调用会带上 localSkillDir，作为 background runtime 处的「初始 cwd 提示」
-  // （非硬性持久绑定；评审 #4 路线 A）。
+  // The active local skill's skillDir for the request owning the current response; when non-empty, parsed
+  // shell_exec / shell_session_begin calls carry localSkillDir as the "initial cwd hint" at the background
+  // runtime (not a hard persistent binding; Review #4 Route A).
   activeLocalSkillDir?: string;
 }
 

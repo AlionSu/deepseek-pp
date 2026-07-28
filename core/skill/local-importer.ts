@@ -197,9 +197,11 @@ export async function importLocalSkillSource(
   };
 }
 
-// 更新本地 Skill 源：重扫同一 rootPath 并就地重存。
-// 源 id 由 rootPath 推导，重导入保持稳定，因此会刷新索引层（name/description）并保留 skillDir 指针。
-// 用于 UI 的"更新"按钮（definition 文件改了 → 重读索引；整个文件夹挪动 → 路径失效时由 UI 引导重新选择）。
+// Update a local skill source: re-scan the same rootPath and store in place.
+// The source id is derived from rootPath and stays stable across re-imports, so
+// this refreshes the index layer (name/description) and keeps the skillDir pointer.
+// Drives the UI "Update" button (definition file changed -> re-read index; whole
+// folder moved -> when the path is invalid, the UI guides re-selection).
 export async function updateLocalSkillSource(
   sourceId: string,
   deps: LocalSkillImportDeps,
@@ -211,9 +213,10 @@ export async function updateLocalSkillSource(
     throw new Error('Local Skill source was not found');
   }
   const localSource = source as LocalSkillSource;
-  // 原文件夹被挪动/失效时，importLocalSkillSource 会抛错（如"未找到 SKILL.md"）。
-  // 这里转成 { ok: false }，使 UI 的 UPDATE 响应进入 !response.ok 分支、引导用户重选路径并触发 T8 重定位，
-  // 而不是让 runtime client 直接 reject 导致 relocate 流程无法启动。
+  // When the original folder is moved/invalid, importLocalSkillSource throws
+  // (e.g. "SKILL.md not found"). Convert it to { ok: false } so the UI's UPDATE
+  // response enters the !response.ok branch, guiding re-selection and triggering
+  // T8 relocation, instead of letting runtime-client reject and blocking relocation.
   try {
     return await importLocalSkillSource(
       { rootPath: localSource.rootPath, selectedPaths: localSource.skillPaths },
@@ -228,10 +231,12 @@ export async function updateLocalSkillSource(
   }
 }
 
-// 重定位本地 Skill 源：原文件夹被挪动/改名后，按用户重新选择的新路径重导。
-// 关键：原地更新现有 source 记录、保留原 source.id（稳定关联），避免激活引用、禁用状态、用户设置断裂。
-// 不调用 importLocalSkillSource（后者会按新 rootPath 生成新 id，导致旧引用失效）。
-// 路径校验/缺失源报错复用既有文案（:160 / :211）。
+// Relocate a local skill source: after the original folder is moved/renamed,
+// re-import from the user's newly selected path.
+// Key: update the existing source record in place, keeping the original source.id
+// (stable linkage) to avoid breaking activation references, disabled states, and user settings.
+// Do NOT call importLocalSkillSource (which would generate a new id from the new rootPath, invalidating old references).
+// Path-validation / missing-source errors reuse existing messages (:160 / :211).
 export async function relocateLocalSkillSource(
   sourceId: string,
   newRootPath: string,
@@ -266,7 +271,7 @@ export async function relocateLocalSkillSource(
   }
 
   const now = Date.now();
-  // 以旧 source 为基底保留 id/provider/importedAt，覆写来自新路径加载结果的字段。
+  // Use the old source as the base, keeping id/provider/importedAt, overwriting fields from the new-path load result.
   const updated: LocalSkillSource = {
     ...localSource,
     rootPath: loaded.preview.source.rootPath,
@@ -282,9 +287,9 @@ export async function relocateLocalSkillSource(
     ...loadedSkill.skill,
     remote: loadedSkill.skill.remote ? {
       ...loadedSkill.skill.remote,
-      // 重定位原地更新、保留原 source.id（见 updated 的构造）。新路径加载得到的
-      // remote.sourceId 是新 id，必须与保留的旧 id 对齐，否则 stageUpsert 的
-      // "remote 必须匹配 source" 断言（registry.ts:315）会拒绝落盘。
+      // Relocation updates in place and keeps the original source.id (see the updated construction).
+      // The new-path load yields a fresh remote.sourceId that must be aligned with the retained old id,
+      // otherwise the "remote must match source" assertion (registry.ts:315) rejects the write.
       sourceId: updated.id,
       importedAt: loadedSkill.skill.remote.importedAt || now,
       updatedAt: now,
@@ -678,8 +683,8 @@ function parseFile(value: unknown): RemoteSkillFile {
   };
 }
 
-// 索引形态标记：用于运行时区分"索引导入"（方案2）与"旧版固化快照"两种 instructions。
-// 见 request-augmentation.ts 的 isLocalIndexSkill（T10 迁移兼容）。
+// Index-form marker: used at runtime to distinguish "index-imported" (Plan 2) instructions
+// from "legacy frozen snapshot" instructions. See isLocalIndexSkill in request-augmentation.ts (T10 migration compat).
 export const LOCAL_INDEX_MARKER = 'Index form: true';
 
 export function isLocalIndexInstructions(instructions: string | undefined): boolean {
@@ -697,9 +702,9 @@ function buildLocalImportedInstructions(input: {
   scriptFiles: RemoteSkillFile[];
 }): string {
   const { source, skillPath, directory, directoryPath, parsed, resources, omittedFiles, scriptFiles } = input;
-  // 方案2：导入只登记"索引"（name/description + skillDir 指针 + 激活硬提示 + D4 边界），
-  // 不再内联 SKILL.md 正文与文本资源全文。真正读盘由 Agent 在激活时经 local_file_read 完成
-  // （见 request-augmentation.ts 的本地 Skill 激活分支）。
+  // Plan 2: import only registers an "index" (name/description + skillDir pointer + activation hint + D4 boundary),
+  // no longer inlining the SKILL.md body and full text-resource contents. The real disk read is done by the
+  // Agent at activation via local_file_read (see the local-skill activation branch in request-augmentation.ts).
   const header = [
     `# Local Skill: ${parsed.name}`,
     '',
@@ -746,10 +751,10 @@ function buildLocalImportedInstructions(input: {
   return [header, scripts, omitted, executionBoundary].filter(Boolean).join('\n\n---\n\n');
 }
 
-// D4 动态软提示（兜底层）：按 skillDir 生成"本地执行边界"说明。
-// 导入与激活均使用本函数，保证路径解析规则 / 初始 cwd 提示 / 越界禁止一致。
-// 说明（评审 #4 路线 A）："cwd 设为 skillDir"指「会话开始时 cwd 设为 skillDir」的初始提示，
-// 非对会话全周期的硬性持久绑定；真实正文相对引用依赖 Agent 遵循「double-base rule」自行解析（评审 #3 路线 A）。
+  // D4 dynamic soft hint (fallback layer): generates a "local execution boundary" note from skillDir.
+  // Both import and activation use this function, keeping path-resolution rules / initial cwd hint / escape prohibition consistent.
+  // Note (Review #4 Route A): "cwd set to skillDir" means the initial hint that "session-start cwd is skillDir",
+  // not a hard session-wide persistent binding; real-body relative references rely on the Agent following the "double-base rule" (Review #3 Route A).
 export function buildLocalExecutionBoundary(skillDir: string): string {
   return [
     '## Local Execution Boundary',

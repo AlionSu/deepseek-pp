@@ -55,8 +55,9 @@ interface DecodedCreateToolAuthorizationPayload {
   runId?: string;
   descriptorIds?: string[];
   toolIntent?: string;
-  // 评审 #2：页面/模型携带的 localSkillDir 为不可信字段，解码后由 background 校验
-  // 其是否属于已导入本地 Skill 目录（validateLocalSkillDirectory），再决定是否写入 grant。
+  // Review #2: the page/model-supplied localSkillDir is an untrusted field;
+  // after decoding, background validates whether it belongs to an imported local
+  // skill directory (validateLocalSkillDirectory) before deciding to write it to the grant.
   localSkillDir?: string;
 }
 

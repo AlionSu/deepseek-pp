@@ -620,7 +620,7 @@ export type MessageAction =
       runId?: string;
       descriptorIds?: string[];
       toolIntent?: string;
-      /** background 已校验的本地 Skill 目录；页面/模型不可信，由 background 校验后写入 grant（评审 #2） */
+      /** Background-validated local-skill directory; page/model untrusted, written to grant by background after validation (Review #2) */
       localSkillDir?: string;
     };
   }

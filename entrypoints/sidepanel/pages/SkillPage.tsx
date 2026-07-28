@@ -327,7 +327,7 @@ export default function SkillPage() {
     const sourceId = skill.remote?.sourceId;
     if (!sourceId) return;
     const defaultPath = skill.remote?.localDirectory ?? skill.remote?.localRootPath ?? '';
-    // 立即进入加载态：禁用本地 Skill 的「更新」按钮并显示转圈，消除"点不动"观感。
+    // Immediately enter the loading state: disable the local skill's "Update" button and show a spinner, removing the "unresponsive" feel.
     setSourceActions((current) => ({
       ...current,
       [sourceId]: { status: 'updating', message: t('sidepanel.skillPage.syncing') },
@@ -338,16 +338,16 @@ export default function SkillPage() {
         payload: { sourceId },
       }, {
         unavailableMessage: t('sidepanel.skillPage.backendUnavailable'),
-        // 关键点：文件夹被挪动/失效时 updateLocalSkillSource 返回 {ok:false, error}（而非抛异常）。
-        // 不传 acceptFailure 会让 runtime-client 把 ok:false 当成故障抛异常，从而跳过下面的
-        // !response.ok 重定位引导分支、且不弹重选对话框。传 true 让响应正常返回，进入 relocate 流程。
+        // Key point: when the folder is moved/invalid, updateLocalSkillSource returns {ok:false, error} (not a thrown exception).
+        // Omitting acceptFailure would make runtime-client treat ok:false as a fault and throw, skipping the
+        // !response.ok relocation branch below and the re-pick dialog. Passing true lets the response return normally into relocation.
         acceptFailure: true,
       });
       if (response && !response.ok) {
-        // 原文件夹已挪动/失效：引导用户重新选择新路径后重定位（保留 source.id，关联不断裂）。
+        // Original folder moved/invalid: guide the user to re-pick a new path and relocate (keep source.id, link unbroken).
         const newRootPath = await pickNewLocalFolder(defaultPath);
         if (!newRootPath) {
-          // 用户取消重选：清掉加载态，给温和提示。
+          // User cancelled re-pick: clear the loading state and give a gentle hint.
           setSourceActions((current) => {
             const next = { ...current };
             delete next[sourceId];
@@ -364,7 +364,7 @@ export default function SkillPage() {
           unavailableMessage: t('sidepanel.skillPage.backendUnavailable'),
         });
         if (relocateResponse && !relocateResponse.ok) {
-          // 重定位失败：清加载态后，由顶部 banner 提示具体错误（保持与原行为一致）。
+          // Relocation failed: clear loading state, then surface the specific error via the top banner (consistent with prior behavior).
           setSourceActions((current) => {
             const next = { ...current };
             delete next[sourceId];
@@ -388,7 +388,7 @@ export default function SkillPage() {
       });
       await load();
     } catch (error) {
-      // 顶层异常（transport/不可用等）：清掉加载态后，用顶部 banner 提示（保持与原行为一致）。
+      // Top-level exception (transport/unavailable, etc.): clear loading state, then surface via the top banner (consistent with prior behavior).
       setSourceActions((current) => {
         const next = { ...current };
         delete next[sourceId];
