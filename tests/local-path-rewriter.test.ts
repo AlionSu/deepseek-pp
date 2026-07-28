@@ -2,6 +2,10 @@
 // 覆盖：joinUnderRoot 双基/越界、isAbsolutePath、absolutizeSkillReferences 的
 // 「双基探测绝对化」「URL/锚点/绝对路径/家目录占位不改写」「文件不存在保留原样」「代码块（fenced/inline）内引用跳过改写」。
 //
+// 声明自洽（评审 #3 路线 A）：本改写器仅作用于「注入 Agent 上下文的索引指令文本」（见 local-path-rewriter.ts
+// 文件头），不覆盖本地 Skill 真实 SKILL.md 正文及其 references 文件内容。真实正文相对引用依赖 Agent 遵循
+// D4 软提示的「double-base rule」自行解析。本文件末尾的 describe 显式锚定这一声明边界。
+//
 // 设计来源：local-skill-import-design.md §2.5。算法（双基探测）：
 //   1) 先 join(thisFileDir, rel)，fileExists 存在 → 用；
 //   2) 否则 join(skillDir, rel)，fileExists 存在 → 用；
@@ -171,5 +175,33 @@ describe('absolutizeSkillReferences', () => {
     });
     expect(out).toContain('`[example](references/guide.md)`');
     expect(out).toContain('[真实链接](/skills/demo/references/guide.md)');
+  });
+});
+
+describe('声明自洽边界（评审 #3 路线 A）：仅作用于注入索引指令文本', () => {
+  const skillDir = '/skills/demo';
+
+  it('索引指令层（文件在已知清单）→ 正常绝对化（设计覆盖边界）', () => {
+    // 模拟 composeLocalSkillPrompt 注入的索引指令文本：thisFileDir=skillDir，fileExists 命中清单
+    const text = '见 [指南](references/guide.md)';
+    const out = absolutizeSkillReferences(text, {
+      skillDir,
+      thisFileDir: skillDir,
+      fileExists: (abs) => abs === '/skills/demo/references/guide.md',
+    });
+    expect(out).toBe('见 [指南](/skills/demo/references/guide.md)');
+  });
+
+  it('真实正文层（文件不在 augment 清单 → fileExists=false）→ 原样保留，不在本层强制', () => {
+    // 模拟真实 SKILL.md 正文经 local_file_read 读入后的情形：本改写器不在读盘注入边界调用，
+    // 若强行传入（fileExists 返回 false 表示不在已登记清单），相对引用保持原样，
+    // 由 Agent 遵循 D4「double-base rule」自行解析——体现"声明自洽：不覆盖真实正文"。
+    const text = '详见 [附录](./appendix/notes.md) 与 [示例](examples/demo.md)';
+    const out = absolutizeSkillReferences(text, {
+      skillDir,
+      thisFileDir: `${skillDir}/refs`,
+      fileExists: () => false,
+    });
+    expect(out).toBe(text);
   });
 });

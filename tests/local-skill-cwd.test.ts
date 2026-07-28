@@ -1,6 +1,7 @@
-// 方案A（扩展侧 cwd 硬强制）单测：
-//   1) enforceLocalSkillCwd 纯函数：仅对 shell_exec / shell_session_begin 强制 cwd=skillDir。
-//   2) parseExternalizedToolPayload 落点：当传入 skillDir 时，命令型工具的 cwd 被归一化。
+// 本地 Skill cwd「初始 cwd 提示」（评审 #4 路线 A）单测：
+//   1) enforceLocalSkillCwd 纯函数：仅对 shell_exec / shell_session_begin 在「初始 cwd」层面归一化 cwd=skillDir。
+//   2) parseExternalizedToolPayload 落点：当传入 skillDir 时，命令型工具的「初始 cwd」被归一化。
+//   3) 声明自洽：本层仅设定初始 cwd，不持久绑定会话（持久会话 cwd 复用由 shell 会话注册表既有语义负责）。
 
 import { describe, expect, it } from 'vitest';
 import { enforceLocalSkillCwd, isCwdEnforcedInvocation } from '../core/tool/local-skill-cwd';
@@ -67,5 +68,22 @@ describe('parseExternalizedToolPayload cwd 强制落点', () => {
       '/skills/demo',
     );
     expect(payload?.cwd).toBeUndefined();
+  });
+});
+
+describe('声明自洽（评审 #4 路线 A）：仅初始 cwd 提示，不持久绑定会话', () => {
+  it('enforceLocalSkillCwd 不修改原 payload 对象（只返回新对象表达初始 cwd）', () => {
+    const original = { command: 'ls', cwd: '/somewhere/else' };
+    const out = enforceLocalSkillCwd(original, 'shell_exec', '/skills/demo');
+    // 初始 cwd 被归一化为 skillDir
+    expect(out.cwd).toBe('/skills/demo');
+    // 原对象不被改动（无副作用，契合"提示"语义而非"持久绑定"）
+    expect(original.cwd).toBe('/somewhere/else');
+  });
+
+  it('shell_session_exec（会话复用既有 cwd）不在本层被强制', () => {
+    const payload = { command: 'ls', sessionId: 's1', cwd: '/skills/demo' };
+    // 会话执行命令非 CWD_ENFORCED_INVOCATIONS 成员（仅 begin 加入强制），本层不影响其 cwd 复用
+    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(false);
   });
 });

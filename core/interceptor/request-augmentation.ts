@@ -41,7 +41,8 @@ export interface RequestBodyAugmentationResult {
   usedMemoryIds: number[];
   messageCount: number;
   // 若本次请求激活了某个本地索引 Skill，则其 skillDir；否则 undefined。
-  // 供调用方（content.ts）捕获后在响应解析期把 shell_exec / shell_session_begin 的 cwd 钉死到 skillDir。
+  // 此为「会话初始 cwd 提示」：供调用方（content.ts）捕获后在响应解析期作为
+  // shell_exec / shell_session_begin 的初始 cwd 建议；非硬性持久绑定（评审 #4 路线 A）。
   activeLocalSkillDir?: string;
 }
 
@@ -236,6 +237,11 @@ function isLocalIndexSkill(skill: AugmentationSkill): boolean {
 
 // 构建本地索引 Skill 的激活提示：索引 instructions + D4 边界（按 skillDir 动态生成）+ D1 防御性改写。
 // 真正读盘由 Agent 在激活时经 local_file_read 完成（扩展运行在浏览器沙箱，无本地同步读文件通道）。
+//
+// 声明收窄（评审 #3 路线 A）：此处的 D1 改写仅作用于「注入的索引指令文本」（见 local-path-rewriter.ts
+// 文件头），不覆盖本地 Skill 真实 SKILL.md 正文及其 references 文件内容；真实正文相对引用
+// 依赖 Agent 遵循 D4 软提示的「double-base rule」自行解析。故本函数不构成"真实文件相对引用全覆盖"，
+// 而是声明自洽的"索引指令层防御性规范化 + Agent 层软提示兜底"。
 function composeLocalSkillPrompt(skill: AugmentationSkill): string {
   const skillDir = skill.remote?.localDirectory ?? '';
   let prompt = skill.instructions;

@@ -747,14 +747,16 @@ function buildLocalImportedInstructions(input: {
 }
 
 // D4 动态软提示（兜底层）：按 skillDir 生成"本地执行边界"说明。
-// 导入与激活均使用本函数，保证路径解析规则 / cwd 硬设 / 越界禁止一致。
+// 导入与激活均使用本函数，保证路径解析规则 / 初始 cwd 提示 / 越界禁止一致。
+// 说明（评审 #4 路线 A）："cwd 设为 skillDir"指「会话开始时 cwd 设为 skillDir」的初始提示，
+// 非对会话全周期的硬性持久绑定；真实正文相对引用依赖 Agent 遵循「double-base rule」自行解析（评审 #3 路线 A）。
 export function buildLocalExecutionBoundary(skillDir: string): string {
   return [
     '## Local Execution Boundary',
     '',
     '- This Skill was imported by reference from a local folder. The extension did not execute any local script during import.',
     '- If the task requires a bundled script, use Shell MCP only when the tool list exposes the needed shell tool. Do not invent command results.',
-    `- Run commands with cwd set to the Skill directory path: ${skillDir}`,
+    `- Run commands with the initial cwd set to the Skill directory path: ${skillDir}`,
     `- Resolve every relative path inside this Skill against the Skill directory path: ${skillDir}`,
     '- Use the double-base rule: first try relative to the referencing file, then relative to the Skill directory path.',
     '- Never use `..` to escape the Skill directory path.',

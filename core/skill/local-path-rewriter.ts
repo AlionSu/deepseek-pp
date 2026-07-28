@@ -1,8 +1,18 @@
-// D1 路径改写器：对本地 Skill 文本中的相对路径引用做"双基探测绝对化"。
+// D1 路径改写器：对本地 Skill「注入 Agent 上下文的索引指令文本」中的相对路径引用做"双基探测绝对化"。
 //
 // 设计来源：.workbuddy/memory/local-skill-import-design.md §2.5。
-// 覆盖对象：进入 Agent 上下文的 Skill 文本里的相对路径引用（Markdown 链接/图片 `](...)` 等）。
-// 算法（双基探测）：
+// 覆盖对象（声明收窄，评审 #3 路线 A）：仅作用于「注入 Agent 上下文的索引指令文本」
+// （即 buildLocalImportedInstructions 生成的索引卡 + buildLocalExecutionBoundary 软提示，
+// 见 request-augmentation.ts 的 composeLocalSkillPrompt）。这些文本的 thisFileDir/skillDir/fileExists
+// 在 augment 阶段已知（来自技能注册的 includedFiles/scriptFiles/omittedFiles 清单）。
+//
+// 不覆盖：本地 Skill 真实 SKILL.md 正文及其 references 文件内容——它们由 Agent 在激活后
+// 经 local_file_read 按需读入 continuation 上下文，本函数不在该读盘注入边界调用
+// （见 local-importer.ts:buildLocalImportedInstructions 的"方案2 索引形态"说明）。
+// 真实正文内的相对引用，依赖 Agent 遵循 D4 软提示中的「double-base rule」自行解析，
+// 本层不做强制重写，避免误改示例/代码块/动态生成路径。
+//
+// 算法（双基探测，仅对索引指令文本生效）：
 //   1) 先 join(thisFileDir, rel)，fileExists 存在 → 用；
 //   2) 否则 join(skillDir, rel)，fileExists 存在 → 用；
 //   3) 都不存在 → 保留原样（不误伤 URL / 绝对路径 / 占位 / `..` 越界）。
@@ -10,7 +20,7 @@
 //
 // 浏览器约束：本模块只用纯字符串路径助手，不依赖 node:path（扩展打包到浏览器环境）。
 // 说明：本模块为 D1 的"规范算法实现"。在"Agent 驱动、按需 local_file_read 读取"的加载模式下，
-// 真正读盘与递归加载由 Agent 完成；本函数作为防御性/规范化手段，对注入文本中的相对引用做绝对化，
+// 真正读盘与递归加载由 Agent 完成；本函数作为防御性/规范化手段，仅对注入的索引指令文本做绝对化，
 // 并由 Agent 指令（见 buildLocalExecutionBoundary）镜像同一规则。代码块（fenced ``` / ~~~ 与 inline `）内的引用视为示例，跳过改写。
 
 const SEP_RE = /[\\/]+/;
