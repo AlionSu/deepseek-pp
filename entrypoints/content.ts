@@ -1143,6 +1143,7 @@ async function handleAugmentRequestBody(data: {
       trigger: 'manual_chat',
       chatSessionId: readRequestChatSessionId(bodyWithMultimodalMedia),
       toolIntent: bodyWithMultimodalMedia.prompt.slice(0, 16_000),
+      localSkillDir: result.activeLocalSkillDir,
     });
     activeToolAuthorizations.set(requestId, authorization);
     toolAuthorizationRequestAliases.set(mainRequestId, requestId);
@@ -1247,6 +1248,8 @@ async function createContentToolAuthorization(input: {
   runId?: string;
   descriptorIds?: string[];
   toolIntent?: string;
+  /** background 已校验的本地 Skill 目录；页面/模型不可信（评审 #2） */
+  localSkillDir?: string;
 }): Promise<ToolAuthorizationGrantSummary> {
   return sendRuntimeMessageStrict<ToolAuthorizationGrantSummary>({
     type: 'CREATE_TOOL_AUTHORIZATION',

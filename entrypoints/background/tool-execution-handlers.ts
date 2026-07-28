@@ -44,6 +44,8 @@ export interface ToolExecutionRuntimeHandlerDependencies {
   getAuthorizationDescriptors(locale: SupportedLocale): Promise<ToolDescriptor[]>;
   refreshToolDescriptors(locale: SupportedLocale): Promise<ToolDescriptor[]>;
   createToolAuthorization(input: CreateToolAuthorizationInput): Promise<ToolAuthorizationGrantSummary>;
+  /** background 校验：给定目录是否属于某个已导入的本地 Skill（评审 #2）。 */
+  validateLocalSkillDirectory(dir: string): Promise<boolean>;
   closeToolAuthorization(
     authorizationId: string,
     subject: ToolAuthorizationSubject,
@@ -114,6 +116,13 @@ export function createToolExecutionRuntimeHandlers(
         return { ok: false as const, error: 'unknown_tool_authorization_descriptor' };
       }
 
+      // 评审 #2：页面/模型携带的 localSkillDir 不可信；仅当 background 校验其
+      // 确属于某个已导入本地 Skill 目录时才写入 grant，否则不强制 cwd。
+      const requestedLocalSkillDir = payload.localSkillDir;
+      const validatedLocalSkillDir =
+        requestedLocalSkillDir && await dependencies.validateLocalSkillDirectory(requestedLocalSkillDir)
+          ? requestedLocalSkillDir
+          : undefined;
       return dependencies.createToolAuthorization({
         requestId: payload.requestId,
         trigger: payload.trigger,
@@ -121,6 +130,7 @@ export function createToolExecutionRuntimeHandlers(
         runId: payload.runId,
         subject: createToolAuthorizationSubject(context),
         descriptors,
+        localSkillDir: validatedLocalSkillDir,
       });
     }),
     defineToolPayloadRuntimeCommandHandler('CLOSE_TOOL_AUTHORIZATION', async (decoded, context) => {

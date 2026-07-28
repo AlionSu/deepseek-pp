@@ -47,6 +47,9 @@ interface StoredToolAuthorizationGrant {
   calls: Record<string, StoredCallAuthorization>;
   issuedAt: number;
   expiresAt: number;
+  // background 在创建 grant 时校验并写入的本地 Skill 目录；
+  // 执行期 cwd 仅从此派生，页面/模型携带的 localSkillDir 一律忽略（评审 #2）。
+  localSkillDir?: string;
 }
 
 interface ToolAuthorizationState {
@@ -68,6 +71,11 @@ export interface CreateToolAuthorizationInput {
   automationRunId?: string;
   subject: ToolAuthorizationSubject;
   descriptors: readonly ToolDescriptor[];
+  /**
+   * background 已校验的本地 Skill 目录（来自 augment 的 activeLocalSkillDir）。
+   * 非空时执行期 cwd 仅从此派生，页面/模型携带的 localSkillDir 被忽略（评审 #2）。
+   */
+  localSkillDir?: string;
   now?: number;
 }
 
@@ -121,6 +129,7 @@ export async function createToolAuthorization(
     calls: {},
     issuedAt: now,
     expiresAt: now + TOOL_AUTHORIZATION_TTL_MS,
+    localSkillDir: input.localSkillDir ?? undefined,
   };
 
   await mutateState((state) => {
@@ -310,6 +319,19 @@ export async function closeToolAuthorization(
     delete state.grants[grantId];
     return { result: undefined, changed: true };
   });
+}
+
+/**
+ * 读取 grant 上 background 已校验的本地 Skill 目录（评审 #2）。
+ * 执行期 cwd 仅从此派生；页面/模型携带的 localSkillDir 一律忽略。
+ * 仅暴露该字段，不返回整个 grant。
+ */
+export async function getGrantLocalSkillDir(grantId: string): Promise<string | undefined> {
+  const grant = await mutateState(async (state) => {
+    const g = state.grants[grantId];
+    return { result: g ? g.localSkillDir : undefined, changed: false };
+  });
+  return grant;
 }
 
 export async function getToolAuthorizationAuditTrigger(
@@ -742,6 +764,7 @@ function isStoredGrant(id: string, value: unknown): value is StoredToolAuthoriza
     'calls',
     'issuedAt',
     'expiresAt',
+    'localSkillDir',
   ]) &&
     grant.id === id &&
     isIdentity(grant.id) &&

@@ -209,6 +209,7 @@ export const TOOL_RUNTIME_PAYLOAD_DECODERS: ToolRuntimePayloadDecoderMap = {
           || !value.descriptorIds.every((id) => typeof id === 'string')
         )
       )
+      || (value.localSkillDir !== undefined && typeof value.localSkillDir !== 'string')
     ) {
       return invalidDecodedPayload('invalid_tool_authorization_request');
     }
@@ -219,6 +220,7 @@ export const TOOL_RUNTIME_PAYLOAD_DECODERS: ToolRuntimePayloadDecoderMap = {
       runId: value.runId,
       descriptorIds: value.descriptorIds as string[] | undefined,
       toolIntent: value.toolIntent as string | undefined,
+      localSkillDir: value.localSkillDir as string | undefined,
     });
   },
   CLOSE_TOOL_AUTHORIZATION(value) {

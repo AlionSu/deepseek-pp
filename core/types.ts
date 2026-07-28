@@ -620,6 +620,8 @@ export type MessageAction =
       runId?: string;
       descriptorIds?: string[];
       toolIntent?: string;
+      /** background 已校验的本地 Skill 目录；页面/模型不可信，由 background 校验后写入 grant（评审 #2） */
+      localSkillDir?: string;
     };
   }
   | { type: 'CLOSE_TOOL_AUTHORIZATION'; payload: { authorizationId: string } }

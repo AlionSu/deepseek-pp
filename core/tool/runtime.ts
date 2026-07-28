@@ -20,6 +20,7 @@ import {
   authorizeToolExecution,
   completeToolExecutionAuthorization,
   createToolAuthorizationResult,
+  getGrantLocalSkillDir,
   getToolAuthorizationAuditTrigger,
   ToolAuthorizationError,
 } from './authorization';
@@ -320,7 +321,12 @@ async function resolveToolCallPayload(
     };
   }
 
-  const resolved = parseExternalizedToolPayload(body, call.payload.invocationName, call.localSkillDir);
+  // 评审 #2：cwd 仅从 background 拥有的 grant 派生，忽略页面/模型携带的
+  // call.localSkillDir（不可信）。externalPayloadNamespace 即 grant.id。
+  const grantLocalSkillDir = externalPayloadNamespace
+    ? await getGrantLocalSkillDir(externalPayloadNamespace)
+    : undefined;
+  const resolved = parseExternalizedToolPayload(body, call.payload.invocationName, grantLocalSkillDir);
   if (resolved.parseError) {
     return {
       ...call,

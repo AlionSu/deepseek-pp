@@ -537,6 +537,14 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         getAuthorizationDescriptors: getRuntimeAuthorizationDescriptors,
         refreshToolDescriptors: refreshRuntimeToolDescriptors,
         createToolAuthorization,
+        // 评审 #2：校验目录是否属于某个已导入本地 Skill（background 拥有、可信）。
+        validateLocalSkillDirectory: async (dir: string): Promise<boolean> => {
+          if (!dir) return false;
+          const sources = await getAllSkillSources();
+          return sources.some(
+            (source) => source.provider === 'local' && source.localDirectory === dir,
+          );
+        },
         closeToolAuthorization,
         authorizeExternalToolPayloadChunk,
         createToolAuthorizationResult,

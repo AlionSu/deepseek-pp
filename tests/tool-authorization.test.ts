@@ -8,6 +8,7 @@ import {
   completeToolExecutionAuthorization,
   closeToolAuthorization,
   createToolAuthorization,
+  getGrantLocalSkillDir,
   haveEquivalentToolDescriptorSecurity,
 } from '../core/tool/authorization';
 import type {
@@ -852,3 +853,49 @@ interface StoredAuthorizationTestState {
     }>;
   }>;
 }
+
+// 评审 #2：grant 绑定并校验本地 Skill 目录；执行期 cwd 仅从 grant 派生，
+// 页面/模型携带的 localSkillDir 被忽略。
+describe('local skill dir 绑定到 grant（评审 #2）', () => {
+  it('createToolAuthorization 写入 localSkillDir，getGrantLocalSkillDir 可读回', async () => {
+    const descriptor = makeDescriptor();
+    const grant = await createToolAuthorization({
+      requestId: 'request-1',
+      trigger: 'manual_chat',
+      chatSessionId: 'chat-1',
+      subject: SUBJECT,
+      descriptors: [descriptor],
+      localSkillDir: '/skills/demo',
+    });
+
+    const readBack = await getGrantLocalSkillDir(grant.id);
+    expect(readBack).toBe('/skills/demo');
+  });
+
+  it('未传 localSkillDir 时 getGrantLocalSkillDir 返回 undefined', async () => {
+    const descriptor = makeDescriptor();
+    const grant = await createGrant([descriptor]);
+
+    const readBack = await getGrantLocalSkillDir(grant.id);
+    expect(readBack).toBeUndefined();
+  });
+
+  it('localSkillDir 经持久化往返后仍可被读回（isStoredGrant 白名单接受该字段）', async () => {
+    const descriptor = makeDescriptor();
+    const grant = await createToolAuthorization({
+      requestId: 'request-1',
+      trigger: 'manual_chat',
+      chatSessionId: 'chat-1',
+      subject: SUBJECT,
+      descriptors: [descriptor],
+      localSkillDir: '/skills/persisted',
+    });
+
+    // 模拟存储往返：从 sessionStorage 重新读取并校验不破坏
+    const stored = sessionStorage[TOOL_AUTHORIZATION_STORAGE_KEY] as { grants: Record<string, unknown> };
+    expect(stored.grants[grant.id]).toHaveProperty('localSkillDir', '/skills/persisted');
+
+    const readBack = await getGrantLocalSkillDir(grant.id);
+    expect(readBack).toBe('/skills/persisted');
+  });
+});
