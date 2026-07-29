@@ -13,11 +13,12 @@ describe('enforceLocalSkillCwd', () => {
     expect(out.cwd).toBe('/skills/demo');
   });
 
-  it('shell_exec 已给合法 cwd → 保留原值（仅缺失时注入 skillDir，不覆盖调用方意图）', () => {
+  it('shell_exec 已给错误 cwd（≠ skillDir）→ 被 grant 的 skillDir 覆盖（Review #2 #7 P1 修复）', () => {
     const payload = { command: 'ls', cwd: '/somewhere/else' };
     const out = enforceLocalSkillCwd(payload, 'shell_exec', '/skills/demo');
-    expect(out).toBe(payload);
-    expect(out.cwd).toBe('/somewhere/else');
+    // 错误 cwd 不再保留：归一化为 grant 派生的 skillDir，防止在 Skill 目录外执行
+    expect(out).not.toBe(payload);
+    expect(out.cwd).toBe('/skills/demo');
   });
 
   it('shell_exec cwd 已等于 skillDir → 原样返回（不复制）', () => {
@@ -71,15 +72,28 @@ describe('parseExternalizedToolPayload cwd 强制落点', () => {
     );
     expect(payload?.cwd).toBeUndefined();
   });
+
+  it('shell_exec 解析时携带错误 cwd（≠ skillDir）→ 被覆盖为 skillDir（Review #2 #7 P1 修复，parser→runtime 路径）', () => {
+    const { payload, parseError } = parseExternalizedToolPayload(
+      '{"command":"ls","cwd":"/somewhere/else"}',
+      'shell_exec',
+      '/skills/demo',
+    );
+    expect(parseError).toBeUndefined();
+    // 错误 cwd 经 enforceLocalSkillCwd 归一化为 grant 派生的 skillDir
+    expect(payload?.cwd).toBe('/skills/demo');
+  });
 });
 
 describe('声明自洽（评审 #4 路线 A）：仅初始 cwd 提示，不持久绑定会话', () => {
-  it('enforceLocalSkillCwd 对「已给 cwd」保留原值（不修改、不覆盖调用方意图）', () => {
+  it('enforceLocalSkillCwd 对「错误 cwd（≠ skillDir）」归一化为 grant 的 skillDir（Review #2 #7 P1 修复）', () => {
     const original = { command: 'ls', cwd: '/somewhere/else' };
     const out = enforceLocalSkillCwd(original, 'shell_exec', '/skills/demo');
-    // 已给 cwd：保留调用方原值，不归一化为 skillDir
-    expect(out).toBe(original);
-    expect(out.cwd).toBe('/somewhere/else');
+    // 错误 cwd 不再保留调用方原值：归一化为 grant 派生的 skillDir
+    expect(out).not.toBe(original);
+    expect(out.cwd).toBe('/skills/demo');
+    // 原对象不被改动（无副作用）
+    expect(original.cwd).toBe('/somewhere/else');
   });
 
   it('enforceLocalSkillCwd 对「缺失 cwd」注入 skillDir，且不修改原对象', () => {

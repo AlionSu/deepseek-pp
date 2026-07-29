@@ -134,7 +134,8 @@ export default function SkillPage() {
   }, [t]);
 
   const handleSaveAutoActivation = async (patch: Partial<SkillAutoActivationSettings>) => {
-    const next = normalizeSkillAutoActivationSettings({ ...autoActivation, ...patch });
+    const previous = autoActivation;
+    const next = normalizeSkillAutoActivationSettings({ ...previous, ...patch });
     setAutoActivation(next);
     try {
       const saved = await sidepanelRuntimeClient.request(
@@ -146,6 +147,7 @@ export default function SkillPage() {
       );
       setAutoActivation(saved);
     } catch (error) {
+      setAutoActivation(previous);
       showOperationError(error);
     }
   };

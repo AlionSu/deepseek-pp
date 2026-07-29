@@ -295,13 +295,13 @@ function buildLocalSkillSystemContext(
 
 // Implicit branch: score local indexed skills against user input and return the matched skill object (or null).
 function selectImplicitLocalSkill(skills: AugmentationSkill[], query: string): AugmentationSkill | null {
-  const candidates: LocalSkillIndex[] = skills
-    .filter(isLocalIndexSkill)
+  const localSkillsForProbe = skills.filter(isLocalIndexSkill);
+  const candidates: LocalSkillIndex[] = localSkillsForProbe
     .map((s) => ({
       name: s.name,
       description: s.description ?? '',
-      category: undefined,
       skillDir: s.remote?.localDirectory ?? '',
+      instructions: s.instructions ?? '',
     }));
   const picked = selectImplicitSkill(query, candidates);
   if (!picked) return null;

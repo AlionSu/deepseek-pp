@@ -25,11 +25,15 @@ export function isCwdEnforcedInvocation(invocationName: string): boolean {
 }
 
 /**
- * If skillDir is non-empty and the call is a command-type tool, set payload.cwd to
- * skillDir only when cwd is missing (initial cwd hint).
- * - cwd already present (any value): returned as-is (caller-supplied cwd wins).
- * - cwd missing and skillDir valid: returns a new object with cwd = skillDir (does not mutate input).
- * - skillDir empty / non-command tool: returned as-is.
+ * Normalize the initial cwd for command-type tool calls when a local skill is
+ * active, per Review #4 Route A and the Review #2 #7 (P1) fix:
+ * - cwd missing (undefined): set to the grant-derived skillDir (initial cwd hint).
+ * - cwd === skillDir (Agent supplied the correct directory): returned as-is (idempotent).
+ * - cwd present but !== skillDir (wrong / misstated): OVERWRITTEN with the
+ *   grant-derived skillDir, so a wrong cwd can never execute a shell command
+ *   outside the Skill directory. This honors the "error cwd normalized to Skill
+ *   directory" promise and fixes the P1 where any caller-supplied cwd silently
+ *   overrode the grant's skillDir.
  * Note: only sets the initial cwd; persistent session cwd reuse is owned by the
  * shell-session registry semantics (Review #4, Route A).
  */
@@ -40,6 +44,6 @@ export function enforceLocalSkillCwd(
 ): ToolPayload {
   if (!skillDir || !skillDir.trim()) return payload;
   if (!isCwdEnforcedInvocation(invocationName)) return payload;
-  if (payload.cwd !== undefined) return payload;
+  if (payload.cwd === skillDir) return payload;
   return { ...payload, cwd: skillDir };
 }

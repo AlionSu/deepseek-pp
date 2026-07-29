@@ -106,11 +106,6 @@ const lineAllowlist = [
   },
   {
     path: 'core/skill/local-skill-scorer.ts',
-    includes: '一-龥',
-    reason: 'scenario-label regex char class matches CJK labels in skill descriptions (source-authored matching data, not UI text)',
-  },
-  {
-    path: 'core/skill/local-skill-scorer.ts',
     includes: '适用场景',
     reason: 'scenario-matching regex keywords for applicable scenarios (source-authored matching data, not UI text)',
   },

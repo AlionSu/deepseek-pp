@@ -22,6 +22,7 @@ import {
   stageUpsertLocalSkillSourceAlreadyLocked,
   type SkillCollisionCandidate,
 } from './registry';
+import { extractScenarioBlock } from './local-skill-scorer';
 
 const MAX_SKILL_BYTES = 120_000;
 const ON_DEMAND_RESOURCE_READER_NAMES = new Set(['local_file_read', 'shell_exec']);
@@ -394,6 +395,16 @@ function loadLocalSkill(
     omittedFiles: hostSkill.omittedFiles,
     scriptFiles: hostSkill.scriptFiles,
   });
+  // 把 SKILL.md 正文的适用/不适用场景带入索引卡（instructions），供隐式评分的 scenarioAdjustment 命中。
+  // 否则本地 Skill 的 description 仅含 frontmatter 一行说明，scenarioAdjustment 永远提取不到场景文本，
+  // 导致中文 query 几乎无法激活本地 Skill（设计思路要求的"命中即激活"失效）。
+  const applicable = extractScenarioBlock(hostSkill.content, '适用场景', '适用场景|适用|使用场景');
+  const notApplicable = extractScenarioBlock(hostSkill.content, '不适用场景', '不适用场景|不适用|禁用场景');
+  const scenarioSection = [
+    applicable && `适用场景：\n${applicable}`,
+    notApplicable && `不适用场景：\n${notApplicable}`,
+  ].filter(Boolean).join('\n\n');
+  const finalInstructions = scenarioSection ? `${instructions}\n\n---\n\n${scenarioSection}` : instructions;
   const remote = {
     provider: 'local' as const,
     sourceId: source.id,
@@ -415,7 +426,7 @@ function loadLocalSkill(
   const skill: Skill = {
     name: importName,
     description: parsed.description,
-    instructions,
+    instructions: finalInstructions,
     source: 'remote',
     memoryEnabled: false,
     enabled: existingRemoteSkill?.enabled ?? true,
