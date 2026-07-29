@@ -114,6 +114,16 @@ const lineAllowlist = [
     includes: '不适用场景',
     reason: 'scenario-matching regex keywords for not-applicable scenarios (source-authored matching data, not UI text)',
   },
+  {
+    path: 'core/skill/local-importer.ts',
+    includes: '适用场景',
+    reason: 'scenario-matching keywords/labels for applicable scenarios injected into the local-skill index card (source-authored matching data, not UI chrome text)',
+  },
+  {
+    path: 'core/skill/local-importer.ts',
+    includes: '不适用场景',
+    reason: 'scenario-matching keywords/labels for not-applicable scenarios injected into the local-skill index card (source-authored matching data, not UI chrome text)',
+  },
 ];
 
 assertDeterministicKeyChecks();

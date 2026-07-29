@@ -395,9 +395,11 @@ function loadLocalSkill(
     omittedFiles: hostSkill.omittedFiles,
     scriptFiles: hostSkill.scriptFiles,
   });
-  // 把 SKILL.md 正文的适用/不适用场景带入索引卡（instructions），供隐式评分的 scenarioAdjustment 命中。
-  // 否则本地 Skill 的 description 仅含 frontmatter 一行说明，scenarioAdjustment 永远提取不到场景文本，
-  // 导致中文 query 几乎无法激活本地 Skill（设计思路要求的"命中即激活"失效）。
+  // Bring the SKILL.md applicable / not-applicable scenario text into the index card
+  // (instructions) so the implicit scorer's scenarioAdjustment can match it.
+  // Otherwise a local Skill's description holds only the frontmatter one-liner, scenarioAdjustment
+  // can never extract scenario text, and Chinese queries almost never activate the local Skill
+  // (breaking the intended "activate on match" design).
   const applicable = extractScenarioBlock(hostSkill.content, '适用场景', '适用场景|适用|使用场景');
   const notApplicable = extractScenarioBlock(hostSkill.content, '不适用场景', '不适用场景|不适用|禁用场景');
   const scenarioSection = [

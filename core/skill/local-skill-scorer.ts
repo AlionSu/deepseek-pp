@@ -21,13 +21,15 @@ export interface LocalSkillIndex {
 const ACTIVATION_THRESHOLD = 100;
 const MIN_LEAD_GAP = 50;
 
-// 中文友好的分词：英文/数字/下划线/连字符按原 tokenize；中文连续段做 2-gram，兼顾整串匹配。
-// 解决原 tokenize 把中文整句成单 token、导致"适用场景"命中加分的双向匹配永远失败的问题。
+// CJK-friendly tokenization: ASCII letters/digits/underscore/hyphen are kept as-is;
+// contiguous CJK segments are split into 2-grams for whole-string matching.
+// Fixes the original tokenizer treating a whole Chinese sentence as one token, which
+// made the bidirectional match for the applicable-scenario bonus always fail.
 export function tokenizeFlexible(value: string): string[] {
   const norm = normalizeSearchText(value);
   const base = tokenize(norm);
   const result = new Set(base);
-  const cjk = norm.match(/[一-鿿]+/g) ?? [];
+  const cjk = norm.match(/[\u4e00-\u9fff]+/g) ?? [];
   for (const seg of cjk) {
     if (seg.length === 1) {
       result.add(seg);
@@ -38,10 +40,11 @@ export function tokenizeFlexible(value: string): string[] {
   return [...result];
 }
 
-// 兼容两种适用/不适用场景写法：
-//  1) 行内 "标签：内容"（带半角/全角冒号）
-//  2) markdown 标题 "## 适用场景" ... 到下一个 "## " 标题或文件尾（标准 SKILL.md 写法）
-// 原实现只支持格式 1，导致标准 markdown 标题格式的本地 Skill 永远拿不到 +300 适用场景加分。
+// Supports two scenario-section writing styles (applicable / not-applicable):
+//  1) inline "label: content" (with ASCII or full-width colon)
+//  2) markdown heading (e.g. "## 适用场景") up to the next "## " heading or EOF (standard SKILL.md style)
+// The original implementation only supported style 1, so local Skills using the
+// standard markdown heading style never received the +300 applicable-scenario bonus.
 export function extractScenarioBlock(desc: string, headingLabel: string, inlineLabels: string): string {
   const inlinePattern = new RegExp(
     `(?:${inlineLabels})[：:]\\s*([\\s\\S]*?)(?=\\n#{1,3}\\s|\\n\\s*(?:适用场景|适用|使用场景|不适用场景|不适用|禁用场景)[：:]|$)`,
@@ -55,7 +58,7 @@ export function extractScenarioBlock(desc: string, headingLabel: string, inlineL
   return '';
 }
 
-// 双向 + 中文 2-gram 重叠匹配。strict（负向）模式忽略纯英文泛词，避免 "skill" 类弱词误触发 -1000。
+// Bidirectional + CJK 2-gram overlap matching. The strict (negative) mode ignores pure-ASCII generic words to avoid weak words like "skill" falsely triggering -1000.
 function flexHits(text: string, queryNorm: string, queryTerms: string[], strict: boolean): boolean {
   const t = normalizeSearchText(text);
   if (queryNorm && (t.includes(queryNorm) || (!strict && queryNorm.includes(t)))) return true;
@@ -71,9 +74,10 @@ function flexHits(text: string, queryNorm: string, queryTerms: string[], strict:
 export function scenarioAdjustment(desc: string, queryNorm: string, queryTerms: string[]): number {
   const applicable = extractScenarioBlock(desc, '适用场景', '适用场景|适用|使用场景');
   const notApplicable = extractScenarioBlock(desc, '不适用场景', '不适用场景|不适用|禁用场景');
-  // 负向 -1000 仅在 query 命中「不适用场景」中相对「适用场景」独有的词时触发：
-  // 若某词同时出现在两者（如「目录」既在「本地项目目录」也在「系统目录」），属歧义词，
-  // 不应触发 -1000，交由适用场景 +300 或基线评分决定，避免合法请求被误杀。
+  // The -1000 negative only fires when the query hits a word unique to the
+  // not-applicable block relative to the applicable block. Ambiguous words that
+  // appear in both blocks must NOT trigger -1000; let the +300 applicable bonus or
+  // baseline score decide, to avoid killing valid requests.
   if (notApplicable) {
     const distinctTerms = applicable
       ? queryTerms.filter((term) => !flexHits(applicable, term, [term], false))
@@ -85,9 +89,9 @@ export function scenarioAdjustment(desc: string, queryNorm: string, queryTerms: 
 }
 
 export function scoreLocalSkill(s: LocalSkillIndex, queryNorm: string, queryTerms: string[]): number {
-  // 评分可见字段严格 = description + 正文中「适用/不适用场景」块：从 instructions 提取场景，
-  // 排除 Plan 2 index 通用元数据（# Local Skill / Activation Notice 等），避免过度导入评分可见字段
-  // （用户要求：只从 description 字段与正文中明确出现适用/不适用场景的字段提取导入，不全量导入正文）。
+  // Scoring-visible fields are strictly description + the applicable/not-applicable
+  // scenario blocks pulled from instructions, excluding Plan 2 index generic metadata
+  // (# Local Skill / Activation Notice etc.) to avoid over-importing scoring-visible fields.
   const scenarioFromInstructions = [
     extractScenarioBlock(s.instructions ?? '', '适用场景', '适用场景|适用|使用场景'),
     extractScenarioBlock(s.instructions ?? '', '不适用场景', '不适用场景|不适用|禁用场景'),
@@ -106,9 +110,11 @@ export function scoreLocalSkill(s: LocalSkillIndex, queryNorm: string, queryTerm
     if (nameNorm.includes(term)) score += 100;
     if (descNorm.includes(term)) score += 40;
   }
-  // 评分可见字段（name/desc 的 800/400/100/40）用收窄后的 scoringText（排除 Plan 2 index 通用元数据）；
-  // 但场景加分/减分需带「适用/不适用场景」标签的原始文本才能被 scenarioAdjustment 重新抽到，
-  // 故此处喂 description + instructions（instructions 含导入时追加的场景段标签），避免 scenarioAdjustment 恒返回 0 的死代码。
+  // Scoring-visible fields (name/desc weights 800/400/100/40) use the narrowed
+  // scoringText (excluding Plan 2 index generic metadata). But the scenario bonus/penalty
+  // needs the raw applicable/not-applicable labeled text to be re-extracted by scenarioAdjustment,
+  // so we feed description + instructions (instructions carry the scenario labels appended at import),
+  // avoiding the dead scenarioAdjustment that always returned 0.
   const scenarioAdj = scenarioAdjustment(`${s.description}\n${s.instructions ?? ''}`, queryNorm, queryTerms);
   score += scenarioAdj;
   return score;
@@ -117,8 +123,9 @@ export function scoreLocalSkill(s: LocalSkillIndex, queryNorm: string, queryTerm
 export function selectImplicitSkill(query: string, skills: LocalSkillIndex[]): LocalSkillIndex | null {
   if (skills.length === 0) return null;
   const queryNorm = normalizeSearchText(query);
-  // 用户输入长句做合理分词后再评分：用 tokenizeFlexible（中文 2-gram + 英文/数字原 tokenize），
-  // 避免中文整句被 tokenize 当成单个 token 后直接与评分可见字段比较而无法命中。
+  // Tokenize the user query sensibly before scoring: tokenizeFlexible (CJK 2-gram +
+  // ASCII/digit as-is) avoids a whole Chinese sentence being treated as a single token
+  // and then failing to match the scoring-visible fields.
   const queryTerms = tokenizeFlexible(queryNorm);
   const scored = skills
     .map((s) => ({ s, score: scoreLocalSkill(s, queryNorm, queryTerms) }))
