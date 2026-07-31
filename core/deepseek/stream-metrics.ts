@@ -72,13 +72,6 @@ export function createResponseTokenSpeedTracker(
     return Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : null;
   };
 
-  const getServerTokensPerSecond = (): number | null => {
-    if (serverAccumulatedTokens === null) return null;
-    const elapsedMs = getServerElapsedMs();
-    if (elapsedMs === null) return null;
-    return (serverAccumulatedTokens / elapsedMs) * 1000;
-  };
-
   const emit = (active: boolean, force = false) => {
     if (finished && active) return;
 
@@ -87,18 +80,20 @@ export function createResponseTokenSpeedTracker(
     lastEmitAt = now;
 
     const estimatedTokens = Math.round(totalTokenUnits);
-    const serverTokensPerSecond = getServerTokensPerSecond();
     const serverElapsedMs = getServerElapsedMs();
     const elapsedMs = serverElapsedMs ?? Math.max(now - startedAt, 1);
     onProgress({
       active,
       estimatedTokens,
       accumulatedTokens: serverAccumulatedTokens === null ? null : Math.round(serverAccumulatedTokens),
-      tokensPerSecond: serverTokensPerSecond ?? getAverageTokensPerSecond(now),
+      // DeepSeek's accumulated usage includes prompt/context tokens. Keep it
+      // for total-usage reporting, but never use it as decoded output when
+      // calculating generation speed.
+      tokensPerSecond: getAverageTokensPerSecond(now),
       elapsedMs: Math.round(elapsedMs),
       textLength,
       tokenSource: serverAccumulatedTokens === null ? 'estimated' : 'server',
-      speedSource: serverTokensPerSecond === null ? 'estimated' : 'server',
+      speedSource: 'estimated',
       modelType,
     });
   };
