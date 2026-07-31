@@ -26,6 +26,7 @@ import type { ChatMessage as ChatMessageType, ModelType } from '../../../core/ty
 import ChatMessage from '../components/ChatMessage';
 import { StatusMessage, useConfirm } from '../components/settings/feedback-primitives';
 import { createRequestGenerationFence } from '../async-state';
+import { shouldSubmitChatComposer } from '../chat-composer';
 import {
   chatController,
   getChatProviderCapabilities,
@@ -508,7 +509,12 @@ export default function ChatPage() {
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (shouldSubmitChatComposer({
+      key: e.key,
+      shiftKey: e.shiftKey,
+      isComposing: e.nativeEvent.isComposing,
+      keyCode: e.keyCode,
+    })) {
       e.preventDefault();
       sendMessage();
     }
