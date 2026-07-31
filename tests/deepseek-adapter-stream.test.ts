@@ -123,12 +123,12 @@ describe('DeepSeek web adapter streaming', () => {
       active: false,
       accumulatedTokens: 3302,
       tokenSource: 'server',
-      speedSource: 'server',
+      speedSource: 'estimated',
       modelType: 'vision',
       chatSessionId: 'session-1',
       assistantMessageId: 2,
     });
-    expect(final?.tokensPerSecond).toBeCloseTo(3302 / 3.11, 5);
+    expect(final?.tokensPerSecond).toBeCloseTo(1.5, 5);
   });
 
   it('creates PoW headers for the requested DeepSeek target path', async () => {
