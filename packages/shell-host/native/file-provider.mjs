@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import {
@@ -56,21 +56,20 @@ function createLocalFileReadResult(args) {
     const stat = safeStat(resolvedPath);
     if (!stat || !stat.isFile()) throw new Error(`Local file is not readable: ${resolvedPath}`);
 
-    const content = readTextFile(resolvedPath);
-    const slice = content.slice(start, start + maxChars);
-    const nextStart = start + slice.length;
+    const { content, totalChars, charsRead } = readTextFileWindow(resolvedPath, start, maxChars);
+    const nextStart = start + charsRead;
     return {
-      content: [{ type: 'text', text: `Read ${slice.length} characters from ${resolvedPath}` }],
+      content: [{ type: 'text', text: `Read ${content.length} characters from ${resolvedPath}` }],
       structuredContent: {
         ok: true,
         data: {
           path: resolvedPath,
-          content: slice,
+          content,
           start,
           nextStart,
           maxChars,
-          totalChars: content.length,
-          truncated: nextStart < content.length,
+          totalChars,
+          truncated: nextStart < totalChars,
         },
       },
     };
@@ -137,6 +136,111 @@ export function resolveUnderRoot(rootPath, relativePath) {
 
 export function readTextFile(filePath) {
   return readFileSync(filePath, 'utf8');
+}
+
+// 按需字节读取字符窗口，避免整文件读入内存（根除 OOM）。
+// 返回 { content: 窗口字符串(≤maxChars 字符), totalChars: 整文件字符数 }。
+export function readTextFileWindow(filePath, startChar, maxChars) {
+  const stat = safeStat(filePath);
+  if (!stat || !stat.isFile()) throw new Error(`Local file is not readable: ${filePath}`);
+  const totalBytes = stat.size;
+  if (totalBytes === 0) return { content: '', totalChars: 0, charsRead: 0 };
+
+  const fd = openSync(filePath, 'r');
+  try {
+    const chunkSize = 64 * 1024;
+
+    // 定位起始字节偏移（UTF-8 变长；带顺序续读缓存避免 O(N^2)）
+    let bytePos = 0;
+    let charPos = 0;
+    const cached = readWindowPosCache.get(filePath);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && startChar >= cached.charPos) {
+      bytePos = cached.bytePos;
+      charPos = cached.charPos;
+    }
+    while (bytePos < totalBytes && charPos < startChar) {
+      const want = Math.min(chunkSize, totalBytes - bytePos);
+      const buf = Buffer.alloc(want);
+      const got = readSync(fd, buf, 0, want, bytePos);
+      if (got === 0) break;
+      const { bytes: consumed, chars: added } = scanUtf8Chars(buf, startChar - charPos);
+      charPos += added;
+      if (charPos >= startChar) {
+        bytePos += consumed;
+        break;
+      }
+      bytePos += got;
+    }
+    if (charPos < startChar) {
+      return { content: '', totalChars: getTotalCharCount(fd, totalBytes, filePath, stat), charsRead: 0 };
+    }
+    readWindowPosCache.set(filePath, { bytePos, charPos, mtimeMs: stat.mtimeMs, size: stat.size });
+
+    // 读取窗口 [startChar, startChar + maxChars)
+    let remaining = maxChars;
+    let charsRead = 0;
+    const parts = [];
+    while (bytePos < totalBytes && remaining > 0) {
+      const want = Math.min(chunkSize, totalBytes - bytePos);
+      const buf = Buffer.alloc(want);
+      const got = readSync(fd, buf, 0, want, bytePos);
+      if (got === 0) break;
+      const { bytes: consumed, chars: added } = scanUtf8Chars(buf, remaining);
+      parts.push(buf.subarray(0, consumed));
+      remaining -= added;
+      charsRead += added;
+      bytePos += consumed;
+    }
+    const text = Buffer.concat(parts).toString('utf8');
+    const windowChars = Array.from(text).slice(0, Math.max(0, maxChars));
+    const windowContent = windowChars.join('');
+    const totalChars = getTotalCharCount(fd, totalBytes, filePath, stat);
+    return { content: windowContent, totalChars, charsRead: windowChars.length };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// 扫描 buffer，返回"前 maxChars 个字符所占字节数"与"实际字符数"(可能因 buffer 不足 < maxChars)。
+// 跨 buffer 的字符连续性由 UTF-8 字节前缀规则保证：续字节(0x80-0xBF)不计入字符数。
+function scanUtf8Chars(bytes, maxChars) {
+  let i = 0;
+  let chars = 0;
+  while (i < bytes.length && chars < maxChars) {
+    if ((bytes[i] & 0xC0) !== 0x80) {
+      chars++;
+      if (chars === maxChars) {
+        i++;
+        while (i < bytes.length && (bytes[i] & 0xC0) === 0x80) i++;
+        break;
+      }
+    }
+    i++;
+  }
+  return { bytes: i, chars };
+}
+
+// 顺序续读定位缓存：记录 (path -> 已扫描到的字节/字符偏移)，使 auto 续读每窗只扫新增量。
+const readWindowPosCache = new Map();
+// 整文件字符数缓存（按 mtime+size 失效），避免每次调用全文件重扫。
+const fileCharCountCache = new Map();
+
+function getTotalCharCount(fd, totalBytes, path, stat) {
+  const cached = fileCharCountCache.get(path);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.count;
+  let count = 0;
+  let bytePos = 0;
+  const chunkSize = 256 * 1024;
+  const buf = Buffer.alloc(chunkSize);
+  while (bytePos < totalBytes) {
+    const want = Math.min(chunkSize, totalBytes - bytePos);
+    const got = readSync(fd, buf, 0, want, bytePos);
+    if (got === 0) break;
+    for (let j = 0; j < got; j++) if ((buf[j] & 0xC0) !== 0x80) count++;
+    bytePos += got;
+  }
+  fileCharCountCache.set(path, { count, mtimeMs: stat.mtimeMs, size: stat.size });
+  return count;
 }
 
 export function safeReadDirectory(directory) {

@@ -125,6 +125,12 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
   <img src="assets/yuansheng.jpg" width="300" alt="Tool execution display">
 </p>
 
+### Local File Reading (Automatic Continuation for Large Files)
+
+- **Deterministic auto-continuation** — For files exceeding the per-call read limit, `local_file_read` is continued deterministically by a code loop on the extension side instead of relying on the model to resume reading, eliminating the silent-truncation reliability gap.
+- **Unicode code-point positioning** — Continuation offsets advance by Unicode code points (not UTF-16 units), so files mixing emoji and CJK text are stitched window-by-window without any character loss.
+- **Host-side OOM protection** — The host reads character windows on demand by byte range instead of loading the whole file into memory, so very large files no longer exhaust memory.
+
 ### Conversation Export
 
 - **Current conversation export** - Export the current DeepSeek conversation from the same row as the official copy and share actions.

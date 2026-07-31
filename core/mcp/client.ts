@@ -166,6 +166,10 @@ export async function callMcpTool(
 ): Promise<ToolResult> {
   const startedAt = Date.now();
   const mcpToolName = getMcpToolName(options.call, options.descriptor);
+  // auto 续读：local_file_read 默认改走确定性循环封装，彻底消除"依赖模型自觉续读"的可靠性弱环节
+  if (mcpToolName === 'local_file_read') {
+    return callLocalFileReadAuto(server, transport, options);
+  }
 
   try {
     const response = await transport.request<Record<string, unknown>, McpCallToolResult>(
@@ -207,6 +211,105 @@ export async function callMcpTool(
       },
     };
   }
+}
+
+// ===== local_file_read auto 续读：确定性代码循环，不依赖模型自觉续读 =====
+// 直接复用本模块的 transport 请求/响应解析原语，避免递归与跨模块循环依赖。
+const AUTO_READ_SAFE_WINDOW_CHARS = 12000; // 12000 字符 × 4 字节 ≈ 48KB < 64KB，确保单窗不触发扩展侧 64KB 裁剪
+const AUTO_READ_MAX_WINDOWS = 1000;
+
+export async function callLocalFileReadAuto(
+  server: McpServerConfig,
+  transport: McpProtocolTransport,
+  options: McpCallToolOptions,
+): Promise<ToolResult> {
+  const call = options.call;
+  const payload = call.payload as Record<string, unknown>;
+  const path = String(payload?.path ?? '');
+  const requestedMaxChars = payload?.max_chars;
+  const safeMaxChars = typeof requestedMaxChars === 'number' && requestedMaxChars >= 1
+    ? Math.min(Math.floor(requestedMaxChars), AUTO_READ_SAFE_WINDOW_CHARS)
+    : AUTO_READ_SAFE_WINDOW_CHARS;
+
+  const contents: string[] = [];
+  let totalChars = 0;
+  let start = 0;
+  let prevNextStart = 0;
+
+  for (let guard = 0; guard < AUTO_READ_MAX_WINDOWS; guard++) {
+    let windowResult: McpCallToolResult;
+    try {
+      const response = await transport.request<Record<string, unknown>, McpCallToolResult>(
+        createMcpRequest('tools/call', {
+          name: getMcpToolName(call, options.descriptor),
+          arguments: { ...payload, path, start, max_chars: safeMaxChars },
+        }),
+        {
+          timeoutMs: options.timeoutMs ?? server.timeouts.requestMs,
+          maxResponseBytes: options.maxResultBytes ?? server.limits.maxResultBytes,
+          signal: options.signal,
+        },
+      );
+      windowResult = unwrapMcpResponse(response, 'mcp_tool_call_failed') as McpCallToolResult;
+    } catch (err) {
+      return buildAutoReadResult(call, contents, totalChars, false, `第 ${contents.length + 1} 窗调用失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const data = (windowResult.structuredContent as Record<string, unknown> | undefined)?.data as
+      | Record<string, unknown>
+      | undefined;
+    const content = typeof data?.content === 'string' ? data.content : undefined;
+    if (typeof content !== 'string') {
+      return buildAutoReadResult(call, contents, totalChars, false, '无法从工具结果解析窗口内容');
+    }
+    contents.push(content);
+    if (typeof data?.totalChars === 'number') totalChars = data.totalChars;
+    const truncated = data?.truncated === true;
+    if (!truncated) break;
+    const nextStart = typeof data?.nextStart === 'number' ? data.nextStart : NaN;
+    if (!Number.isFinite(nextStart) || nextStart <= prevNextStart) {
+      return buildAutoReadResult(call, contents, totalChars, false, `nextStart 未前进 (${prevNextStart} -> ${nextStart})`);
+    }
+    prevNextStart = nextStart;
+    start = nextStart;
+  }
+  return buildAutoReadResult(call, contents, totalChars, true, undefined);
+}
+
+function buildAutoReadResult(
+  call: ToolCall,
+  contents: string[],
+  totalChars: number,
+  ok: boolean,
+  failReason?: string,
+): ToolResult {
+  const windows = contents.length;
+  const detail = ok
+    ? `已通过 auto 续读分 ${windows} 窗读取文件，共 ${totalChars} 字符（每窗 ≤${AUTO_READ_SAFE_WINDOW_CHARS} 字符），无静默截断。完整内容见 output.data.contents（逐窗独立数组）。`
+    : `local_file_read auto 续读异常终止（${failReason ?? '未知原因'}）。已读取 ${windows} 窗，共 ${totalChars} 字符。`;
+  return {
+    ok,
+    summary: ok ? 'local_file_read auto 续读完成' : 'local_file_read auto 续读失败',
+    detail,
+    name: call.name,
+    provider: call.provider,
+    descriptorId: call.descriptorId,
+    output: {
+      data: {
+        path: String((call.payload as Record<string, unknown>)?.path ?? ''),
+        windows,
+        totalChars,
+        truncated: false,
+        contents,
+      },
+    },
+    startedAt: Date.now(),
+    completedAt: Date.now(),
+    durationMs: 0,
+    truncated: false,
+    error: ok
+      ? undefined
+      : { code: 'local_file_read_auto_failed', message: failReason ?? 'auto 续读失败', retryable: false },
+  };
 }
 
 export function normalizeMcpToolDescriptor(server: McpServerConfig, tool: McpToolDefinition): ToolDescriptor {
