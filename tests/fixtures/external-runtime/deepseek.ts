@@ -4,6 +4,7 @@ export const DEEPSEEK_ROUTE_CONTRACT = {
   bypassHeader: 'X-DPP-Bypass-Hook',
   routes: {
     completion: '/api/v0/chat/completion',
+    editMessage: '/api/v0/chat/edit_message',
     regenerate: '/api/v0/chat/regenerate',
     history: '/api/v0/chat/history_messages',
     powChallenge: '/api/v0/chat/create_pow_challenge',
@@ -16,6 +17,7 @@ export const DEEPSEEK_ROUTE_CONTRACT = {
 
 export const LEGAL_DEEPSEEK_ROUTE_FIXTURES = [
   { route: 'completion', method: 'POST', url: 'https://chat.deepseek.com/api/v0/chat/completion' },
+  { route: 'editMessage', method: 'POST', url: 'https://chat.deepseek.com/api/v0/chat/edit_message' },
   { route: 'regenerate', method: 'POST', url: 'https://chat.deepseek.com/api/v0/chat/regenerate' },
   { route: 'history', method: 'GET', url: 'https://chat.deepseek.com/api/v0/chat/history_messages?chat_session_id=one' },
   {
@@ -28,6 +30,7 @@ export const LEGAL_DEEPSEEK_ROUTE_FIXTURES = [
 
 export const DEEPSEEK_ACTIVE_ROUTE_METHOD_FIXTURES = [
   { name: 'completion', path: '/api/v0/chat/completion', method: 'POST' },
+  { name: 'editMessage', path: '/api/v0/chat/edit_message', method: 'POST' },
   { name: 'regenerate', path: '/api/v0/chat/regenerate', method: 'POST' },
   { name: 'history', path: '/api/v0/chat/history_messages', method: 'GET' },
   { name: 'powChallenge', path: '/api/v0/chat/create_pow_challenge', method: 'POST' },

@@ -18,6 +18,7 @@ type DeepSeekWebRoutePolicyMap = {
 
 export const DEEPSEEK_WEB_ROUTE_POLICY = {
   completion: { route: 'completion', method: 'POST' },
+  editMessage: { route: 'editMessage', method: 'POST' },
   regenerate: { route: 'regenerate', method: 'POST' },
   createSession: { route: 'createSession', method: 'POST' },
   powChallenge: { route: 'powChallenge', method: 'POST' },
