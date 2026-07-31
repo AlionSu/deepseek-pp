@@ -204,4 +204,25 @@ describe('声明自洽边界（评审 #3 路线 A）：仅作用于注入索引�
     });
     expect(out).toBe(text);
   });
+
+  it('GAP-1 固化：索引指令改写与真实正文隔离——调用点仅传入 index card', () => {
+    // 契约（request-augmentation.ts:268 composeLocalSkillPrompt）：absolutizeSkillReferences 唯一调用点只接收
+    // skill.instructions（导入时生成的索引卡），绝不接收 local_file_read 读回的真实正文。
+    // 即便真实正文含可解析的相对引用，只要未被注入清单登记（fileExists=false），本层不强制改写，
+    // 由 Agent 遵循 D4「double-base rule」自行解析。此测试锁定该隔离边界，防止回归为"覆盖真实正文"。
+    const indexCard = '见 [指南](references/guide.md)'; // 索引卡：在清单内 → 改写
+    const realBody = '正文见 [附录](./appendix/notes.md)'; // 真实正文：不在清单 → 保留
+    const rewrittenIndex = absolutizeSkillReferences(indexCard, {
+      skillDir,
+      thisFileDir: skillDir,
+      fileExists: (abs) => abs === '/skills/demo/references/guide.md',
+    });
+    const untouchedBody = absolutizeSkillReferences(realBody, {
+      skillDir,
+      thisFileDir: `${skillDir}/refs`,
+      fileExists: () => false, // 真实正文不在注入清单
+    });
+    expect(rewrittenIndex).toBe('见 [指南](/skills/demo/references/guide.md)');
+    expect(untouchedBody).toBe(realBody);
+  });
 });

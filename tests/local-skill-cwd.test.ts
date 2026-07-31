@@ -43,6 +43,7 @@ describe('enforceLocalSkillCwd', () => {
   it('isCwdEnforcedInvocation 仅覆盖命令型工具', () => {
     expect(isCwdEnforcedInvocation('shell_exec')).toBe(true);
     expect(isCwdEnforcedInvocation('shell_session_begin')).toBe(true);
+    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(true);
     expect(isCwdEnforcedInvocation('local_file_read')).toBe(false);
     expect(isCwdEnforcedInvocation('local_skill_preview')).toBe(false);
   });
@@ -105,9 +106,13 @@ describe('声明自洽（评审 #4 路线 A）：仅初始 cwd 提示，不持�
     expect(original.cwd).toBeUndefined();
   });
 
-  it('shell_session_exec（会话复用既有 cwd）不在本层被强制', () => {
-    const payload = { command: 'ls', sessionId: 's1', cwd: '/skills/demo' };
-    // 会话执行命令非 CWD_ENFORCED_INVOCATIONS 成员（仅 begin 加入强制），本层不影响其 cwd 复用
-    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(false);
+  it('shell_session_exec（会话续发命令）也被强制为 skillDir（GAP-2 修复）', () => {
+    const payload = { command: 'ls', sessionId: 's1', cwd: '/somewhere/else' };
+    // 会话执行命令现在属于 CWD_ENFORCED_INVOCATIONS 成员，错误 cwd 被纠正为 skillDir，
+    // 使"cwd 恒为 skillDir 硬边界"对所有命令型调用（含会话续发）成立。
+    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(true);
+    const out = enforceLocalSkillCwd(payload, 'shell_session_exec', '/skills/demo');
+    expect(out).not.toBe(payload);
+    expect(out.cwd).toBe('/skills/demo');
   });
 });
