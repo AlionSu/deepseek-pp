@@ -59,7 +59,7 @@ function createLocalFileReadResult(args) {
     const { content, totalChars, charsRead } = readTextFileWindow(resolvedPath, start, maxChars);
     const nextStart = start + charsRead;
     return {
-      content: [{ type: 'text', text: `Read ${content.length} characters from ${resolvedPath}` }],
+      content: [{ type: 'text', text: `Read ${Array.from(content).length} characters from ${resolvedPath}` }],
       structuredContent: {
         ok: true,
         data: {
@@ -174,6 +174,7 @@ export function readTextFileWindow(filePath, startChar, maxChars) {
     if (charPos < startChar) {
       return { content: '', totalChars: getTotalCharCount(fd, totalBytes, filePath, stat), charsRead: 0 };
     }
+    if (readWindowPosCache.size >= MAX_WINDOW_POS_CACHE) readWindowPosCache.clear();
     readWindowPosCache.set(filePath, { bytePos, charPos, mtimeMs: stat.mtimeMs, size: stat.size });
 
     // 读取窗口 [startChar, startChar + maxChars)
@@ -221,8 +222,11 @@ function scanUtf8Chars(bytes, maxChars) {
 }
 
 // 顺序续读定位缓存：记录 (path -> 已扫描到的字节/字符偏移)，使 auto 续读每窗只扫新增量。
+// 上限保护（L1）：长驻宿主进程读取大量不同文件时避免 Map 无限增长导致内存泄漏。
+const MAX_WINDOW_POS_CACHE = 1024;
 const readWindowPosCache = new Map();
-// 整文件字符数缓存（按 mtime+size 失效），避免每次调用全文件重扫。
+// 整文件字符数缓存（按 mtime+size 失效），避免每次调用全文件重扫。上限保护同 L1。
+const MAX_FILE_CHAR_CACHE = 1024;
 const fileCharCountCache = new Map();
 
 function getTotalCharCount(fd, totalBytes, path, stat) {
@@ -239,6 +243,7 @@ function getTotalCharCount(fd, totalBytes, path, stat) {
     for (let j = 0; j < got; j++) if ((buf[j] & 0xC0) !== 0x80) count++;
     bytePos += got;
   }
+  if (fileCharCountCache.size >= MAX_FILE_CHAR_CACHE) fileCharCountCache.clear();
   fileCharCountCache.set(path, { count, mtimeMs: stat.mtimeMs, size: stat.size });
   return count;
 }

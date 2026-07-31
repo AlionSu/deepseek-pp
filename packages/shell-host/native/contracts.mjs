@@ -151,7 +151,7 @@ const TOOL_DEFINITIONS = [
   {
     name: 'local_file_read',
     title: 'Read Local Text File',
-    description: 'Read a UTF-8 local text file in character windows so large files can be fetched in chunks.',
+    description: 'Read a UTF-8 local text file in character windows. Large files are automatically continued by the extension in deterministic windows (no model-driven resume needed); start/max_chars are honoured per window.',
     inputSchema: {
       type: 'object',
       properties: {

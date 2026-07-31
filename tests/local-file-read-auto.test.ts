@@ -143,4 +143,39 @@ describe('callLocalFileReadAuto (扩展侧 auto 续读)', () => {
     const result = await callLocalFileReadAuto(server, transport, { call } as never);
     expect(result.ok).toBe(false);
   });
+
+  it('窗口数达上限时 fail-closed（不静默谎报成功）', async () => {
+    // 模拟超大文件：每窗均 truncated=true 且 nextStart 持续前进，直到 AUTO_READ_MAX_WINDOWS(1000) 耗尽。
+    // 验证 M1 修复：此时必须 ok:false 且 truncated:true，而非谎报成功（fail-open）。
+    const WINDOW = 'A'.repeat(12000);
+    let i = 0;
+    const transport = {
+      request: async () => {
+        i++;
+        return {
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            content: [{ type: 'text', text: `Read ${WINDOW.length} characters` }],
+            structuredContent: {
+              data: {
+                path: '/x',
+                content: WINDOW,
+                start: (i - 1) * 12000,
+                nextStart: i * 12000,
+                maxChars: 12000,
+                totalChars: 12_000_000,
+                truncated: true,
+              },
+            },
+          },
+        } as unknown as Awaited<ReturnType<McpProtocolTransport['request']>>;
+      },
+    } as unknown as McpProtocolTransport;
+    const result = await callLocalFileReadAuto(server, transport, { call } as never);
+    expect(result.ok).toBe(false);
+    const data = (result.output as { data: { contents: string[]; truncated: boolean } }).data;
+    expect(data.truncated).toBe(true);
+    expect(data.contents.length).toBe(1000);
+  });
 });

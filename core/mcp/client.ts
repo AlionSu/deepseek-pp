@@ -215,6 +215,8 @@ export async function callMcpTool(
 
 // ===== local_file_read auto 续读：确定性代码循环，不依赖模型自觉续读 =====
 // 直接复用本模块的 transport 请求/响应解析原语，避免递归与跨模块循环依赖。
+// 注：此处对 local_file_read 提前返回，会绕过 callMcpTool 下方统一的 normalizeMcpToolResult
+// 聚合/计时/错误包装；auto 续读结果由 buildAutoReadResult 自行构造，属有意特例（L6）。
 const AUTO_READ_SAFE_WINDOW_CHARS = 12000; // 12000 字符 × 4 字节 ≈ 48KB < 64KB，确保单窗不触发扩展侧 64KB 裁剪
 const AUTO_READ_MAX_WINDOWS = 1000;
 
@@ -226,15 +228,24 @@ export async function callLocalFileReadAuto(
   const call = options.call;
   const payload = call.payload as Record<string, unknown>;
   const path = String(payload?.path ?? '');
+  // L5：auto 续读下 max_chars 为「每窗上限」（取模型请求与 12000 的安全上限之较小值），
+  // 总读取量由多窗循环决定，而非单次 max_chars 限制总量。
   const requestedMaxChars = payload?.max_chars;
   const safeMaxChars = typeof requestedMaxChars === 'number' && requestedMaxChars >= 1
     ? Math.min(Math.floor(requestedMaxChars), AUTO_READ_SAFE_WINDOW_CHARS)
     : AUTO_READ_SAFE_WINDOW_CHARS;
+  // L4：兼容模型显式传入的起始偏移（与宿主 createLocalFileReadResult 的 start 语义一致）；
+  // 未传或非法时从 0 开始完整读取。
+  const requestedStart = payload?.start;
+  const start0 = typeof requestedStart === 'number' && Number.isFinite(requestedStart) && requestedStart >= 0
+    ? Math.floor(requestedStart)
+    : 0;
 
   const contents: string[] = [];
   let totalChars = 0;
-  let start = 0;
-  let prevNextStart = 0;
+  let start = start0;
+  let prevNextStart = start0;
+  let lastTruncated = false;
 
   for (let guard = 0; guard < AUTO_READ_MAX_WINDOWS; guard++) {
     let windowResult: McpCallToolResult;
@@ -264,6 +275,7 @@ export async function callLocalFileReadAuto(
     contents.push(content);
     if (typeof data?.totalChars === 'number') totalChars = data.totalChars;
     const truncated = data?.truncated === true;
+    lastTruncated = truncated;
     if (!truncated) break;
     const nextStart = typeof data?.nextStart === 'number' ? data.nextStart : NaN;
     if (!Number.isFinite(nextStart) || nextStart <= prevNextStart) {
@@ -271,6 +283,18 @@ export async function callLocalFileReadAuto(
     }
     prevNextStart = nextStart;
     start = nextStart;
+  }
+  // M1 修复：若因达到最大窗口数而退出循环，且最后一窗仍 truncated（文件超过上限），
+  // 必须 fail-closed（ok:false 且 truncated:true），不得谎报为成功读取（fail-open）。
+  if (lastTruncated) {
+    return buildAutoReadResult(
+      call,
+      contents,
+      totalChars,
+      false,
+      `auto 续读窗口数已达上限（${AUTO_READ_MAX_WINDOWS}），文件可能过大未完整读取`,
+      true,
+    );
   }
   return buildAutoReadResult(call, contents, totalChars, true, undefined);
 }
@@ -281,6 +305,7 @@ function buildAutoReadResult(
   totalChars: number,
   ok: boolean,
   failReason?: string,
+  truncated = false,
 ): ToolResult {
   const windows = contents.length;
   const detail = ok
@@ -298,14 +323,14 @@ function buildAutoReadResult(
         path: String((call.payload as Record<string, unknown>)?.path ?? ''),
         windows,
         totalChars,
-        truncated: false,
+        truncated,
         contents,
       },
     },
     startedAt: Date.now(),
     completedAt: Date.now(),
     durationMs: 0,
-    truncated: false,
+    truncated,
     error: ok
       ? undefined
       : { code: 'local_file_read_auto_failed', message: failReason ?? 'auto 续读失败', retryable: false },
