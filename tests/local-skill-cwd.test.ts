@@ -2,6 +2,7 @@
 //   1) enforceLocalSkillCwd 纯函数：仅对 shell_exec / shell_session_begin 在「初始 cwd」层面归一化 cwd=skillDir。
 //   2) parseExternalizedToolPayload 落点：当传入 skillDir 时，命令型工具的「初始 cwd」被归一化。
 //   3) 声明自洽：本层仅设定初始 cwd，不持久绑定会话（持久会话 cwd 复用由 shell 会话注册表既有语义负责）。
+//   4) A3 修复：shell_session_exec 不在归一化集合（其 cwd 由会话注册表保持，contracts.ts:80-84），不注入 cwd。
 
 import { describe, expect, it } from 'vitest';
 import { enforceLocalSkillCwd, isCwdEnforcedInvocation } from '../core/tool/local-skill-cwd';
@@ -16,7 +17,6 @@ describe('enforceLocalSkillCwd', () => {
   it('shell_exec 已给错误 cwd（≠ skillDir）→ 被 grant 的 skillDir 覆盖（Review #2 #7 P1 修复）', () => {
     const payload = { command: 'ls', cwd: '/somewhere/else' };
     const out = enforceLocalSkillCwd(payload, 'shell_exec', '/skills/demo');
-    // 错误 cwd 不再保留：归一化为 grant 派生的 skillDir，防止在 Skill 目录外执行
     expect(out).not.toBe(payload);
     expect(out.cwd).toBe('/skills/demo');
   });
@@ -40,10 +40,12 @@ describe('enforceLocalSkillCwd', () => {
     expect(out.rootPath).toBe('/skills/demo');
   });
 
-  it('isCwdEnforcedInvocation 仅覆盖命令型工具', () => {
+  it('isCwdEnforcedInvocation 仅覆盖初始命令型工具（A3 修复：shell_session_exec 不归一化）', () => {
     expect(isCwdEnforcedInvocation('shell_exec')).toBe(true);
     expect(isCwdEnforcedInvocation('shell_session_begin')).toBe(true);
-    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(true);
+    // A3 修复：shell_session_exec 复用会话既有 cwd（contracts.ts:80-84 明确不接收 cwd 字段），
+    // 不再归入归一化集合，避免违反对外契约。
+    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(false);
     expect(isCwdEnforcedInvocation('local_file_read')).toBe(false);
     expect(isCwdEnforcedInvocation('local_skill_preview')).toBe(false);
   });
@@ -81,7 +83,6 @@ describe('parseExternalizedToolPayload cwd 强制落点', () => {
       '/skills/demo',
     );
     expect(parseError).toBeUndefined();
-    // 错误 cwd 经 enforceLocalSkillCwd 归一化为 grant 派生的 skillDir
     expect(payload?.cwd).toBe('/skills/demo');
   });
 });
@@ -90,29 +91,49 @@ describe('声明自洽（评审 #4 路线 A）：仅初始 cwd 提示，不持�
   it('enforceLocalSkillCwd 对「错误 cwd（≠ skillDir）」归一化为 grant 的 skillDir（Review #2 #7 P1 修复）', () => {
     const original = { command: 'ls', cwd: '/somewhere/else' };
     const out = enforceLocalSkillCwd(original, 'shell_exec', '/skills/demo');
-    // 错误 cwd 不再保留调用方原值：归一化为 grant 派生的 skillDir
     expect(out).not.toBe(original);
     expect(out.cwd).toBe('/skills/demo');
-    // 原对象不被改动（无副作用）
     expect(original.cwd).toBe('/somewhere/else');
   });
 
   it('enforceLocalSkillCwd 对「缺失 cwd」注入 skillDir，且不修改原对象', () => {
     const original: { command: string; cwd?: string } = { command: 'ls' };
     const out = enforceLocalSkillCwd(original, 'shell_exec', '/skills/demo');
-    // 缺失 cwd：注入 skillDir 作为初始提示
     expect(out.cwd).toBe('/skills/demo');
-    // 原对象不被改动（无副作用）
     expect(original.cwd).toBeUndefined();
   });
 
-  it('shell_session_exec（会话续发命令）也被强制为 skillDir（GAP-2 修复）', () => {
+  it('shell_session_exec（会话续发命令）不归一化 cwd（A3 修复，contracts.ts:80-84）', () => {
     const payload = { command: 'ls', sessionId: 's1', cwd: '/somewhere/else' };
-    // 会话执行命令现在属于 CWD_ENFORCED_INVOCATIONS 成员，错误 cwd 被纠正为 skillDir，
-    // 使"cwd 恒为 skillDir 硬边界"对所有命令型调用（含会话续发）成立。
-    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(true);
+    // A3 修复：shell_session_exec 不在 CWD_ENFORCED_INVOCATIONS，其 cwd 由会话注册表保持，
+    // 调用方传入的 cwd 原样保留（不强制为 skillDir），避免违反对外契约。
+    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(false);
     const out = enforceLocalSkillCwd(payload, 'shell_session_exec', '/skills/demo');
-    expect(out).not.toBe(payload);
+    expect(out).toBe(payload);
+    expect(out.cwd).toBe('/somewhere/else');
+  });
+});
+
+describe('模块 E：A3 对立面回归（C1-C3，shell_session_exec 不注入 cwd）', () => {
+  it('C1：isCwdEnforcedInvocation 不含 shell_session_exec', () => {
+    expect(isCwdEnforcedInvocation('shell_session_exec')).toBe(false);
+  });
+
+  it('C2：初始命令型调用 shell_exec / shell_session_begin 仍归一化 cwd', () => {
+    expect(isCwdEnforcedInvocation('shell_exec')).toBe(true);
+    expect(isCwdEnforcedInvocation('shell_session_begin')).toBe(true);
+  });
+
+  it('C3：shell_session_exec 的 cwd 原样保留（不强制为 skillDir，contracts.ts:80-84）', () => {
+    const payload = { command: 'ls', sessionId: 's1', cwd: '/somewhere/else' };
+    const out = enforceLocalSkillCwd(payload, 'shell_session_exec', '/skills/demo');
+    expect(out).toBe(payload);
+    expect(out.cwd).toBe('/somewhere/else');
+  });
+
+  it('C3 补：错误 cwd 仍被 shell_exec 归一化（防回归 R3）', () => {
+    const payload = { command: 'ls', cwd: '/somewhere/else' };
+    const out = enforceLocalSkillCwd(payload, 'shell_exec', '/skills/demo');
     expect(out.cwd).toBe('/skills/demo');
   });
 });

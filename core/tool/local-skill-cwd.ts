@@ -5,15 +5,16 @@
 // skill's skillDir on the Native Host side, instead of falling back to homedir().
 // This is the "initial cwd" layer of the D4 Local Execution Boundary: an Agent call
 // issued via <shell_exec> that omits or misstates cwd gets its initial cwd
-// normalized to skillDir (persistent session calls via shell_session_exec are also
-// re-normalized to skillDir when their cwd is missing or wrong, so the "cwd is skillDir" boundary
-// holds for every command-type call, not just the first).
+// normalized to skillDir (persistent session calls via shell_session_exec reuse the session's
+// existing cwd established by shell_session_begin and kept in the session registry, see
+// core/shell/contracts.ts:80-84, so this function does NOT re-normalize them).
 //
-// Declarative consistency: this function provides *cwd normalization* for every command-type tool call
-// (shell_exec / shell_session_begin / shell_session_exec). When a call omits or misstates cwd, it is
-// normalized to the grant-derived skillDir, so the local Skill's "cwd is skillDir" boundary holds for
-// all command executions (see pr457-workplan.md §2.4, Route A). A session call whose cwd is already
-// skillDir is idempotent; a wrong/missing cwd on any command-type call is still corrected.
+// Declarative consistency (Route A, initial cwd hint): this function provides *cwd normalization*
+// for the initial command-type tool calls (shell_exec / shell_session_begin). When such a call
+// omits or misstates cwd, it is normalized to the grant-derived skillDir, so the local Skill's
+// "initial cwd is skillDir" hint holds for the first command of each invocation.
+// shell_session_exec reuses the session's existing cwd and is intentionally out of scope here
+// (contracts.ts:80-84). A call whose cwd is already skillDir is idempotent.
 //
 // Applies only to command-type tools that accept cwd. Tools that take rootPath /
 // paths as input (local_file_read / local_file_write / local_file_stat /
@@ -21,7 +22,7 @@
 
 import type { ToolPayload } from './types';
 
-const CWD_ENFORCED_INVOCATIONS = new Set(['shell_exec', 'shell_session_begin', 'shell_session_exec']);
+const CWD_ENFORCED_INVOCATIONS = new Set(['shell_exec', 'shell_session_begin']);
 
 export function isCwdEnforcedInvocation(invocationName: string): boolean {
   return CWD_ENFORCED_INVOCATIONS.has(invocationName);
@@ -37,8 +38,8 @@ export function isCwdEnforcedInvocation(invocationName: string): boolean {
  *   outside the Skill directory. This honors the "error cwd normalized to Skill
  *   directory" promise and fixes the P1 where any caller-supplied cwd silently
  *   overrode the grant's skillDir.
- * 说明：对所有命令型调用（含会话续发的 shell_session_exec）归一化 cwd。cwd 已为 skillDir 的调用幂等；
- * 任意命令型调用若 cwd 缺失或错误，均被纠正为 skillDir，从而闭合 GAP-2（"cwd 恒为 skillDir 硬边界未成立"）。
+ * 说明：仅对初始命令型调用（shell_exec / shell_session_begin）归一化 cwd（Route A 初始 cwd 提示，不持久绑定会话）。
+ * cwd 已为 skillDir 的调用幂等；shell_session_exec 复用会话既有 cwd，不在本函数归一化范围（contracts.ts:80-84）。
  */
 export function enforceLocalSkillCwd(
   payload: ToolPayload,

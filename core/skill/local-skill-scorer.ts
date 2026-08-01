@@ -8,12 +8,12 @@
 // Design source: .workbuddy/memory/local-skill-scoring-spec.md (§3 weight table,
 // §3.4 scenarioAdjustment, §3.5 threshold dual-gate).
 //
-// P1-B / P1-C 修改（PR #457 三审）：
+// P1-B / P1-C / A2 / A4 修改（PR #457 三审 + R5 整改）：
 //  - scenarioAdjustment 固定 +300 改为 F0-A 覆盖率驱动动态加成（≥0.6 → round(cov*100)，封顶 +100）。
-//  - selectImplicitSkill 新增泛词闸门（查询仅由 ≤2 个常见二字词构成 → 不激活）。
+//  - selectImplicitSkill 泛词降权（查询仅由 ≤2 个常见二字词构成 → 降权而非归零，精确名称命中 +800 仍优先激活，A4 修复）。
 //  - 2 字查询不再吃描述整串 +400（仅查询整串规范化后长度 ≥ 3 才给）。
 //  - scoreLocalSkill 基础分净化：scoringText 仅含 description + applicable 块，剔除 notApplicable 正向打分。
-//  - extractScenarioBlock 负向后顾 (?<!不) + heading 负向防御 (?!不)，防止"适用场景"作为"不适用场景"子串误匹配，同时保留行内合法负向标注。
+//  - extractScenarioBlock 负向后顾 (?<!不) 保留（防"适用场景"作为"不适用场景"子串误匹配）；heading 不再加 (?!不)（A2 修复：恢复负向块提取与 -1000 抑制）。
 
 import { normalizeSearchText, tokenize } from '../mcp/capability-projection';
 
@@ -28,10 +28,10 @@ export interface LocalSkillIndex {
 const ACTIVATION_THRESHOLD = 100;
 const MIN_LEAD_GAP = 50;
 
-// 常见二字词否定表（泛词闸门，P1-B 修法1）：查询仅由这些弱特异性词构成时，
-// 仅凭"共享一个常见二字词"不得激活本地 Skill（如"财务"不得误激活财务报表类 Skill）。
+// 常见二字词泛词标记（泛词降权，非拦截，A4 修复）：查询仅由这些弱特异性词构成时，
+// 视为弱共享、用于降权（而非归零拦截），精确名称命中（+800）仍优先激活（如"分析"作为 Skill 名称应激活）。
 // 注意：特定场景词（如"周报""报表生成"）不应列入，否则会误杀真实适用场景命中。
-const COMMON_TWO_CHAR_NEGATIVE_WORDS = new Set<string>([
+const GENERIC_TWO_CHAR_TERMS = new Set<string>([
   '财务', '新闻', '报告', '报表', '分析', '数据', '文件', '信息', '内容', '总结',
   '查询', '搜索', '处理', '管理', '生成', '编写', '检查', '说明',
 ]);
@@ -55,11 +55,12 @@ export function tokenizeFlexible(value: string): string[] {
   return [...result];
 }
 
-// 泛词闸门（P1-B 修法1）：查询规范化后仅由 ≤2 个常见二字词构成 → 视为弱共享，直接不激活。
-function isGenericNegativeQuery(queryNorm: string): boolean {
+// 泛词降权标记（A4 修复）：查询规范化后仅由 ≤2 个常见二字词构成 → 视为弱共享，用于降权（不拦截）。
+// 精确名称命中（+800）不受此标记影响，仍优先激活。
+function isGenericQuery(queryNorm: string): boolean {
   const words = queryNorm.split(/\s+/).filter(Boolean);
   if (words.length === 0 || words.length > 2) return false;
-  return words.every((w) => COMMON_TWO_CHAR_NEGATIVE_WORDS.has(w));
+  return words.every((w) => GENERIC_TWO_CHAR_TERMS.has(w));
 }
 
 // 场景块覆盖率（F0-A，P1-B）：共享 2-gram 数 / 查询 2-gram 总数。
@@ -79,7 +80,9 @@ function scenarioCoverage(applicableText: string, queryTerms: string[]): number 
 //
 // P1-C：负向后顾 (?<!不) 替代行首锚，防止"适用场景"作为"不适用场景"子串被误匹配，
 // 同时保留行内合法负向标注（如"禁用场景：写周报"）的匹配；
-// headingPattern 负向防御 (?!不)，防止 "## 不适用场景" 被适用场景 heading 误抓。
+// headingPattern 不再加 (?!不) 防御：headingLabel 已是全称（如"适用场景"/"不适用场景"），## 与 label 之间隔了「不」字，
+// "## 适用场景" 不会误抓 "## 不适用场景"；去除 (?!不) 后 "## 不适用场景" 才能被其自身 heading 正确提取
+// （修复 A2：此前 (?!不) 导致负向块被排除、scenarioAdjustment 的 -1000 整段失效）。
 export function extractScenarioBlock(desc: string, headingLabel: string, inlineLabels: string): string {
   const inlinePattern = new RegExp(
     `(?<!不)(?:${inlineLabels})[：:]\\s*([\\s\\S]*?)(?=\\n#{1,3}\\s|\\n\\s*(?:适用场景|适用|使用场景|不适用场景|不适用|禁用场景)[：:]|$)`,
@@ -87,7 +90,7 @@ export function extractScenarioBlock(desc: string, headingLabel: string, inlineL
   );
   const m = desc.match(inlinePattern);
   if (m) return m[1];
-  const headingPattern = new RegExp(`##\\s*(?!不)${headingLabel}[^\\n]*\\n([\\s\\S]*?)(?=\\n##\\s|$)`, 'i');
+  const headingPattern = new RegExp(`##\\s*${headingLabel}[^\\n]*\\n([\\s\\S]*?)(?=\\n##\\s|$)`, 'i');
   const hm = desc.match(headingPattern);
   if (hm) return hm[1].replace(/^\s*[-*+]\s+/gm, '').trim();
   return '';
@@ -130,7 +133,7 @@ export function scenarioAdjustment(desc: string, queryNorm: string, queryTerms: 
 }
 
 export function scoreLocalSkill(s: LocalSkillIndex, queryNorm: string, queryTerms: string[]): number {
-  // P1-B 基础分净化：scoringText 仅含 description + applicable 块，剔除 notApplicable 块正向打分
+  // 基础分净化：scoringText 仅含 description + applicable 块，剔除 notApplicable 块正向打分
   // （修复 B10 误激活：不适用场景块中的词不再贡献正向基础分）。
   const applicableFromInstructions = extractScenarioBlock(
     s.instructions ?? '',
@@ -140,32 +143,35 @@ export function scoreLocalSkill(s: LocalSkillIndex, queryNorm: string, queryTerm
   const scoringText = [s.description, applicableFromInstructions].filter(Boolean).join('\n');
   const nameNorm = normalizeSearchText(s.name);
   const descNorm = normalizeSearchText(scoringText);
+  // 统一裁决管线（A2/A4 修复）：精确名称整串命中 +800 最先结算、且不受泛词降权影响；
+  // generic 标记仅用于降权，不拦截。
+  const exactNameHit = !!queryNorm && nameNorm.includes(queryNorm);
+  const generic = isGenericQuery(queryNorm);
   let score = 0;
   if (queryNorm) {
-    if (nameNorm.includes(queryNorm)) score += 800;
-    // P1-B 修法3：仅当查询整串（规范化后）长度 ≥ 3 时才给描述整串 +400，
-    // 避免 2 字查询（如"周报"）仅凭一个常见 2-gram 命中描述即获 +400 高分而误激活。
-    if (descNorm.includes(queryNorm) && queryNorm.length >= 3) score += 400;
+    if (exactNameHit) score += 800;
+    // 精确名称命中时仍给描述整串 +400（强信号）；泛词且无精确名称时，2 字查询已因 length>=3 防御，
+    // 3 字泛词亦不给整串 +400，避免弱义二字词借描述整串误激活（R4②）。
+    if (descNorm.includes(queryNorm) && queryNorm.length >= 3 && !(generic && !exactNameHit)) score += 400;
   }
   for (const term of queryTerms) {
     if (nameNorm.includes(term)) score += 100;
-    if (descNorm.includes(term)) score += 40;
+    // 泛词且无精确名称命中时，描述分词分减半（+40 → +20），压低弱义词相关性（R4② 降权）。
+    if (descNorm.includes(term)) score += (generic && !exactNameHit) ? 20 : 40;
   }
-  // Scoring-visible fields (name/desc weights 800/400/100/40) use the narrowed
-  // scoringText (excluding Plan 2 index generic metadata + not-applicable block).
-  // scenarioAdjustment needs the raw applicable/not-applicable labeled text re-extracted
-  // from description + instructions (instructions carry the scenario labels appended at import).
+  // scenarioAdjustment：场景适用动态加成（封顶+100）/ 不适用 -1000，已保留 R4 评分要素。
   const scenarioAdj = scenarioAdjustment(`${s.description}\n${s.instructions ?? ''}`, queryNorm, queryTerms);
-  score += scenarioAdj;
+  // 泛词且无精确名称命中时，场景适用加成封顶 +30（R4② 防弱义二字词借场景覆盖率触发 +100 误激活）；
+  // 负向 -1000 不受影响，仍正常抑制。精确名称命中优先于降权（A4 修复不变量）。
+  score += (generic && !exactNameHit && scenarioAdj > 0) ? Math.min(30, scenarioAdj) : scenarioAdj;
   return score;
 }
 
 export function selectImplicitSkill(query: string, skills: LocalSkillIndex[]): LocalSkillIndex | null {
   if (skills.length === 0) return null;
   const queryNorm = normalizeSearchText(query);
-  // P1-B 修法1：泛词闸门。查询仅由 ≤2 个常见二字词构成（如"财务""新闻 报表"）→ 直接不激活，
-  // 避免"仅共享一个常见二字词"即错误激活本地 Skill。
-  if (isGenericNegativeQuery(queryNorm)) return null;
+  // 泛词闸门（A4 修复）：不再前置 return null 拦截。查询由 ≤2 个常见二字词构成时，由 scoreLocalSkill
+  // 内的 isGenericQuery 降权（而非归零）；精确名称命中（+800）仍优先激活，避免误杀真实适用 Skill。
   // Tokenize the user query sensibly before scoring: tokenizeFlexible (CJK 2-gram +
   // ASCII/digit as-is) avoids a whole Chinese sentence being treated as a single token
   // and then failing to match the scoring-visible fields.

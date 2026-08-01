@@ -175,3 +175,61 @@ describe('P1-C 场景块提取负向防御（防「适用场景」被「不适�
     expect(extractScenarioBlock(desc, '适用场景', '适用场景|适用|使用场景')).toBe('生成月报');
   });
 });
+
+describe('模块 E：A4 精确名称不被泛词杀（E1-E3）', () => {
+  it('E1：Skill 名称精确命中泛词查询 → 激活（如分析作为名称）', () => {
+    const skills = [index('分析', '通用分析助手')];
+    expect(selectImplicitSkill('分析', skills)?.name).toBe('分析');
+  });
+
+  it('E2：名称含泛词（财务）→ 名称精确命中 +800 激活', () => {
+    const skills = [index('财务报表生成', '适用场景：生成财务报表')];
+    expect(selectImplicitSkill('财务', skills)?.name).toBe('财务报表生成');
+  });
+
+  it('E3：名称含泛词（报告）→ 名称精确命中 +800 激活', () => {
+    const skills = [index('数据分析报告', '适用场景：生成分析报告')];
+    expect(selectImplicitSkill('报告', skills)?.name).toBe('数据分析报告');
+  });
+});
+
+describe('模块 E：A2 负向 -1000 恢复且正向不误抓（E4-E6）', () => {
+  it('E4：heading 风格不适用场景能被正确提取负向块', () => {
+    const desc = '## 不适用场景\n- 写周报';
+    expect(extractScenarioBlock(desc, '不适用场景', '不适用场景|不适用|禁用场景')).toBe('写周报');
+  });
+
+  it('E5：heading 不适用场景命中 → 不激活（负向 -1000 恢复）', () => {
+    const skills = [index('writer', '## 不适用场景\n- 写周报')];
+    expect(selectImplicitSkill('周报', skills)).toBeNull();
+  });
+
+  it('E6：heading 适用场景正向块仍正确激活（删 (?!不) 后不误抓）', () => {
+    const skills = [index('report', '## 适用场景\n- 生成周报')];
+    expect(selectImplicitSkill('周报', skills)?.name).toBe('report');
+  });
+});
+
+describe('模块 E：E7 精确名称 vs 强负向收尾钉死', () => {
+  it('E7：名称精确命中但场景明确不适用 → 不激活（+800-1000=-200<阈值）', () => {
+    const skills = [index('分析', '## 不适用场景\n- 分析类任务')];
+    expect(selectImplicitSkill('分析', skills)).toBeNull();
+  });
+
+  it('E7 补：名称精确命中且场景适用 → 激活', () => {
+    const skills = [index('分析', '## 适用场景\n- 数据分析')];
+    expect(selectImplicitSkill('分析', skills)?.name).toBe('分析');
+  });
+});
+
+describe('模块 E：E8 R4 泛词误激活防护不回归', () => {
+  it('E8：泛词查询（非精确名称）仍不误激活财务报表类 Skill', () => {
+    const skills = [index('finance-helper', '适用场景：生成财务报表')];
+    expect(selectImplicitSkill('财务', skills)).toBeNull();
+  });
+
+  it('E8 补：泛词查询 + 名称精确命中（如财务在名称中）→ 仍激活', () => {
+    const skills = [index('财务报表', '适用场景：生成财务报表')];
+    expect(selectImplicitSkill('财务', skills)?.name).toBe('财务报表');
+  });
+});
