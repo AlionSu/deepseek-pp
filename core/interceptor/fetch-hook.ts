@@ -185,7 +185,10 @@ export function hookFetch(): () => void {
       return interceptHistoryResponse(originalFetch.call(this, input, init));
     }
 
-    if ((route !== 'completion' && route !== 'regenerate') || typeof init?.body !== 'string') {
+    if (
+      (route !== 'completion' && route !== 'editMessage' && route !== 'regenerate') ||
+      typeof init?.body !== 'string'
+    ) {
       return originalFetch.call(this, input, init);
     }
 
@@ -266,7 +269,10 @@ export function hookXHR(): () => void {
 
   XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
     const route = xhrRoutes.get(this);
-    if ((route === 'completion' || route === 'regenerate') && typeof body === 'string') {
+    if (
+      (route === 'completion' || route === 'editMessage' || route === 'regenerate') &&
+      typeof body === 'string'
+    ) {
       const xhr = this;
       const sendChatRequest = async () => {
         const originalContext = createRequestContext(body);

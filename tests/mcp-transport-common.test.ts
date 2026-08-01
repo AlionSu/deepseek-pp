@@ -2,18 +2,109 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MCP_PROTOCOL_VERSION,
   createMcpRequest,
+  createMcpSseTransport,
   createMcpTransport,
   createMcpStreamableHttpTransport,
   initializeMcpServer,
   type McpServerConfig,
 } from '../core/mcp';
-import { McpTransportError, readJsonRpcResponse } from '../core/mcp/transports/common';
+import {
+  McpTransportError,
+  drainSseEvents,
+  readJsonRpcResponse,
+} from '../core/mcp/transports/common';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('MCP transport response limits', () => {
+  it('parses SSE events with LF, CRLF, and CR line endings', () => {
+    for (const lineEnding of ['\n', '\r\n', '\r']) {
+      expect(drainSseEvents([
+        'event: endpoint',
+        'data: /messages?session_id=line-endings',
+        '',
+        '',
+      ].join(lineEnding))).toEqual({
+        events: [{
+          event: 'endpoint',
+          data: '/messages?session_id=line-endings',
+        }],
+        remainder: '',
+      });
+    }
+  });
+
+  it('handles CRLF endpoint and response events split across stream chunks', async () => {
+    vi.stubGlobal('chrome', {
+      permissions: {
+        contains: vi.fn(async () => true),
+        request: vi.fn(async () => true),
+      },
+    });
+
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (method === 'GET') {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+            controller.enqueue(encoder.encode('event: endpoint\r'));
+            controller.enqueue(encoder.encode('\ndata: /messages?session_id=crlf\r\n\r\n'));
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }
+
+      const request = JSON.parse(String(init?.body));
+      requests.push({ url: String(input), method, body: request });
+      const response = {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: {} } },
+      };
+      streamController?.enqueue(encoder.encode([
+        'event: message',
+        `data: ${JSON.stringify(response)}`,
+        '',
+        '',
+      ].join('\r\n')));
+      streamController?.close();
+      return new Response(null, { status: 202 });
+    }));
+
+    const server = {
+      ...createServerConfig(),
+      transport: {
+        kind: 'sse' as const,
+        url: 'http://127.0.0.1:48123/sse',
+      },
+    };
+    const request = createMcpRequest('initialize', {
+      protocolVersion: MCP_PROTOCOL_VERSION,
+      capabilities: { tools: {} },
+      clientInfo: { name: 'test', version: '0.0.0' },
+    });
+
+    await expect(createMcpSseTransport(server).request(request)).resolves.toMatchObject({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: { protocolVersion: MCP_PROTOCOL_VERSION },
+    });
+    expect(requests).toEqual([{
+      url: 'http://127.0.0.1:48123/messages?session_id=crlf',
+      method: 'POST',
+      body: request,
+    }]);
+  });
+
   it('fails before parsing oversized JSON-RPC HTTP bodies', async () => {
     const body = JSON.stringify({ jsonrpc: '2.0', id: '1', result: { text: 'too large' } });
     const response = new Response(body, {

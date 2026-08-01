@@ -2,6 +2,7 @@ export const DEEPSEEK_WEB_ORIGIN = 'https://chat.deepseek.com';
 
 export const DEEPSEEK_WEB_ROUTES = {
   completion: '/api/v0/chat/completion',
+  editMessage: '/api/v0/chat/edit_message',
   regenerate: '/api/v0/chat/regenerate',
   history: '/api/v0/chat/history_messages',
   powChallenge: '/api/v0/chat/create_pow_challenge',

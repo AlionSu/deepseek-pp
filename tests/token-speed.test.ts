@@ -80,23 +80,25 @@ describe('createResponseTokenSpeedTracker', () => {
     tracker.finish();
   });
 
-  it('uses server token usage and server timestamps when available', () => {
+  it('keeps output speed based on streamed output when server usage includes context tokens', () => {
     const { tracker, payloads, advanceTo } = setupTracker();
     advanceTo(100);
     tracker.updateServerStats({ modelType: 'vision', insertedAt: 1000 });
-    tracker.append('hello world');
-    tracker.updateServerStats({ accumulatedTokenUsage: 3302 });
+    tracker.append('你好');
+    advanceTo(1100);
+    tracker.append('世界');
+    tracker.updateServerStats({ accumulatedTokenUsage: 49_794 });
     tracker.finish();
     tracker.updateServerStats({ updatedAt: 1003.11 });
 
     const final = payloads[payloads.length - 1];
     expect(final.active).toBe(false);
     expect(final.modelType).toBe('vision');
-    expect(final.accumulatedTokens).toBe(3302);
+    expect(final.accumulatedTokens).toBe(49_794);
     expect(final.tokenSource).toBe('server');
-    expect(final.speedSource).toBe('server');
+    expect(final.speedSource).toBe('estimated');
     expect(final.elapsedMs).toBe(3110);
-    expect(final.tokensPerSecond).toBeCloseTo(3302 / 3.11, 5);
+    expect(final.tokensPerSecond).toBeCloseTo(1.2, 5);
   });
 
   it('keeps estimated TPS until the server time window is complete', () => {
@@ -117,7 +119,7 @@ describe('createResponseTokenSpeedTracker', () => {
     expect(final.tokensPerSecond).toBeCloseTo(1.2, 5);
   });
 
-  it('handles server token usage and completion time from the same stats patch', () => {
+  it('does not turn server usage into output speed without streamed output', () => {
     const { tracker, payloads } = setupTracker();
     tracker.updateServerStats({ insertedAt: 2000 });
     tracker.finish();
@@ -125,8 +127,8 @@ describe('createResponseTokenSpeedTracker', () => {
 
     const final = payloads[payloads.length - 1];
     expect(final.accumulatedTokens).toBe(120);
-    expect(final.speedSource).toBe('server');
-    expect(final.tokensPerSecond).toBe(60);
+    expect(final.speedSource).toBe('estimated');
+    expect(final.tokensPerSecond).toBe(0);
   });
 });
 

@@ -246,15 +246,18 @@ export interface SseEvent {
 }
 
 export function drainSseEvents(buffer: string): { events: SseEvent[]; remainder: string } {
-  const boundary = buffer.lastIndexOf('\n\n');
-  if (boundary === -1) return { events: [], remainder: buffer };
-  const complete = buffer.slice(0, boundary);
-  const remainder = buffer.slice(boundary + 2);
-  const events = complete
-    .split('\n\n')
-    .map(parseSseEvent)
-    .filter((event): event is SseEvent => event !== null);
-  return { events, remainder };
+  const events: SseEvent[] = [];
+  const boundaryPattern = /(?:\r\n|\r(?!\n)|\n)(?:\r\n|\r(?!\n)|\n)/g;
+  let blockStart = 0;
+  let boundary: RegExpExecArray | null;
+
+  while ((boundary = boundaryPattern.exec(buffer)) !== null) {
+    const event = parseSseEvent(buffer.slice(blockStart, boundary.index));
+    if (event) events.push(event);
+    blockStart = boundary.index + boundary[0].length;
+  }
+
+  return { events, remainder: buffer.slice(blockStart) };
 }
 
 export function normalizeJsonRpcResponse<TResult>(
@@ -364,7 +367,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseSseEvent(block: string): SseEvent | null {
-  const lines = block.split('\n');
+  const lines = block.split(/\r\n|\r|\n/);
   let event = 'message';
   const data: string[] = [];
   for (const line of lines) {

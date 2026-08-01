@@ -4,6 +4,7 @@ import {
   hookFetch,
   hookXHR,
   interceptFetchResponse,
+  type RequestBodyModification,
   updateHookState,
 } from '../core/interceptor/fetch-hook';
 import type { ToolDescriptor } from '../core/types';
@@ -16,7 +17,10 @@ describe('fetch hook request lifecycle', () => {
   const onToolCallChunk = vi.fn();
   const onToolCallStarted = vi.fn();
   const onHeadersCaptured = vi.fn();
-  const onRequestBody = vi.fn(async () => null);
+  const onRequestBody = vi.fn<(
+    body: string,
+    requestId: string,
+  ) => Promise<RequestBodyModification | null>>(async () => null);
 
   beforeEach(() => {
     for (const mock of [
@@ -367,6 +371,32 @@ describe('fetch hook request lifecycle', () => {
       expect(fetchImpl).toHaveBeenCalledOnce();
       expect(onRequestBody).not.toHaveBeenCalled();
       expect(onHeadersCaptured).not.toHaveBeenCalled();
+    } finally {
+      window.fetch = nativeFetch;
+    }
+  });
+
+  it('augments edited-message requests before dispatch', async () => {
+    const nativeFetch = window.fetch;
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    window.fetch = fetchImpl;
+    onRequestBody.mockResolvedValueOnce({
+      body: '{"prompt":"augmented edit"}',
+      agentTaskPrompt: 'edited prompt',
+    });
+
+    try {
+      hookFetch();
+      await window.fetch('https://chat.deepseek.com/api/v0/chat/edit_message', {
+        method: 'POST',
+        body: '{"prompt":"edited prompt"}',
+      });
+
+      expect(onRequestBody).toHaveBeenCalledWith('{"prompt":"edited prompt"}', expect.any(String));
+      expect(fetchImpl).toHaveBeenCalledWith(
+        'https://chat.deepseek.com/api/v0/chat/edit_message',
+        expect.objectContaining({ body: '{"prompt":"augmented edit"}' }),
+      );
     } finally {
       window.fetch = nativeFetch;
     }
