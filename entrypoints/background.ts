@@ -542,11 +542,20 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         validateLocalSkillDirectory: async (dir: string): Promise<boolean> => {
           if (!dir) return false;
           const sources = await getAllSkillSources();
-          // Review #2: treat dir as trusted only when it belongs to an imported
-          // local skill's root path (rootPath). LocalSkillSource's directory
-          // field is rootPath (no localDirectory), so compare against that.
-          return sources.some(
+          // Review #2: treat dir as trusted when it matches an imported local
+          // skill source's root path, OR when it matches the actual install
+          // directory (localDirectory) of any imported local skill. The latter
+          // is required because activeLocalSkillDir is set to the skill's
+          // localDirectory (e.g. rootPath/subSkill) rather than the source
+          // rootPath when a multi-skill folder is imported.
+          if (sources.some(
             (source) => source.provider === 'local' && source.rootPath === dir,
+          )) {
+            return true;
+          }
+          const skills = await getAllSkills({ includeDisabled: true });
+          return skills.some(
+            (skill) => skill.remote?.provider === 'local' && skill.remote?.localDirectory === dir,
           );
         },
         closeToolAuthorization,
