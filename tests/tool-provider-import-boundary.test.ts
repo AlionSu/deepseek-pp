@@ -26,6 +26,7 @@ describe('tool provider import boundary', () => {
       './execution-error',
       './externalized-payload',
       './history',
+      './local-skill-cwd',
       './provider-registry',
       './types',
     ]);
@@ -206,5 +207,6 @@ function stronglyConnectedComponents(graph: ReadonlyMap<string, ReadonlySet<stri
 }
 
 function toRelative(path: string): string {
-  return normalize(path).slice(`${normalize(ROOT)}/`.length);
+  const normalizedRoot = normalize(ROOT).replace(/\\/g, '/');
+  return normalize(path).replace(/\\/g, '/').slice(`${normalizedRoot}/`.length);
 }
