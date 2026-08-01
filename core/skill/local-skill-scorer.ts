@@ -8,12 +8,13 @@
 // Design source: .workbuddy/memory/local-skill-scoring-spec.md (§3 weight table,
 // §3.4 scenarioAdjustment, §3.5 threshold dual-gate).
 //
-// P1-B / P1-C / A2 / A4 修改（PR #457 三审 + R5 整改）：
-//  - scenarioAdjustment 固定 +300 改为 F0-A 覆盖率驱动动态加成（≥0.6 → round(cov*100)，封顶 +100）。
-//  - selectImplicitSkill 泛词降权（查询仅由 ≤2 个常见二字词构成 → 降权而非归零，精确名称命中 +800 仍优先激活，A4 修复）。
-//  - 2 字查询不再吃描述整串 +400（仅查询整串规范化后长度 ≥ 3 才给）。
-//  - scoreLocalSkill 基础分净化：scoringText 仅含 description + applicable 块，剔除 notApplicable 正向打分。
-//  - extractScenarioBlock 负向后顾 (?<!不) 保留（防"适用场景"作为"不适用场景"子串误匹配）；heading 不再加 (?!不)（A2 修复：恢复负向块提取与 -1000 抑制）。
+// R5 fix (PR #457 third review): P1-B / P1-C / A2 / A4 changes:
+//  - scenarioAdjustment: fixed +300 replaced by F0-A coverage-driven dynamic bonus (>=0.6 => round(cov*100), capped at +100).
+//  - selectImplicitSkill: weak-query down-weighting (query composed of <=2 common two-char words => down-weight, not zeroed; exact-name hit +800 still wins, A4 fix).
+//  - Two-char queries no longer get the description whole-string +400 (only when the normalized whole query length >= 3).
+//  - scoreLocalSkill baseline purification: scoringText contains only description + applicable block, excluding notApplicable positive scoring.
+//  - extractScenarioBlock keeps a negative lookbehind on the Chinese negation character (prevents an applicable-scenario
+//    heading being substring-matched inside a not-applicable-scenario heading); heading no longer adds a negative-ahead guard (A2 fix: restores negative-block extraction and the -1000 suppression).
 
 import { normalizeSearchText, tokenize } from '../mcp/capability-projection';
 
@@ -28,12 +29,13 @@ export interface LocalSkillIndex {
 const ACTIVATION_THRESHOLD = 100;
 const MIN_LEAD_GAP = 50;
 
-// 常见二字词泛词标记（泛词降权，非拦截，A4 修复）：查询仅由这些弱特异性词构成时，
-// 视为弱共享、用于降权（而非归零拦截），精确名称命中（+800）仍优先激活（如"分析"作为 Skill 名称应激活）。
-// 注意：特定场景词（如"周报""报表生成"）不应列入，否则会误杀真实适用场景命中。
+// Common two-char weak/generic terms (down-weight, not block; A4 fix): when a query is composed solely of
+// these low-specificity words, treat as weakly shared and down-weight (not zero out); an exact-name hit (+800)
+// still wins activation (e.g. a two-char word that is itself a Skill name should still activate).
+// Note: specific scenario words (e.g. "weekly report", "report generation") must NOT be listed here, or they
+// would wrongly suppress genuinely applicable hits.
 const GENERIC_TWO_CHAR_TERMS = new Set<string>([
-  '财务', '新闻', '报告', '报表', '分析', '数据', '文件', '信息', '内容', '总结',
-  '查询', '搜索', '处理', '管理', '生成', '编写', '检查', '说明',
+  '财务', '新闻', '报告', '报表', '分析', '数据', '文件', '信息', '内容', '总结', '查询', '搜索', '处理', '管理', '生成', '编写', '检查', '说明',
 ]);
 
 // CJK-friendly tokenization: ASCII letters/digits/underscore/hyphen are kept as-is;
@@ -55,16 +57,16 @@ export function tokenizeFlexible(value: string): string[] {
   return [...result];
 }
 
-// 泛词降权标记（A4 修复）：查询规范化后仅由 ≤2 个常见二字词构成 → 视为弱共享，用于降权（不拦截）。
-// 精确名称命中（+800）不受此标记影响，仍优先激活。
+// Generic-query marker (A4 fix): when the normalized query is composed of <=2 common two-char words => treat as
+// weakly shared and down-weight (not block). An exact-name hit (+800) is unaffected and still wins activation.
 function isGenericQuery(queryNorm: string): boolean {
   const words = queryNorm.split(/\s+/).filter(Boolean);
   if (words.length === 0 || words.length > 2) return false;
   return words.every((w) => GENERIC_TWO_CHAR_TERMS.has(w));
 }
 
-// 场景块覆盖率（F0-A，P1-B）：共享 2-gram 数 / 查询 2-gram 总数。
-// 用于替代固定 +300，只有当查询至少 60% 的 2-gram 碎片也出现在适用场景文本时才给加成。
+// Scenario-block coverage (F0-A, P1-B): shared 2-gram count / total query 2-gram count.
+// Replaces the fixed +300; only grants a bonus when >=60% of the query's 2-grams also appear in the applicable-scenario text.
 function scenarioCoverage(applicableText: string, queryTerms: string[]): number {
   if (queryTerms.length === 0) return 0;
   const textTerms = new Set(tokenizeFlexible(applicableText));
@@ -78,11 +80,14 @@ function scenarioCoverage(applicableText: string, queryTerms: string[]): number 
 // The original implementation only supported style 1, so local Skills using the
 // standard markdown heading style never received the applicable-scenario bonus.
 //
-// P1-C：负向后顾 (?<!不) 替代行首锚，防止"适用场景"作为"不适用场景"子串被误匹配，
-// 同时保留行内合法负向标注（如"禁用场景：写周报"）的匹配；
-// headingPattern 不再加 (?!不) 防御：headingLabel 已是全称（如"适用场景"/"不适用场景"），## 与 label 之间隔了「不」字，
-// "## 适用场景" 不会误抓 "## 不适用场景"；去除 (?!不) 后 "## 不适用场景" 才能被其自身 heading 正确提取
-// （修复 A2：此前 (?!不) 导致负向块被排除、scenarioAdjustment 的 -1000 整段失效）。
+// P1-C: a negative lookbehind on the Chinese negation character replaces the line-start anchor, preventing an
+// applicable-scenario heading from being substring-matched inside a not-applicable-scenario heading, while still
+// matching inline legal negative labels (e.g. a "disabled scenario: write weekly report" label).
+// The heading pattern no longer adds a negative-ahead guard: the heading label is already the full name
+// (applicable-scenario / not-applicable-scenario); a "## applicable-scenario" heading cannot grab a
+// "## not-applicable-scenario" heading because the negation character sits between "## " and the label.
+// Removing the negative-ahead guard lets the not-applicable heading be correctly extracted by its own heading
+// (fixes A2: previously the guard excluded the negative block, disabling scenarioAdjustment's -1000 entirely).
 export function extractScenarioBlock(desc: string, headingLabel: string, inlineLabels: string): string {
   const inlinePattern = new RegExp(
     `(?<!不)(?:${inlineLabels})[：:]\\s*([\\s\\S]*?)(?=\\n#{1,3}\\s|\\n\\s*(?:适用场景|适用|使用场景|不适用场景|不适用|禁用场景)[：:]|$)`,
@@ -122,9 +127,9 @@ export function scenarioAdjustment(desc: string, queryNorm: string, queryTerms: 
       : queryTerms;
     if (flexHits(notApplicable, queryNorm, distinctTerms, true)) return -1000;
   }
-  // P1-B（F0-A）：覆盖率驱动动态加成，替代固定 +300。
-  // coverage ≥ 0.6 才给加成，round(coverage*100) 封顶 +100；避免最弱语言单元(2-gram)
-  // 触发最强相关性(+300)判据的语义粒度错误（如查询"财务"误激活财务报表类 Skill）。
+  // P1-B (F0-A): coverage-driven dynamic bonus, replacing the fixed +300.
+  // Bonus only when coverage >= 0.6, round(coverage*100) capped at +100; avoids the weakest language unit (2-gram)
+  // triggering the strongest-correlation (+300) criterion's semantic-granularity error (e.g. a generic finance query mis-activating finance-report Skills).
   if (applicable) {
     const coverage = scenarioCoverage(applicable, queryTerms);
     if (coverage >= 0.6) return Math.min(100, Math.round(coverage * 100));
@@ -133,8 +138,8 @@ export function scenarioAdjustment(desc: string, queryNorm: string, queryTerms: 
 }
 
 export function scoreLocalSkill(s: LocalSkillIndex, queryNorm: string, queryTerms: string[]): number {
-  // 基础分净化：scoringText 仅含 description + applicable 块，剔除 notApplicable 块正向打分
-  // （修复 B10 误激活：不适用场景块中的词不再贡献正向基础分）。
+  // Baseline purification: scoringText contains only description + applicable block, excluding notApplicable positive scoring
+  // (fixes B10 mis-activation: words in the not-applicable block no longer contribute positive baseline score).
   const applicableFromInstructions = extractScenarioBlock(
     s.instructions ?? '',
     '适用场景',
@@ -143,26 +148,28 @@ export function scoreLocalSkill(s: LocalSkillIndex, queryNorm: string, queryTerm
   const scoringText = [s.description, applicableFromInstructions].filter(Boolean).join('\n');
   const nameNorm = normalizeSearchText(s.name);
   const descNorm = normalizeSearchText(scoringText);
-  // 统一裁决管线（A2/A4 修复）：精确名称整串命中 +800 最先结算、且不受泛词降权影响；
-  // generic 标记仅用于降权，不拦截。
+  // Unified adjudication pipeline (A2/A4 fix): exact-name whole-string hit +800 settles first and is unaffected by generic down-weighting;
+  // the generic marker only down-weights, never blocks.
   const exactNameHit = !!queryNorm && nameNorm.includes(queryNorm);
   const generic = isGenericQuery(queryNorm);
   let score = 0;
   if (queryNorm) {
     if (exactNameHit) score += 800;
-    // 精确名称命中时仍给描述整串 +400（强信号）；泛词且无精确名称时，2 字查询已因 length>=3 防御，
-    // 3 字泛词亦不给整串 +400，避免弱义二字词借描述整串误激活（R4②）。
+    // Exact-name hit still grants description whole-string +400 (strong signal); with generic query and no exact-name hit,
+    // the 2-char query is already defended by length>=3, and 3-char generic queries also get no +400, preventing weak two-char
+    // words from mis-activating via description whole-string match (R4②).
     if (descNorm.includes(queryNorm) && queryNorm.length >= 3 && !(generic && !exactNameHit)) score += 400;
   }
   for (const term of queryTerms) {
     if (nameNorm.includes(term)) score += 100;
-    // 泛词且无精确名称命中时，描述分词分减半（+40 → +20），压低弱义词相关性（R4② 降权）。
+    // Generic query with no exact-name hit: description token score halved (+40 => +20) to lower weak-word correlation (R4② down-weight).
     if (descNorm.includes(term)) score += (generic && !exactNameHit) ? 20 : 40;
   }
-  // scenarioAdjustment：场景适用动态加成（封顶+100）/ 不适用 -1000，已保留 R4 评分要素。
+  // scenarioAdjustment: applicable-scenario dynamic bonus (capped +100) / not-applicable -1000, preserving R4 scoring factors.
   const scenarioAdj = scenarioAdjustment(`${s.description}\n${s.instructions ?? ''}`, queryNorm, queryTerms);
-  // 泛词且无精确名称命中时，场景适用加成封顶 +30（R4② 防弱义二字词借场景覆盖率触发 +100 误激活）；
-  // 负向 -1000 不受影响，仍正常抑制。精确名称命中优先于降权（A4 修复不变量）。
+  // Generic query with no exact-name hit: applicable-scenario bonus capped at +30 (R4② prevents weak two-char words from
+  // triggering +100 mis-activation via scenario coverage); the -1000 negative is unaffected and still suppresses. Exact-name hit
+  // takes priority over down-weighting (A4 fix invariant).
   score += (generic && !exactNameHit && scenarioAdj > 0) ? Math.min(30, scenarioAdj) : scenarioAdj;
   return score;
 }
@@ -170,8 +177,9 @@ export function scoreLocalSkill(s: LocalSkillIndex, queryNorm: string, queryTerm
 export function selectImplicitSkill(query: string, skills: LocalSkillIndex[]): LocalSkillIndex | null {
   if (skills.length === 0) return null;
   const queryNorm = normalizeSearchText(query);
-  // 泛词闸门（A4 修复）：不再前置 return null 拦截。查询由 ≤2 个常见二字词构成时，由 scoreLocalSkill
-  // 内的 isGenericQuery 降权（而非归零）；精确名称命中（+800）仍优先激活，避免误杀真实适用 Skill。
+  // Generic gate (A4 fix): no longer pre-emptively returns null to block. When a query is composed of <=2 common two-char words,
+  // scoreLocalSkill's isGenericQuery down-weights (rather than zeroes); an exact-name hit (+800) still wins activation, avoiding
+  // killing genuinely applicable Skills.
   // Tokenize the user query sensibly before scoring: tokenizeFlexible (CJK 2-gram +
   // ASCII/digit as-is) avoids a whole Chinese sentence being treated as a single token
   // and then failing to match the scoring-visible fields.

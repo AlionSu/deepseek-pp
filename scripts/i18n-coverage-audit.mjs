@@ -124,6 +124,11 @@ const lineAllowlist = [
     includes: '不适用场景',
     reason: 'scenario-matching keywords/labels for not-applicable scenarios injected into the local-skill index card (source-authored matching data, not UI chrome text)',
   },
+  {
+    path: 'core/skill/local-skill-scorer.ts',
+    includes: "'财务', '新闻', '报告'",
+    reason: 'generic two-character Chinese stop-words used for weak-query down-weighting (source-authored linguistic scoring data, not UI text)',
+  },
 ];
 
 assertDeterministicKeyChecks();

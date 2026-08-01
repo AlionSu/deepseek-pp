@@ -38,8 +38,8 @@ export function isCwdEnforcedInvocation(invocationName: string): boolean {
  *   outside the Skill directory. This honors the "error cwd normalized to Skill
  *   directory" promise and fixes the P1 where any caller-supplied cwd silently
  *   overrode the grant's skillDir.
- * 说明：仅对初始命令型调用（shell_exec / shell_session_begin）归一化 cwd（Route A 初始 cwd 提示，不持久绑定会话）。
- * cwd 已为 skillDir 的调用幂等；shell_session_exec 复用会话既有 cwd，不在本函数归一化范围（contracts.ts:80-84）。
+ * Note: cwd normalization applies only to the initial command-type calls (shell_exec / shell_session_begin) (Route A initial cwd hint, not persistently bound to the session).
+ * A call whose cwd is already skillDir is idempotent; shell_session_exec reuses the session's existing cwd and is intentionally out of scope here (contracts.ts:80-84).
  */
 export function enforceLocalSkillCwd(
   payload: ToolPayload,
