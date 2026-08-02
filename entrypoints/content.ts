@@ -19,6 +19,7 @@ import type {
 import { normalizePetConfig } from '../core/pet/config';
 import { pickPetLine, type PetState } from '../core/pet/lines';
 import { createToolInvocationCatalog } from '../core/tool/invocation';
+import { projectToolDescriptorsForNativeSearch } from '../core/tool/native-search-projection';
 import { createLatestSyncGate, type LatestSyncLease } from '../core/tool/latest-sync';
 import { DEFAULT_PROMPT_INJECTION_SETTINGS, normalizePromptInjectionSettings } from '../core/prompt/settings';
 import { normalizeBackgroundConfig } from '../core/background/config';
@@ -3685,7 +3686,12 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
   try {
     await runInlineAgentLoop({
       ...payload,
-      toolDescriptors: authorization.descriptors,
+      toolDescriptors: [
+        ...projectToolDescriptorsForNativeSearch(
+          authorization.descriptors,
+          payload.promptOptions.searchEnabled,
+        ),
+      ],
     }, { post, executeTool, signal: abort.signal });
   } finally {
     await closeContentToolAuthorization(authorizationRequestKey);
