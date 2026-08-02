@@ -72,6 +72,11 @@ export {
 } from './web-search';
 
 export {
+  isExtensionOwnedWebSearchDescriptor,
+  projectToolDescriptorsForNativeSearch,
+} from './native-search-projection';
+
+export {
   WEB_FETCH_DESCRIPTOR_ID,
   WEB_FETCH_PERMISSION_ERROR_CODE,
   isRetryableWebFetchPermissionPrecondition,

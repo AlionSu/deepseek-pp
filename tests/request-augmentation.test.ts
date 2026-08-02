@@ -324,3 +324,112 @@ function memory(
     lastAccessedAt: 1,
   };
 }
+
+describe('page-native search projection', () => {
+  it('keeps web_search schema and guidance when native search is disabled', () => {
+    const result = augmentRequestBody(JSON.stringify({
+      prompt: 'search latest DeepSeek news',
+      parent_message_id: null,
+      thinking_enabled: false,
+      search_enabled: false,
+    }), {
+      memories: [],
+      skills: [],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: DEFAULT_TOOL_DESCRIPTORS,
+      messageCount: 0,
+      locale: 'en',
+    });
+
+    const prompt = JSON.parse(result?.body ?? '{}').prompt as string;
+    expect(prompt).toContain('### Tool web_search');
+    expect(prompt).toContain('## Web Search Rules');
+    expect(prompt).toContain('### Tool memory_save');
+    expect(JSON.parse(result?.body ?? '{}').search_enabled).toBe(false);
+  });
+
+  it('drops the local web_search schema and guidance when native search is enabled', () => {
+    const result = augmentRequestBody(JSON.stringify({
+      prompt: 'search latest DeepSeek news',
+      parent_message_id: null,
+      thinking_enabled: false,
+      search_enabled: true,
+    }), {
+      memories: [],
+      skills: [],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: DEFAULT_TOOL_DESCRIPTORS,
+      messageCount: 0,
+      locale: 'en',
+    });
+
+    const prompt = JSON.parse(result?.body ?? '{}').prompt as string;
+    expect(prompt).not.toContain('### Tool web_search');
+    expect(prompt).not.toContain('## Web Search Rules');
+    expect(prompt).toContain('### Tool web_fetch');
+    expect(prompt).toContain('### Tool memory_save');
+    expect(JSON.parse(result?.body ?? '{}').search_enabled).toBe(true);
+  });
+
+  it('applies the same projection to Skill-command requests', () => {
+    const result = augmentRequestBody(JSON.stringify({
+      prompt: '/writer Search this topic',
+      parent_message_id: null,
+      thinking_enabled: false,
+      search_enabled: true,
+    }), {
+      memories: [],
+      skills: [{
+        name: 'writer',
+        instructions: 'Write a report using web evidence.',
+        memoryEnabled: false,
+      }],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: DEFAULT_TOOL_DESCRIPTORS,
+      messageCount: 0,
+      locale: 'en',
+    });
+
+    const prompt = JSON.parse(result?.body ?? '{}').prompt as string;
+    expect(prompt).not.toContain('### Tool web_search');
+    expect(prompt).not.toContain('## Web Search Rules');
+    expect(prompt).toContain('### Tool web_fetch');
+    expect(prompt).toContain('### Tool memory_save');
+  });
+
+  it('keeps a hypothetical MCP web_search descriptor under native search', () => {
+    const mcpDescriptor = {
+      ...DEFAULT_TOOL_DESCRIPTORS.find((descriptor) => descriptor.name === 'web_search')!,
+      id: 'mcp:browser-tools:web_search',
+      invocationName: 'browser_tools_web_search',
+      provider: {
+        kind: 'mcp' as const,
+        id: 'browser-tools',
+        displayName: 'Browser Tools',
+        transport: 'streamable_http' as const,
+      },
+    };
+    const result = augmentRequestBody(JSON.stringify({
+      prompt: 'search latest DeepSeek news',
+      parent_message_id: null,
+      thinking_enabled: false,
+      search_enabled: true,
+    }), {
+      memories: [],
+      skills: [],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: [mcpDescriptor],
+      messageCount: 0,
+      locale: 'en',
+    });
+
+    const prompt = JSON.parse(result?.body ?? '{}').prompt as string;
+    expect(prompt).toContain('### Tool web_search');
+    expect(prompt).toContain('Accepted tag names: browser_tools_web_search, web_search');
+    expect(prompt).toContain('## Web Search Rules');
+  });
+});

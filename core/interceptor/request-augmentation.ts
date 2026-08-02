@@ -7,6 +7,7 @@ import {
   type PromptInjectionSettings,
 } from '../prompt/settings';
 import { parseSkillCommand } from '../skill/parser';
+import { projectToolDescriptorsForNativeSearch } from '../tool';
 import type { Memory, ModelType, Skill, SystemPromptPreset, ToolDescriptor } from '../types';
 import { filterMemoriesByProjectScope } from '../memory/scope';
 
@@ -104,6 +105,11 @@ export function augmentDecodedRequestBody(
     body.model_type = state.modelType;
   }
 
+  const modelFacingToolDescriptors = projectToolDescriptorsForNativeSearch(
+    state.toolDescriptors,
+    body.search_enabled === true,
+  );
+
   const invocation = parseSkillCommand(originalPrompt);
   if (invocation) {
     const resolved = resolveSkills(state.skills, invocation.skillName, invocation.args, locale);
@@ -116,7 +122,7 @@ export function augmentDecodedRequestBody(
         visibleUserPrompt: originalPrompt,
         presetContent,
         projectContext: state.projectContext,
-        toolDescriptors: state.toolDescriptors,
+        toolDescriptors: modelFacingToolDescriptors,
         locale,
         memoryEnabled: promptSettings.memoryEnabled,
         systemPromptEnabled: promptSettings.systemPromptEnabled,
@@ -138,7 +144,7 @@ export function augmentDecodedRequestBody(
     thinkingEnabled,
     presetContent,
     projectContext: state.projectContext,
-    toolDescriptors: state.toolDescriptors,
+    toolDescriptors: modelFacingToolDescriptors,
     locale,
     memoryEnabled: promptSettings.memoryEnabled,
     systemPromptEnabled: promptSettings.systemPromptEnabled,

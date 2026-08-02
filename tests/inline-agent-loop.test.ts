@@ -53,6 +53,38 @@ describe('runInlineAgentLoop', () => {
     }));
   });
 
+  it('keeps sending searchEnabled: true on continuation requests', async () => {
+    adapterMocks.submitPromptStreaming.mockImplementationOnce(async (_input, handlers) => {
+      handlers.onTextChunk('Done after tool result.');
+      return {
+        assistantText: '',
+        responseMessageId: 102,
+        requestMessageId: 101,
+        finished: true,
+      };
+    });
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    await runInlineAgentLoop({
+      ...createPayload(),
+      promptOptions: {
+        ...createPayload().promptOptions,
+        searchEnabled: true,
+      },
+    }, {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(1);
+    expect(adapterMocks.submitPromptStreaming.mock.calls[0]?.[0]).toMatchObject({
+      searchEnabled: true,
+    });
+  });
+
   it('does not replay the same step when planning text is followed by a complete answer', async () => {
     const answer = [
       '要求查看贵金属走势，之前的搜索已经提供了一些结果。我需要基于这些结果给出一个全面的回答。',
