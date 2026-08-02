@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1118-release-highlights">1.11.8 Highlights</a>
+  <a href="#1119-release-highlights">1.11.9 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.11.8 Release Highlights](#1118-release-highlights)
+- [1.11.9 Release Highlights](#1119-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -299,7 +299,23 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.11.8 Release Highlights
+## 1.11.9 Release Highlights
+
+1.11.9 focuses on chat and MCP usability, fixing edited-message context injection, output speed statistics, IME Enter handling, and MCP tool selection, while keeping DeepSeek native intelligent search coordinated with the extension's tools.
+
+| Area | Main changes |
+|------|--------------|
+| Edited messages | After editing a DeepSeek message, the extension's injected memories, presets, and tool guidance apply again as with a new message instead of being lost. |
+| Output statistics | Model output speed now counts only visible output and no longer includes hidden reasoning text. |
+| Chat input | Pressing Enter to confirm an IME composition candidate no longer sends the message prematurely. |
+| MCP compatibility | Improves compatibility with MCP services using standard streaming formats; manual tool selection stays clear and switching tools no longer clears discovered service information. |
+| Native search | With DeepSeek native intelligent search enabled, regular conversations and agent continuations keep native search active without triggering a duplicate built-in web search. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.11.8 - 0.2.0)</summary>
+
+### 1.11.8 Release Highlights
 
 1.11.8 improves optional cloud-sync reliability, reducing failures when a sync service is temporarily busy while an individual data file is uploaded or downloaded.
 
@@ -308,9 +324,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | Cloud sync | Sync uploads and downloads process files in order, reducing failures when WebDAV, Google Drive, or OneDrive temporarily limits concurrent requests. |
 | Data integrity | Local memories, Skills, presets, projects, and saved items update only after one complete synced dataset has downloaded and passed validation. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.7 - 0.2.0)</summary>
 
 ### 1.11.7 Release Highlights
 
