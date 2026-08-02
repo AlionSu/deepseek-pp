@@ -13,6 +13,7 @@ import McpPage from '../entrypoints/sidepanel/pages/McpPage';
 let container: HTMLDivElement;
 let root: Root | null;
 let historyResponse: unknown;
+let serversResponse: McpServerConfig[];
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,12 +21,13 @@ beforeEach(() => {
   document.body.append(container);
   root = null;
   historyResponse = [];
+  serversResponse = [multimodalServer];
 
   vi.stubGlobal('chrome', {
     runtime: {
       getManifest: vi.fn(() => ({ version: '0.7.5' })),
       sendMessage: vi.fn(async (message: { type?: string }) => {
-        if (message.type === 'GET_MCP_SERVERS') return [multimodalServer];
+        if (message.type === 'GET_MCP_SERVERS') return serversResponse;
         if (message.type === 'GET_PLATFORM_CAPABILITIES') return platformEnvironment;
         if (message.type === 'GET_MCP_TOOL_CACHE') return multimodalCache;
         if (message.type === 'GET_TOOL_CALL_HISTORY') return historyResponse;
@@ -89,6 +91,56 @@ describe('McpPage server row collapse', () => {
     expect(container.textContent).toContain('history_tool');
   });
 });
+
+describe('McpPage discovered tool switch states', () => {
+  it('labels an auto-mode selected tool as automatic', async () => {
+    await renderMcpPage();
+
+    const row = findToolRow('Multimodal Status');
+    expect(row.textContent).toContain('自动');
+    expect(toolSwitch(row).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('labels a manual-mode selected tool as selected, not auto or enabled', async () => {
+    serversResponse = [{
+      ...multimodalServer,
+      execution: { enabled: true, mode: 'manual' },
+    }];
+    await renderMcpPage();
+
+    const row = findToolRow('Multimodal Status');
+    expect(row.textContent).toContain('已选择');
+    expect(row.textContent).not.toContain('自动');
+    expect(toolSwitch(row).getAttribute('aria-pressed')).toBe('true');
+    expect(container.textContent).toContain('当前注入 0 个工具');
+  });
+
+  it('labels an unselected tool as disabled with the switch off', async () => {
+    serversResponse = [{
+      ...multimodalServer,
+      execution: { enabled: true, mode: 'manual' },
+      allowlist: { mode: 'allow', toolNames: [] },
+    }];
+    await renderMcpPage();
+
+    const row = findToolRow('Multimodal Status');
+    expect(row.textContent).toContain('禁用');
+    expect(toolSwitch(row).getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+function findToolRow(title: string): HTMLElement {
+  const titleElement = findExactText(title);
+  const row = titleElement.closest<HTMLElement>('.ds-card');
+  expect(row).toBeTruthy();
+  return row!;
+}
+
+function toolSwitch(row: HTMLElement): HTMLElement {
+  const toggle = row.querySelector<HTMLElement>('button.ds-switch');
+  expect(toggle).toBeTruthy();
+  return toggle!;
+}
 
 async function renderMcpPage() {
   await act(async () => {

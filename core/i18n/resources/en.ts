@@ -586,6 +586,7 @@ export const en = {
       multimodal: 'Multimodal',
       addServer: 'Add',
       enabled: 'Enabled',
+      selected: 'Selected',
       auto: 'Auto',
       disabled: 'Disabled',
       success: 'Success',

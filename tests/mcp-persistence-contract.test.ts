@@ -189,6 +189,33 @@ describe('MCP persisted-config contract', () => {
     expect(await getMcpToolCache(MCP_SERVER_IDS.shell)).toEqual(MCP_CACHE_ENTRY);
   });
 
+  it('preserves the discovery cache when only the execution policy changes', async () => {
+    storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V2);
+
+    await updateMcpServer(MCP_SERVER_IDS.shell, {
+      execution: { enabled: true, mode: 'manual' },
+    });
+
+    expect(await getMcpToolCache(MCP_SERVER_IDS.shell)).toEqual(MCP_CACHE_ENTRY);
+    expect(await getMcpServerById(MCP_SERVER_IDS.shell)).toMatchObject({
+      execution: { enabled: true, mode: 'manual' },
+    });
+  });
+
+  it('keeps the discovered list after a manual-mode allowlist selection change', async () => {
+    storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V2);
+
+    await updateMcpServer(MCP_SERVER_IDS.shell, {
+      execution: { enabled: true, mode: 'manual' },
+      allowlist: { mode: 'deny', toolNames: ['shell_status'] },
+    });
+
+    expect(await getMcpToolCache(MCP_SERVER_IDS.shell)).toEqual(MCP_CACHE_ENTRY);
+    expect(await getMcpServerById(MCP_SERVER_IDS.shell)).toMatchObject({
+      allowlist: { mode: 'deny', toolNames: ['shell_status'] },
+    });
+  });
+
   it('accepts current v2 cache collisions so the user can clear or refresh them', () => {
     const raw = structuredClone(MCP_STORAGE_V2_COLLIDING_CACHE);
 

@@ -19,7 +19,7 @@ import {
   findMcpPreset,
   getMcpPresetInput,
   isMcpNativeMessagingSupported,
-  isMcpToolEnabled,
+  isMcpToolSelected,
   mcpToolsController,
   nextMcpToolAllowlist,
   type McpConnectionAction,
@@ -275,9 +275,9 @@ export function useMcpPageController(t: Translator, confirm: Confirm) {
   }, [clearBanner, load, setBusyState, showBanner, t]);
 
   const toggleTool = useCallback(async (server: McpServerConfig, tool: ToolDescriptor) => {
-    const enabled = isMcpToolEnabled(server, tool);
+    const selected = isMcpToolSelected(server, tool);
     await patchServer(server, {
-      allowlist: nextMcpToolAllowlist(server.allowlist, tool, !enabled),
+      allowlist: nextMcpToolAllowlist(server.allowlist, tool, !selected),
     });
   }, [patchServer]);
 

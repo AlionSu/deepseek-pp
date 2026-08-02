@@ -26,6 +26,7 @@ import {
   getAllowedMcpTransportKinds,
   isMcpNativeMessagingSupported,
   isMcpToolEnabled,
+  isMcpToolSelected,
   isMultimodalMcpServer,
   isShellMcpServer,
   mcpServerNeedsOriginPermission,
@@ -1023,6 +1024,7 @@ function ToolRow({
   t: Translator;
 }) {
   const enabled = isMcpToolEnabled(server, tool);
+  const selected = isMcpToolSelected(server, tool);
   return (
     <div className="ds-card rounded-lg px-3 py-2">
       <div className="flex items-start justify-between gap-2">
@@ -1040,8 +1042,12 @@ function ToolRow({
             {pinned ? t('sidepanel.mcpPage.detail.unpin') : t('sidepanel.mcpPage.detail.pin')}
           </button>
           <ToggleRow
-            title={enabled ? t('sidepanel.mcpPage.auto') : t('sidepanel.mcpPage.disabled')}
-            enabled={enabled}
+            title={enabled
+              ? t('sidepanel.mcpPage.auto')
+              : selected
+                ? t('sidepanel.mcpPage.selected')
+                : t('sidepanel.mcpPage.disabled')}
+            enabled={selected}
             onToggle={onToggle}
           />
         </div>

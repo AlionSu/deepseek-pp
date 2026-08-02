@@ -288,13 +288,17 @@ export function getAllowedMcpTransportKinds(
   return getSupportedMcpTransportKinds([...candidates], platform);
 }
 
-export function isMcpToolEnabled(server: McpServerConfig, tool: ToolDescriptor): boolean {
-  if (!server.enabled || !server.execution.enabled || server.execution.mode !== 'auto') return false;
+export function isMcpToolSelected(server: McpServerConfig, tool: ToolDescriptor): boolean {
   const selected = server.allowlist.toolNames.includes(tool.name)
     || server.allowlist.toolNames.includes(tool.invocationName);
   if (server.allowlist.mode === 'allow') return selected;
   if (server.allowlist.mode === 'deny') return !selected;
   return true;
+}
+
+export function isMcpToolEnabled(server: McpServerConfig, tool: ToolDescriptor): boolean {
+  if (!server.enabled || !server.execution.enabled || server.execution.mode !== 'auto') return false;
+  return isMcpToolSelected(server, tool);
 }
 
 export function countEnabledMcpTools(

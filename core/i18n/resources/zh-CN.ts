@@ -586,6 +586,7 @@ export const zhCN = {
       multimodal: '多模态',
       addServer: '新增',
       enabled: '启用',
+      selected: '已选择',
       auto: '自动',
       disabled: '禁用',
       success: '成功',
