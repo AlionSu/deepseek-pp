@@ -7,6 +7,7 @@ import {
   getAllowedMcpTransportKinds,
   isMcpNativeMessagingSupported,
   isMcpToolEnabled,
+  isMcpToolSelected,
   nextMcpToolAllowlist,
   normalizeHostPermissionOrigin,
 } from '../entrypoints/sidepanel/controllers/mcp-tools-controller';
@@ -163,6 +164,55 @@ describe('sidepanel MCP and Tools controller', () => {
       .toBe('https://example.test/*');
     expect(() => normalizeHostPermissionOrigin('file:///tmp/data'))
       .toThrow('only supports http/https');
+  });
+
+  it('keeps allowlist selection independent of execution policy for manual-mode toggles', () => {
+    const manualServer: McpServerConfig = {
+      ...server,
+      execution: { enabled: true, mode: 'manual' },
+    };
+    const disabledServer: McpServerConfig = {
+      ...server,
+      enabled: false,
+      execution: { enabled: true, mode: 'manual' },
+    };
+
+    expect(isMcpToolEnabled(manualServer, pythonTool)).toBe(false);
+    expect(isMcpToolSelected(manualServer, pythonTool)).toBe(true);
+    expect(isMcpToolSelected(disabledServer, pythonTool)).toBe(true);
+
+    const off = nextMcpToolAllowlist(
+      manualServer.allowlist,
+      pythonTool,
+      !isMcpToolSelected(manualServer, pythonTool),
+    );
+    expect(off).toEqual({ mode: 'deny', toolNames: ['python_exec'] });
+    expect(isMcpToolSelected({ ...manualServer, allowlist: off }, pythonTool)).toBe(false);
+
+    const backOn = nextMcpToolAllowlist(off, pythonTool, !isMcpToolSelected(
+      { ...manualServer, allowlist: off },
+      pythonTool,
+    ));
+    expect(backOn).toEqual({ mode: 'all', toolNames: [] });
+    expect(isMcpToolSelected({ ...manualServer, allowlist: backOn }, pythonTool)).toBe(true);
+  });
+
+  it('deselects an allow-listed tool in manual mode instead of only ever enabling', () => {
+    const manualServer: McpServerConfig = {
+      ...server,
+      execution: { enabled: true, mode: 'manual' },
+      allowlist: { mode: 'allow', toolNames: ['python_exec'] },
+    };
+
+    expect(isMcpToolEnabled(manualServer, pythonTool)).toBe(false);
+    expect(isMcpToolSelected(manualServer, pythonTool)).toBe(true);
+
+    const next = nextMcpToolAllowlist(
+      manualServer.allowlist,
+      pythonTool,
+      !isMcpToolSelected(manualServer, pythonTool),
+    );
+    expect(next).toEqual({ mode: 'allow', toolNames: [] });
   });
 
   it('keeps native controls disabled until the platform snapshot loads', () => {
