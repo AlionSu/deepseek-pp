@@ -1706,6 +1706,7 @@ input[type='range'] {
 }
 
 .usage-bar-column {
+  position: relative;
   display: grid;
   grid-template-rows: 118px 20px;
   min-width: 0;
@@ -1742,20 +1743,31 @@ input[type='range'] {
 }
 
 .usage-bar-label {
+  /* Absolutely anchored instead of text-align: when a label is wider than its
+     day column, Chrome applies safe overflow alignment and silently falls back
+     to start alignment, which pushed the last day's label past the chart edge
+     and clipped it. left/right anchoring has no such fallback. top matches the
+     label row start of the column grid (118px track + 6px gap). */
+  position: absolute;
+  top: 124px;
+  left: 50%;
+  transform: translateX(-50%);
   min-width: 0;
   color: var(--ds-text-tertiary);
   font-size: 9px;
   line-height: 1.1;
-  text-align: center;
   white-space: nowrap;
 }
 
 .usage-bar-label-first {
-  text-align: left;
+  left: 0;
+  transform: none;
 }
 
 .usage-bar-label-last {
-  text-align: right;
+  right: 0;
+  left: auto;
+  transform: none;
 }
 
 .usage-model-layout {
