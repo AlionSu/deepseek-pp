@@ -19,9 +19,14 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // budget); the PR adds four content.agent i18n keys (zh/en) for the
 // structured step UI (+331 raw / +82 gzip). Measurements are Node-22 zlib
 // values; keep the GZIP_ENCODER_VARIANCE_BYTES allowance below.
+// Refreshed for #475 (PR #491, head bbd2064): trusted-directory settings
+// subpage + chat @ panel add 29 i18n keys (zh/en) plus their strings to the
+// initial shell. CI Node-22 measurement: 369698 raw / 111410 gzip (+4022 /
+// +1007 over the previous baseline); local Node-25 zlib measures 111279,
+// within the encoder variance allowance.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 365_676, gzip: 110_403 },
+  initialShell: { raw: 369_698, gzip: 111_410 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
