@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TOOL_DESCRIPTORS } from '../core/tool';
+import { createBrowserControlToolDescriptors } from '../core/browser-control/tool';
 import {
   augmentRequestBody,
   decodeAugmentableDeepSeekRequestBody,
@@ -360,7 +361,10 @@ describe('page-native search projection', () => {
       skills: [],
       activePreset: null,
       modelType: null,
-      toolDescriptors: DEFAULT_TOOL_DESCRIPTORS,
+      toolDescriptors: [
+        ...DEFAULT_TOOL_DESCRIPTORS,
+        ...createBrowserControlToolDescriptors('en'),
+      ],
       messageCount: 0,
       locale: 'en',
     });
@@ -369,6 +373,7 @@ describe('page-native search projection', () => {
     expect(prompt).not.toContain('### Tool web_search');
     expect(prompt).not.toContain('## Web Search Rules');
     expect(prompt).not.toContain('### Tool web_fetch');
+    expect(prompt).not.toContain('### Tool browser_navigate');
     expect(prompt).toContain('### Tool memory_save');
     expect(JSON.parse(result?.body ?? '{}').search_enabled).toBe(true);
   });
@@ -388,7 +393,10 @@ describe('page-native search projection', () => {
       }],
       activePreset: null,
       modelType: null,
-      toolDescriptors: DEFAULT_TOOL_DESCRIPTORS,
+      toolDescriptors: [
+        ...DEFAULT_TOOL_DESCRIPTORS,
+        ...createBrowserControlToolDescriptors('en'),
+      ],
       messageCount: 0,
       locale: 'en',
     });
@@ -397,6 +405,7 @@ describe('page-native search projection', () => {
     expect(prompt).not.toContain('### Tool web_search');
     expect(prompt).not.toContain('## Web Search Rules');
     expect(prompt).not.toContain('### Tool web_fetch');
+    expect(prompt).not.toContain('### Tool browser_navigate');
     expect(prompt).toContain('### Tool memory_save');
   });
 

@@ -1,4 +1,5 @@
 import type { ToolDescriptor } from './types';
+import { BROWSER_CONTROL_TOOL_PROVIDER_ID } from '../browser-control/types';
 import { WEB_SEARCH_TOOL_PROVIDER } from './web-search';
 
 function isExtensionOwnedWebTool(
@@ -34,14 +35,30 @@ export function isExtensionOwnedWebFetchDescriptor(
 }
 
 /**
+ * Stable identity of the extension-owned local browser-control descriptors
+ * (browser_navigate and friends). Matched by the local provider contract so
+ * an MCP tool that merely shares a browser_* name is not covered.
+ */
+export function isExtensionOwnedBrowserControlDescriptor(
+  descriptor: ToolDescriptor,
+): boolean {
+  return (
+    descriptor.provider?.kind === 'local' &&
+    descriptor.provider?.id === BROWSER_CONTROL_TOOL_PROVIDER_ID
+  );
+}
+
+/**
  * Model-facing projection: when DeepSeek page-native search is enabled for a
- * turn, remove BOTH extension-owned local web tools (web_search and web_fetch)
- * so the schema and mandatory web guidance disappear together and the model
- * relies on the native search path instead of competing extension networking
- * (observed in #480: the model switched to web_fetch once web_search was
- * removed). Browser, MCP, memory, and capability-helper descriptors keep their
- * order. When native search is disabled the input array is returned by the
- * same reference, unchanged.
+ * turn, remove ALL extension-owned networking tools — web_search, web_fetch,
+ * and the browser-control family (browser_navigate and friends) — so the
+ * schema and mandatory web guidance disappear together and the model relies
+ * on the native search/browsing path instead of competing extension
+ * capabilities (observed in #480: the model switched to web_fetch, then to
+ * browser_navigate, once earlier tools were removed). MCP, memory, and
+ * capability-helper descriptors keep their order, including MCP tools that
+ * merely share web_* or browser_* names. When native search is disabled the
+ * input array is returned by the same reference, unchanged.
  */
 export function projectToolDescriptorsForNativeSearch(
   descriptors: readonly ToolDescriptor[],
@@ -51,6 +68,7 @@ export function projectToolDescriptorsForNativeSearch(
   return descriptors.filter(
     (descriptor) =>
       !isExtensionOwnedWebSearchDescriptor(descriptor) &&
-      !isExtensionOwnedWebFetchDescriptor(descriptor),
+      !isExtensionOwnedWebFetchDescriptor(descriptor) &&
+      !isExtensionOwnedBrowserControlDescriptor(descriptor),
   );
 }

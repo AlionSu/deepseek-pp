@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDefaultToolDescriptors,
+  isExtensionOwnedBrowserControlDescriptor,
   isExtensionOwnedWebFetchDescriptor,
   isExtensionOwnedWebSearchDescriptor,
   projectToolDescriptorsForNativeSearch,
 } from '../core/tool';
+import { createBrowserControlToolDescriptors } from '../core/browser-control/tool';
 import type { ToolDescriptor } from '../core/types';
 
 describe('projectToolDescriptorsForNativeSearch', () => {
@@ -20,15 +22,16 @@ describe('projectToolDescriptorsForNativeSearch', () => {
     );
   });
 
-  it('removes both extension-owned local web tools when native search is enabled', () => {
-    const descriptors = createDefaultToolDescriptors('en');
-    expect(descriptors.map((descriptor) => descriptor.name))
-      .toEqual(['memory_save', 'memory_update', 'memory_delete', 'web_search', 'web_fetch']);
+  it('removes all extension-owned networking tools when native search is enabled', () => {
+    const descriptors = [
+      ...createDefaultToolDescriptors('en'),
+      ...createBrowserControlToolDescriptors('en'),
+    ];
 
     const projected = projectToolDescriptorsForNativeSearch(descriptors, true);
 
-    expect(projected.map((descriptor) => descriptor.name))
-      .toEqual(['memory_save', 'memory_update', 'memory_delete']);
+    const names = projected.map((descriptor) => descriptor.name);
+    expect(names).toEqual(['memory_save', 'memory_update', 'memory_delete']);
   });
 
   it('preserves descriptor order for the remaining descriptors', () => {
@@ -51,11 +54,17 @@ describe('projectToolDescriptorsForNativeSearch', () => {
     expect(descriptors).toEqual(snapshot);
   });
 
-  it('does not remove an MCP descriptor that merely shares the web_search name', () => {
+  it('does not remove MCP descriptors that merely share web_/browser_ names', () => {
+    const mcpBrowser = {
+      ...mcpWebSearchDescriptor(),
+      id: 'mcp:browser-tools:browser_navigate',
+      name: 'browser_navigate',
+      invocationName: 'browser_tools_browser_navigate',
+    };
     const descriptors = [
       createDefaultToolDescriptors('en')[0],
       mcpWebSearchDescriptor(),
-      createDefaultToolDescriptors('en').find((descriptor) => descriptor.name === 'web_fetch')!,
+      mcpBrowser,
     ];
 
     const projected = projectToolDescriptorsForNativeSearch(descriptors, true);
@@ -63,7 +72,9 @@ describe('projectToolDescriptorsForNativeSearch', () => {
     expect(projected.map((descriptor) => descriptor.id)).toEqual([
       'local:memory:memory_save',
       'mcp:browser-tools:web_search',
+      'mcp:browser-tools:browser_navigate',
     ]);
+    expect(isExtensionOwnedBrowserControlDescriptor(mcpBrowser as never)).toBe(false);
   });
 
   it('identifies the local extension web_search by provider contract rather than name alone', () => {
@@ -78,6 +89,13 @@ describe('projectToolDescriptorsForNativeSearch', () => {
     expect(isExtensionOwnedWebFetchDescriptor(createDefaultToolDescriptors('en')
       .find((descriptor) => descriptor.name === 'web_search')!)).toBe(false);
     expect(isExtensionOwnedWebFetchDescriptor(mcpWebSearchDescriptor())).toBe(false);
+
+    expect(isExtensionOwnedBrowserControlDescriptor(
+      createBrowserControlToolDescriptors('en')[0],
+    )).toBe(true);
+    expect(isExtensionOwnedBrowserControlDescriptor(
+      createDefaultToolDescriptors('en').find((descriptor) => descriptor.name === 'web_search')!,
+    )).toBe(false);
   });
 });
 

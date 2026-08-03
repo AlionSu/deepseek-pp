@@ -72,6 +72,7 @@ export {
 } from './web-search';
 
 export {
+  isExtensionOwnedBrowserControlDescriptor,
   isExtensionOwnedWebFetchDescriptor,
   isExtensionOwnedWebSearchDescriptor,
   projectToolDescriptorsForNativeSearch,
