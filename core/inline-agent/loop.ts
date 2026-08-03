@@ -37,6 +37,7 @@ type PostFn = (type: string, data: unknown) => void;
 type ExecuteToolFn = (call: ToolCall) => Promise<ToolExecutionRecord>;
 
 const INLINE_AGENT_STREAM_EVENT_MAX_CHARS = 12000;
+const INLINE_AGENT_MAX_STEP_ATTEMPTS = 2;
 const INLINE_AGENT_FALLBACK_PARSE_MAX_CHARS = 120_000;
 const TRUNCATION_SUFFIX = '\n...[truncated]';
 
@@ -98,23 +99,39 @@ export async function runInlineAgentLoop(
         powHeaders,
       };
 
-      const stepTimeout = createStepSignal(signal);
-      const turn: ModelTurn = await submitPromptStreaming(input, {
-        retainAssistantText: false,
-        onTokenSpeed(progress) {
-          postAgentTokenSpeed(post, payload, `step:${step}`, progress);
+      let receivedAnyChunk = false;
+      const turn: ModelTurn = await submitAgentTurn(
+        input,
+        {
+          onTextChunk(text) {
+            receivedAnyChunk = true;
+            streamState.onTextChunk(text);
+          },
+          onTokenSpeed(progress) {
+            postAgentTokenSpeed(post, payload, `step:${step}`, progress);
+          },
         },
-        onTextChunk(text) {
-          streamState.onTextChunk(text);
-        },
-      }, stepTimeout.signal);
-      stepTimeout.clear();
+        signal,
+        () => receivedAnyChunk,
+      );
       const streamSnapshot = streamState.flush();
 
       if (signal.aborted) break;
 
       parentMessageId = turn.responseMessageId;
+      const toolCalls = streamSnapshot.toolCalls;
+      const visibleText = streamSnapshot.visibleText;
+
       if (parentMessageId == null) {
+        if (toolCalls.length > 0) {
+          throw new Error(
+            'DeepSeek returned agent tool calls without a continuable response message; refusing to execute tools outside the conversation chain.',
+          );
+        }
+        if (!visibleText.trim()) {
+          throw new Error('DeepSeek returned an empty agent continuation without a continuable response message.');
+        }
+        resolvedFinalText = visibleText;
         post('AGENT_STEP_COMPLETE', {
           loopId,
           stepIndex: step,
@@ -124,8 +141,6 @@ export async function runInlineAgentLoop(
         totalSteps = step + 1;
         break;
       }
-      const toolCalls = streamSnapshot.toolCalls;
-      const visibleText = streamSnapshot.visibleText;
 
       if (extractTaskCompleteSignal(visibleText)) {
         resolvedFinalText = visibleText;
@@ -186,17 +201,21 @@ export async function runInlineAgentLoop(
           post,
           fallbackText: visibleText,
         });
-        const nudgeTimeout = createStepSignal(signal);
-        const nudgeTurn = await submitPromptStreaming(nudgeInput, {
-          retainAssistantText: false,
-          onTokenSpeed(progress) {
-            postAgentTokenSpeed(post, payload, `step:${step}:nudge:${nudgeCount}`, progress);
+        let nudgeReceivedAnyChunk = false;
+        const nudgeTurn = await submitAgentTurn(
+          nudgeInput,
+          {
+            onTextChunk(text) {
+              nudgeReceivedAnyChunk = true;
+              nudgeStreamState.onTextChunk(text);
+            },
+            onTokenSpeed(progress) {
+              postAgentTokenSpeed(post, payload, `step:${step}:nudge:${nudgeCount}`, progress);
+            },
           },
-          onTextChunk(text) {
-            nudgeStreamState.onTextChunk(text);
-          },
-        }, nudgeTimeout.signal);
-        nudgeTimeout.clear();
+          signal,
+          () => nudgeReceivedAnyChunk,
+        );
         const nudgeStreamSnapshot = nudgeStreamState.flush();
 
         if (signal.aborted) break;
@@ -204,6 +223,12 @@ export async function runInlineAgentLoop(
         parentMessageId = nudgeTurn.responseMessageId;
         const nudgeToolCalls = nudgeStreamSnapshot.toolCalls;
         const nudgeVisibleText = nudgeStreamSnapshot.visibleText;
+
+        if (parentMessageId == null && nudgeToolCalls.length > 0) {
+          throw new Error(
+            'DeepSeek returned nudge tool calls without a continuable response message; refusing to execute tools outside the conversation chain.',
+          );
+        }
 
         if (extractTaskCompleteSignal(nudgeVisibleText)) {
           resolvedFinalText = nudgeVisibleText;
@@ -440,16 +465,72 @@ function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function createStepSignal(parentSignal: AbortSignal): { signal: AbortSignal; clear: () => void } {
+function createStepSignal(parentSignal: AbortSignal): {
+  signal: AbortSignal;
+  clear: () => void;
+  timedOut: () => boolean;
+} {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), INLINE_AGENT_STEP_TIMEOUT_MS);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException('Agent step timed out.', 'TimeoutError'));
+  }, INLINE_AGENT_STEP_TIMEOUT_MS);
   const onParentAbort = () => controller.abort();
-  parentSignal.addEventListener('abort', onParentAbort, { once: true });
+  if (parentSignal.aborted) {
+    onParentAbort();
+  } else {
+    parentSignal.addEventListener('abort', onParentAbort, { once: true });
+  }
   const clear = () => {
     clearTimeout(timeout);
     parentSignal.removeEventListener('abort', onParentAbort);
   };
-  return { signal: controller.signal, clear };
+  return { signal: controller.signal, clear, timedOut: () => timedOut };
+}
+
+/**
+ * Submits one model turn with a bounded single retry. A retry is only allowed
+ * when the request failed before any text chunk was received: once the server
+ * has streamed content the turn is likely committed server-side, and replaying
+ * it with the same parent message could fork the conversation chain. User
+ * abort is never retried and propagates untouched so the caller can finish
+ * silently.
+ */
+async function submitAgentTurn(
+  input: SubmitPromptInput,
+  callbacks: {
+    onTextChunk: (text: string) => void;
+    onTokenSpeed: (progress: ResponseTokenSpeedPayload) => void;
+  },
+  parentSignal: AbortSignal,
+  receivedAnyChunk: () => boolean,
+): Promise<ModelTurn> {
+  for (let attempt = 1; attempt <= INLINE_AGENT_MAX_STEP_ATTEMPTS; attempt++) {
+    const stepTimeout = createStepSignal(parentSignal);
+    try {
+      return await submitPromptStreaming(input, {
+        retainAssistantText: false,
+        onTextChunk: callbacks.onTextChunk,
+        onTokenSpeed: callbacks.onTokenSpeed,
+      }, stepTimeout.signal);
+    } catch (err) {
+      if (parentSignal.aborted) throw err;
+      const timeoutFired = stepTimeout.timedOut();
+      if (timeoutFired && receivedAnyChunk()) {
+        throw new Error('DeepSeek agent step timed out while streaming; the response was interrupted.');
+      }
+      if (attempt >= INLINE_AGENT_MAX_STEP_ATTEMPTS) {
+        if (timeoutFired) throw new Error('DeepSeek agent step timed out after retry.');
+        throw err;
+      }
+      await waitBetweenDeepSeekRequests(parentSignal);
+      if (parentSignal.aborted) throw err;
+    } finally {
+      stepTimeout.clear();
+    }
+  }
+  throw new Error('DeepSeek agent step failed without a completed attempt.');
 }
 
 function buildInlineAgentBudgetNotice(locale: SupportedLocale): string {
