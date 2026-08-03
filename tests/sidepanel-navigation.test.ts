@@ -95,6 +95,7 @@ describe('sidepanel navigation', () => {
       '外观',
       '用量',
       '数据',
+      '项目目录',
       '关于',
     ]);
     expect(navButtonLabels('设置子导航').indexOf('用量')).toBeLessThan(
