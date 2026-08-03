@@ -24,6 +24,7 @@ import {
 } from '../../../core/voice/settings';
 import { DEEPSEEK_IMAGE_UPLOAD_MAX_BYTES } from '../../../core/deepseek/upload-limits';
 import { parseAtTrigger } from '../../../core/trusted-directory/at-panel';
+import { normalizeImageMimeType } from '../../../core/trusted-directory/scan';
 import type { ChatMessage as ChatMessageType, ModelType } from '../../../core/types';
 import AtFilePanel, { type AtAttachmentStatus } from '../components/AtFilePanel';
 import ChatMessage from '../components/ChatMessage';
@@ -423,7 +424,8 @@ export default function ChatPage() {
   };
 
   const uploadImageFile = async (file: File, sourcePath: string | null = null) => {
-    const validationError = validateImageFile(file, t);
+    const mimeType = normalizeImageMimeType(file.name, file.type);
+    const validationError = validateImageFile(file, mimeType, t);
     if (validationError) {
       setError(validationError);
       return;
@@ -435,7 +437,7 @@ export default function ChatPage() {
       id: attachmentId,
       fileId: null,
       name: file.name,
-      mimeType: file.type,
+      mimeType,
       sizeBytes: file.size,
       previewUrl,
       status: 'uploading',
@@ -450,7 +452,7 @@ export default function ChatPage() {
       const uploaded = await chatController.uploadImage({
         dataUrl,
         name: file.name,
-        mimeType: file.type,
+        mimeType,
         sizeBytes: file.size,
       });
       const fileId = uploaded.id;
@@ -905,9 +907,10 @@ function getImageAttachmentStatusLabel(
 
 function validateImageFile(
   file: File,
+  mimeType: string,
   t: ReturnType<typeof useI18n>['t'],
 ): string | null {
-  if (!file.type.startsWith('image/')) {
+  if (!mimeType.startsWith('image/')) {
     return t('sidepanel.chatPage.imageOnly');
   }
   if (file.size <= 0) {

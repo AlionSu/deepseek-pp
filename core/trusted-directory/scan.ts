@@ -68,6 +68,18 @@ const IGNORED_FILE_SUFFIXES = ['.key', '.p12', '.pem', '.pfx', '.ppk'] as const;
 /** Binary/deprecated image extensions are indexed only when text-like parsing is irrelevant; images stay actionable. */
 const IMAGE_EXTENSIONS = new Set(['avif', 'bmp', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp']);
 
+/** Canonical image MIME types used when the picker reports an empty/unknown type. */
+export const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  gif: 'image/gif',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  svg: 'image/svg+xml',
+  webp: 'image/webp',
+};
+
 const TEXT_MIME_PREFIXES = ['text/'] as const;
 const TEXT_MIME_TYPES = new Set([
   'application/javascript',
@@ -103,8 +115,14 @@ function getRelativePath(file: TrustedFileLike): string {
 
 function isIgnoredPath(relativePath: string, name: string): boolean {
   const segments = relativePath.split('/');
-  if (segments.length > 1 && segments.some((segment) => IGNORED_DIR_SEGMENTS.has(segment))) {
-    return true;
+  if (segments.length > 1) {
+    // The first segment is the picker root, which the user explicitly
+    // authorized even when it looks like a build/cache name (e.g. a project
+    // folder literally named `build`). Only components below the root count.
+    const belowRoot = segments.slice(1);
+    if (belowRoot.some((segment) => IGNORED_DIR_SEGMENTS.has(segment))) {
+      return true;
+    }
   }
   if (IGNORED_EXACT_FILE_NAMES.has(name)) return true;
   if (IGNORED_FILE_PREFIXES.some((prefix) => name.startsWith(prefix))) return true;
@@ -114,6 +132,16 @@ function isIgnoredPath(relativePath: string, name: string): boolean {
 function getExtension(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+}
+
+/**
+ * Effective MIME type for upload validation/payloads. Picker files whose
+ * `.type` is empty or `application/octet-stream` still classify as images by
+ * extension; normalize them so the @ panel rows are actually attachable.
+ */
+export function normalizeImageMimeType(name: string, mime: string): string {
+  if (mime.toLowerCase().startsWith('image/')) return mime;
+  return IMAGE_MIME_BY_EXTENSION[getExtension(name)] ?? mime;
 }
 
 export function classifyTrustedFile(file: TrustedFileLike): TrustedFileKind {

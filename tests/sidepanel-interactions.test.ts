@@ -827,6 +827,46 @@ describe('trusted-directory @ file references', () => {
     });
   });
 
+  it('uploads an extension-classified image whose picker MIME type is empty', async () => {
+    const sendMessage = stubWebChat();
+    stubObjectUrl();
+    stubFileReader('data:image/png;base64,YWJj');
+    const session = buildTrustedDirectorySession([
+      withRelativePath(new File(['abc'], 'shot.png'), 'proj/shot.png'),
+    ]);
+    expect(session).not.toBeNull();
+    setTrustedDirectorySession(session);
+
+    await renderElement(React.createElement(ChatPage));
+    await flushPromises();
+
+    const textarea = inputByPlaceholder('给 DeepSeek++ 发送消息') as HTMLTextAreaElement;
+    await act(async () => {
+      setTextControlValue(textarea, '看下 @');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const imageRow = Array.from(container.querySelectorAll('.ds-chat-at-row'))
+      .find((row) => row.textContent?.includes('shot.png')) as HTMLButtonElement | undefined;
+    expect(imageRow?.disabled).toBe(false);
+
+    await act(async () => {
+      imageRow?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushPromises();
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'UPLOAD_DEEPSEEK_IMAGE',
+      payload: {
+        dataUrl: 'data:image/png;base64,YWJj',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        sizeBytes: 3,
+      },
+    });
+    expect(container.textContent).toContain('已添加');
+  });
+
   it('filters rows by the @ query and disables non-image rows', async () => {
     stubWebChat();
     installSession();

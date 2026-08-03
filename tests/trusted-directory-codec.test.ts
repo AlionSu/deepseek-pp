@@ -69,6 +69,21 @@ describe('trusted-directory persistence', () => {
     storage[TRUSTED_DIRECTORY_STORAGE_KEY] = { schemaVersion: TRUSTED_DIRECTORY_SCHEMA_VERSION, rootName: 42 };
     await expect(getTrustedDirectoryMeta()).rejects.toThrow(/rootName/);
   });
+
+  it('refuses to overwrite a corrupt slot when saving new metadata', async () => {
+    storage[TRUSTED_DIRECTORY_STORAGE_KEY] = { schemaVersion: TRUSTED_DIRECTORY_SCHEMA_VERSION, rootName: 42 };
+    await expect(saveTrustedDirectoryMeta(META)).rejects.toThrow(/rootName/);
+    expect(storage[TRUSTED_DIRECTORY_STORAGE_KEY]).toEqual({
+      schemaVersion: TRUSTED_DIRECTORY_SCHEMA_VERSION,
+      rootName: 42,
+    });
+  });
+
+  it('refuses to overwrite an unsupported future slot when saving new metadata', async () => {
+    storage[TRUSTED_DIRECTORY_STORAGE_KEY] = { ...META, schemaVersion: 99 };
+    await expect(saveTrustedDirectoryMeta(META)).rejects.toThrow(/schemaVersion/);
+    expect((storage[TRUSTED_DIRECTORY_STORAGE_KEY] as { schemaVersion?: unknown }).schemaVersion).toBe(99);
+  });
 });
 
 describe('decodeTrustedDirectoryMeta', () => {

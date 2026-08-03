@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  IMAGE_MIME_BY_EXTENSION,
   MAX_SINGLE_FILE_SIZE_BYTES,
   MAX_TOTAL_INDEX_BYTES,
   MAX_TRUSTED_FILES,
   classifyTrustedFile,
   countTrustedFilesByKind,
+  normalizeImageMimeType,
   scanTrustedFiles,
   type TrustedFileLike,
 } from '../core/trusted-directory/scan';
@@ -54,6 +56,32 @@ describe('scanTrustedFiles', () => {
       'root/zeta.txt',
     ]);
     expect(result.files[0]).toMatchObject({ name: 'alpha.png', kind: 'image', sizeBytes: 12 });
+  });
+
+  it('does not ignore the picker root even when it matches an ignored segment name', () => {
+    const result = scanTrustedFiles([
+      file({ name: 'src.ts', webkitRelativePath: 'build/src.ts' }),
+      file({ name: 'out.ts', webkitRelativePath: 'out/out.ts' }),
+      file({ name: 'env.ts', webkitRelativePath: 'env/env.ts' }),
+      // A nested ignored directory below the root is still skipped.
+      file({ name: 'x.ts', webkitRelativePath: 'build/dist/x.ts' }),
+      file({ name: 'y.ts', webkitRelativePath: 'out/node_modules/y.ts' }),
+    ]);
+    expect(result.files.map((item) => item.relativePath)).toEqual([
+      'build/src.ts',
+      'env/env.ts',
+      'out/out.ts',
+    ]);
+    expect(result.skippedCount).toBe(2);
+  });
+
+  it('normalizes image MIME types from the extension when the picker type is empty', () => {
+    expect(normalizeImageMimeType('shot.png', '')).toBe('image/png');
+    expect(normalizeImageMimeType('shot.JPG', 'application/octet-stream')).toBe('image/jpeg');
+    expect(normalizeImageMimeType('shot.svg', 'image/svg+xml')).toBe('image/svg+xml');
+    expect(normalizeImageMimeType('readme.md', 'text/markdown')).toBe('text/markdown');
+    expect(normalizeImageMimeType('blob.bin', '')).toBe('');
+    expect(IMAGE_MIME_BY_EXTENSION.webp).toBe('image/webp');
   });
 
   it('ignores VCS, build, cache, IDE, virtualenv and secret files', () => {

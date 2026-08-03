@@ -22,7 +22,9 @@ export async function getTrustedDirectoryMeta(): Promise<TrustedDirectoryMeta | 
 }
 
 export async function saveTrustedDirectoryMeta(meta: TrustedDirectoryMeta): Promise<void> {
-  await trustedDirectoryRepository.writeAfterReadAlreadyLocked(meta);
+  // replaceAlreadyLocked re-reads and validates the current slot first, so a
+  // corrupt or unsupported-future value is rejected instead of overwritten.
+  await trustedDirectoryRepository.replaceAlreadyLocked(meta);
 }
 
 export async function clearTrustedDirectoryMeta(): Promise<void> {
