@@ -14,9 +14,14 @@ if (requestedBrowsers.some((browser) => !browser)) {
 }
 
 // R6.4 pre-change Chrome baseline, captured from commit 87746a9 with WXT 0.20.26.
+// Refreshed for the agent-harness PR (#490, head 0c0e7c8): main @ 60678ef
+// measured 365345 raw / 110321 gzip under Node 22 (3 bytes below the old
+// budget); the PR adds four content.agent i18n keys (zh/en) for the
+// structured step UI (+331 raw / +82 gzip). Measurements are Node-22 zlib
+// values; keep the GZIP_ENCODER_VARIANCE_BYTES allowance below.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 366_157, gzip: 110_068 },
+  initialShell: { raw: 365_676, gzip: 110_403 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
