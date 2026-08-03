@@ -141,6 +141,18 @@ describe('usage daily trend X axis', () => {
     }
   });
 
+  it('uses compact day-only labels in 30-day mode so text fits the narrow columns', async () => {
+    await renderUsagePage();
+
+    const visible = labels().filter((label) => label.textContent!.trim() !== '');
+    expect(visible).toHaveLength(6);
+    for (const label of visible) {
+      // Day-only ("3", "27") is ~6-11px wide; "M/D" ("7/15") is ~14-19px and
+      // spills over the neighboring bars in the 30-day chart.
+      expect(label.textContent!.trim()).not.toContain('/');
+    }
+  });
+
   it('labels every day in 7-day mode with anchored edges', async () => {
     usageResponse = makeUsageSummary(7);
     await renderUsagePage();
@@ -158,5 +170,7 @@ describe('usage daily trend X axis', () => {
     expect(visible).toHaveLength(7);
     expect(visible[0].className).toContain('usage-bar-label-first');
     expect(visible[visible.length - 1].className).toContain('usage-bar-label-last');
+    // 7-day columns are wide enough for full M/D labels.
+    expect(visible[0].textContent!.trim()).toContain('/');
   });
 });

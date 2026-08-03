@@ -276,7 +276,7 @@ function UsageDailyTrend({ summary, locale }: { summary: UsageSummary; locale: s
                 </div>
               </div>
               <span className={labelClass}>
-                {showLabel ? formatShortDate(day.timestamp, locale) : ''}
+                {showLabel ? formatShortDate(day.timestamp, locale, summary.rangeDays === 30) : ''}
               </span>
             </div>
           );
@@ -367,9 +367,9 @@ function formatDate(timestamp: number, locale: string): string {
   }).format(new Date(timestamp));
 }
 
-function formatShortDate(timestamp: number, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    month: 'numeric',
-    day: 'numeric',
-  }).format(new Date(timestamp));
+function formatShortDate(timestamp: number, locale: string, dayOnly = false): string {
+  return new Intl.DateTimeFormat(locale, dayOnly
+    ? { day: 'numeric' }
+    : { month: 'numeric', day: 'numeric' },
+  ).format(new Date(timestamp));
 }
