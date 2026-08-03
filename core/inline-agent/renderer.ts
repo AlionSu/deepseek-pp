@@ -1,5 +1,6 @@
 import { renderInlineMarkdown } from './markdown';
 import { injectInjectedThemeStyles } from '../ui/injected-theme';
+import type { ToolExecutionRecord } from '../types';
 
 const AGENT_STEP_STYLE_ID = 'dpp-inline-agent-css';
 
@@ -7,6 +8,10 @@ export interface InlineAgentRendererLabels {
   step: (stepNumber: number) => string;
   streaming: string;
   stop: string;
+  process: string;
+  tools: string;
+  results: string;
+  running: (stepNumber: number, toolCount: number) => string;
   footerComplete: (totalSteps: number, totalTools: number) => string;
   footerError: (totalSteps: number, totalTools: number) => string;
 }
@@ -156,11 +161,15 @@ export function injectInlineAgentStyles(): void {
       font-weight: 600;
       color: var(--dpp-ui-text-muted);
     }
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-body {
+    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-body,
+    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-process {
       max-height: 0;
       padding: 0 10px;
       opacity: 0;
       overflow: hidden;
+    }
+    .dpp-agent-step-process {
+      transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
     }
     .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-tools {
       max-height: 0;
@@ -229,6 +238,75 @@ export function injectInlineAgentStyles(): void {
       text-align: left;
       vertical-align: top;
     }
+    .dpp-agent-step-section-label {
+      margin: 6px 0 4px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--dpp-ui-text-muted);
+      text-transform: uppercase;
+    }
+    .dpp-agent-step-section-label[hidden] {
+      display: none;
+    }
+    .dpp-agent-step-tool-result {
+      margin: 4px 0;
+      border: 1px solid var(--dpp-ui-border);
+      border-radius: 5px;
+      background: var(--dpp-ui-surface-muted);
+      font-size: 12px;
+    }
+    .dpp-agent-step-tool-result summary {
+      padding: 4px 8px;
+      cursor: pointer;
+      color: var(--dpp-ui-text);
+      word-break: break-word;
+    }
+    .dpp-agent-step-tool-result summary.ok::before {
+      content: '\\2713 ';
+      color: var(--dpp-ui-success);
+    }
+    .dpp-agent-step-tool-result summary.err::before {
+      content: '\\2717 ';
+      color: var(--dpp-ui-error);
+    }
+    .dpp-agent-step-tool-result-body {
+      padding: 0 8px 6px;
+      color: var(--dpp-ui-text-muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .dpp-agent-step-tool-result-body .dpp-tool-result-line {
+      margin: 2px 0;
+    }
+    .dpp-agent-running-indicator {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 2147483647;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border: 1px solid var(--dpp-ui-accent);
+      border-radius: 8px;
+      background: var(--dpp-ui-surface);
+      color: var(--dpp-ui-text);
+      font-size: 12px;
+      line-height: 1.4;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
+    }
+    .dpp-agent-running-indicator-text::before {
+      content: '\\25CF ';
+      color: var(--dpp-ui-accent);
+      animation: dpp-agent-running-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes dpp-agent-running-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
     [data-dpp-body-text] th { font-weight: 600; }
   `;
   document.head.appendChild(style);
@@ -284,15 +362,41 @@ export function createAgentStepElement(
     header.appendChild(stopBtn);
   }
 
+  const process = document.createElement('div');
+  process.className = 'dpp-agent-step-process';
+
+  const processLabel = document.createElement('div');
+  processLabel.className = 'dpp-agent-step-section-label process';
+  processLabel.textContent = labels?.process ?? 'Process';
+  processLabel.hidden = true;
+
   const body = document.createElement('div');
   body.className = 'dpp-agent-step-body';
 
   const tools = document.createElement('div');
   tools.className = 'dpp-agent-step-tools';
 
+  const toolsLabel = document.createElement('div');
+  toolsLabel.className = 'dpp-agent-step-section-label tools';
+  toolsLabel.textContent = labels?.tools ?? 'Tools';
+  toolsLabel.hidden = true;
+
+  const results = document.createElement('div');
+  results.className = 'dpp-agent-step-results';
+
+  const resultsLabel = document.createElement('div');
+  resultsLabel.className = 'dpp-agent-step-section-label results';
+  resultsLabel.textContent = labels?.results ?? 'Results';
+  resultsLabel.hidden = true;
+
   step.appendChild(header);
-  step.appendChild(body);
+  process.appendChild(processLabel);
+  process.appendChild(body);
+  step.appendChild(process);
+  tools.appendChild(toolsLabel);
   step.appendChild(tools);
+  results.appendChild(resultsLabel);
+  step.appendChild(results);
 
   return step;
 }
@@ -303,6 +407,8 @@ export function updateStepStreamText(step: HTMLElement, visibleText: string): vo
 
   body.setAttribute('data-dpp-raw-text', visibleText);
   body.innerHTML = renderInlineMarkdown(visibleText);
+  const processLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.process');
+  if (processLabel) processLabel.hidden = !visibleText.trim();
   scrollStepBodyToBottom(body);
 }
 
@@ -334,9 +440,12 @@ export function addToolResultToStep(
   const tools = step.querySelector('.dpp-agent-step-tools');
   if (!tools) return;
 
+  const toolsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.tools');
+  if (toolsLabel) toolsLabel.hidden = false;
+
   const item = document.createElement('div');
   item.className = `dpp-agent-step-tool-item ${ok ? 'ok' : 'err'}`;
-  item.textContent = `${toolName}: ${summary.slice(0, 100)}`;
+  item.textContent = ok ? toolName : `${toolName}: ${summary.slice(0, 100)}`;
   tools.appendChild(item);
 }
 
@@ -359,4 +468,91 @@ export function createAgentFooter(
       `Agent complete (${totalSteps} steps, ${totalTools} tool calls)`;
   }
   return footer;
+}
+
+/**
+ * Renders one collapsible block per executed tool with its result payload.
+ * Display-only: values are clamped here and never written back to trace or
+ * history records.
+ */
+export function addToolResultDetailsToStep(
+  step: HTMLElement,
+  executions: readonly ToolExecutionRecord[],
+): void {
+  const results = step.querySelector<HTMLElement>('.dpp-agent-step-results');
+  if (!results || executions.length === 0) return;
+
+  const resultsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.results');
+  if (resultsLabel) resultsLabel.hidden = false;
+
+  for (const exec of executions) {
+    const details = document.createElement('details');
+    details.className = 'dpp-agent-step-tool-result';
+
+    const summary = document.createElement('summary');
+    summary.className = exec.result.ok ? 'ok' : 'err';
+    const provider = exec.provider?.displayName;
+    summary.textContent = exec.result.ok
+      ? (provider ? `${exec.name} · ${provider}` : exec.name)
+      : `${exec.name} · ${exec.result.error?.code ?? 'error'}`;
+
+    const body = document.createElement('div');
+    body.className = 'dpp-agent-step-tool-result-body';
+    appendResultLine(body, 'summary', exec.result.summary);
+    if (exec.result.detail) appendResultLine(body, 'detail', exec.result.detail);
+    if (exec.result.output !== undefined) {
+      appendResultLine(body, 'output', JSON.stringify(exec.result.output));
+    }
+    if (exec.result.error) {
+      appendResultLine(body, 'error', JSON.stringify(exec.result.error));
+    }
+
+    details.appendChild(summary);
+    details.appendChild(body);
+    results.appendChild(details);
+  }
+}
+
+function appendResultLine(body: HTMLElement, key: string, value: string | undefined): void {
+  if (!value) return;
+  const line = document.createElement('div');
+  line.className = 'dpp-tool-result-line';
+  line.textContent = `${key}: ${clampDisplayText(value, key === 'output' ? 4000 : 2000)}`;
+  body.appendChild(line);
+}
+
+function clampDisplayText(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}\n...[truncated]` : value;
+}
+
+export function createAgentRunningIndicator(labels?: Partial<InlineAgentRendererLabels>): HTMLElement {
+  const element = document.createElement('div');
+  element.className = 'dpp-agent-running-indicator';
+  element.setAttribute('data-dpp-agent-running', 'false');
+
+  const text = document.createElement('span');
+  text.className = 'dpp-agent-running-indicator-text';
+
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'dpp-agent-stop-btn';
+  stopBtn.textContent = labels?.stop ?? 'Stop';
+
+  element.appendChild(text);
+  element.appendChild(stopBtn);
+  return element;
+}
+
+export function updateAgentRunningIndicator(
+  element: HTMLElement,
+  state: { running: boolean; stepNumber: number; toolCount: number },
+  labels?: Partial<InlineAgentRendererLabels>,
+): void {
+  element.setAttribute('data-dpp-agent-running', state.running ? 'true' : 'false');
+  element.style.display = state.running ? '' : 'none';
+  const text = element.querySelector<HTMLElement>('.dpp-agent-running-indicator-text');
+  if (!text) return;
+  text.textContent = state.running
+    ? labels?.running?.(state.stepNumber, state.toolCount)
+      ?? `Agent running (step ${state.stepNumber + 1}, ${state.toolCount} tool calls)`
+    : '';
 }
