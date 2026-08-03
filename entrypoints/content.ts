@@ -71,7 +71,10 @@ import {
   updateStepStreamText,
   updateStepStatus,
   addToolResultToStep,
+  addToolResultDetailsToStep,
   createAgentFooter,
+  createAgentRunningIndicator,
+  updateAgentRunningIndicator,
 } from '../core/inline-agent/renderer';
 import { renderInlineMarkdown } from '../core/inline-agent/markdown';
 import {
@@ -386,6 +389,8 @@ let currentToolDescriptors: ToolDescriptor[] = [];
 const toolDescriptorSyncGate = createLatestSyncGate();
 let currentRequestMessageCount = 0;
 let activeAgentAbort: AbortController | null = null;
+let agentRunningIndicator: HTMLElement | null = null;
+let agentRunningToolCount = 0;
 const pendingInlineAgentLoopTasks = new Set<Promise<void>>();
 let toolOpenTagRe = buildToolOpenTagRegex(currentToolDescriptors);
 let toolMarkerRe = buildToolMarkerRegex(currentToolDescriptors);
@@ -440,11 +445,46 @@ function getAgentRendererLabels() {
     step: (stepNumber: number) => contentT('content.agent.step', { index: stepNumber }),
     streaming: contentT('content.agent.streaming'),
     stop: contentT('content.agent.stop'),
+    process: contentT('content.agent.process'),
+    tools: contentT('content.agent.tools'),
+    results: contentT('content.agent.results'),
+    running: (stepNumber: number, toolCount: number) =>
+      contentT('content.agent.running', { step: stepNumber + 1, tools: toolCount }),
     footerComplete: (totalSteps: number, totalTools: number) =>
       contentT('content.agent.footerComplete', { steps: totalSteps, tools: totalTools }),
     footerError: (totalSteps: number, totalTools: number) =>
       contentT('content.agent.footerError', { steps: totalSteps, tools: totalTools }),
   };
+}
+
+function ensureAgentRunningIndicator(): HTMLElement {
+  if (agentRunningIndicator?.isConnected) return agentRunningIndicator;
+  agentRunningIndicator = createAgentRunningIndicator(getAgentRendererLabels());
+  agentRunningIndicator.querySelector('.dpp-agent-stop-btn')?.addEventListener('click', () => stopInlineAgent());
+  document.body.appendChild(agentRunningIndicator);
+  return agentRunningIndicator;
+}
+
+function showAgentRunningIndicator(stepNumber: number): void {
+  updateAgentRunningIndicator(
+    ensureAgentRunningIndicator(),
+    { running: true, stepNumber, toolCount: agentRunningToolCount },
+    getAgentRendererLabels(),
+  );
+}
+
+function hideAgentRunningIndicator(): void {
+  if (!agentRunningIndicator) return;
+  updateAgentRunningIndicator(
+    agentRunningIndicator,
+    { running: false, stepNumber: 0, toolCount: 0 },
+    getAgentRendererLabels(),
+  );
+}
+
+function removeAgentRunningIndicator(): void {
+  agentRunningIndicator?.remove();
+  agentRunningIndicator = null;
 }
 
 function getHistoryOrganizerLabels() {
@@ -774,6 +814,7 @@ async function stopInlineAgentCapability(): Promise<void> {
   pendingRestoredInlineAgentTraceIds.clear();
   restoredInlineAgentRenderAttempts = 0;
   document.querySelectorAll('.dpp-agent-container').forEach((node) => node.remove());
+  removeAgentRunningIndicator();
   removeInlineAgentStyles();
   if (contentToastTimer) {
     clearTimeout(contentToastTimer);
@@ -3579,6 +3620,7 @@ function isInlineAgentRunning(): boolean {
  */
 function teardownInlineAgentPanel(): void {
   flushPendingInlineAgentStreamRender();
+  hideAgentRunningIndicator();
   if (inlineAgentContainer) {
     inlineAgentContainer.remove();
   }
@@ -3591,6 +3633,7 @@ function teardownInlineAgentPanel(): void {
 }
 
 function stopInlineAgent(): void {
+  hideAgentRunningIndicator();
   const container = inlineAgentContainer;
   updateActiveInlineAgentTrace((trace) => ({
     ...trace,
@@ -3626,6 +3669,7 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
   const abort = new AbortController();
   activeAgentAbort = abort;
 
+  agentRunningToolCount = payload.toolExecutions.length;
   const authorizationRequestKey = `agent:${payload.loopId}`;
   const capabilityScopeRequestId = payload.capabilityScopeRequestId ?? authorizationRequestKey;
   let authorization: ToolAuthorizationGrantSummary;
@@ -3738,6 +3782,7 @@ function handleInlineAgentLoopEvent(type: string, data: unknown): void {
 
 function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): void {
   if (data.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  showAgentRunningIndicator(data.stepIndex);
 
   const stepEl = createAgentStepElement(data.stepIndex, stopInlineAgent, getAgentRendererLabels());
   inlineAgentCurrentStep = stepEl;
@@ -3754,6 +3799,7 @@ function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): vo
 
 function handleAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
+  showAgentRunningIndicator(msg.stepIndex);
   pendingInlineAgentStreamChunk = msg;
   if (inlineAgentStreamRenderFrame !== null) return;
 
@@ -3803,6 +3849,9 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
   for (const exec of msg.toolExecutions) {
     addToolResultToStep(inlineAgentCurrentStep, exec.name, exec.result.ok, exec.result.summary);
   }
+  addToolResultDetailsToStep(inlineAgentCurrentStep, msg.toolExecutions);
+  agentRunningToolCount += msg.toolExecutions.length;
+  showAgentRunningIndicator(msg.stepIndex);
 
   const label = msg.toolExecutions.length > 0
     ? contentT('content.agent.completeWithTools', { count: msg.toolExecutions.length })
@@ -3827,6 +3876,7 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
 
 function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  hideAgentRunningIndicator();
   flushPendingInlineAgentStreamRender();
 
   try {
@@ -3887,6 +3937,7 @@ function appendInlineAgentFinalAnswer(container: HTMLElement, text: string, loop
 
 function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  hideAgentRunningIndicator();
   flushPendingInlineAgentStreamRender();
 
   try {
@@ -6076,6 +6127,7 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
     for (const exec of step.toolExecutions) {
       addToolResultToStep(stepEl, exec.name, exec.result.ok, exec.result.summary);
     }
+    addToolResultDetailsToStep(stepEl, step.toolExecutions);
     updateStepStatus(stepEl, step.status, getInlineAgentStepStatusLabel(step));
     stepEl.setAttribute('data-collapsed', step.collapsed ? 'true' : 'false');
     container.appendChild(stepEl);

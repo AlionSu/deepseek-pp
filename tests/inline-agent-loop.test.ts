@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createArtifactToolDescriptors } from '../core/artifact';
 import type { InlineAgentStartPayload } from '../core/inline-agent/types';
 import type { ToolExecutionRecord } from '../core/types';
 
@@ -14,6 +15,17 @@ vi.mock('../core/deepseek/adapter', () => ({
 }));
 
 const { runInlineAgentLoop } = await import('../core/inline-agent/loop');
+
+function abortAwarePendingTurn(signal: AbortSignal): Promise<unknown> {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  }
+  return new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => {
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
+}
 
 describe('runInlineAgentLoop', () => {
   beforeEach(() => {
@@ -162,7 +174,7 @@ describe('runInlineAgentLoop', () => {
 
     expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(2);
     expect(adapterMocks.submitPromptStreaming.mock.calls[1]?.[0].prompt)
-      .toContain('This is no-tool-call correction attempt 2.');
+      .toContain('This is no-tool-call correction attempt 1.');
     expect(executeTool).not.toHaveBeenCalled();
     expect(post).toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
       finalText: expect.stringContaining('paused after 25 automated tool-continuation rounds'),
@@ -171,6 +183,202 @@ describe('runInlineAgentLoop', () => {
     expect(post).not.toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
       finalText: 'I still need to call search next.',
     }));
+  });
+
+  it('completes with the streamed text when the response omits a continuable message id', async () => {
+    adapterMocks.submitPromptStreaming.mockImplementationOnce(async (_input, handlers) => {
+      handlers.onTextChunk('Here is the final answer.');
+      return {
+        assistantText: '',
+        responseMessageId: null,
+        requestMessageId: 101,
+        finished: true,
+      };
+    });
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    await runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(1);
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
+      finalText: 'Here is the final answer.',
+      totalSteps: 1,
+    }));
+  });
+
+  it('fails visibly when the response is empty and omits a continuable message id', async () => {
+    adapterMocks.submitPromptStreaming.mockImplementationOnce(async () => ({
+      assistantText: '',
+      responseMessageId: null,
+      requestMessageId: 101,
+      finished: true,
+    }));
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    await runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_ERROR', expect.objectContaining({
+      error: expect.stringContaining('empty agent continuation'),
+    }));
+  });
+
+  it('refuses to execute tool calls returned without a continuable message id', async () => {
+    adapterMocks.submitPromptStreaming.mockImplementationOnce(async (_input, handlers) => {
+      handlers.onTextChunk('<artifact_create>{"filename":"a.txt","content":"ok"}</artifact_create>');
+      return {
+        assistantText: '',
+        responseMessageId: null,
+        requestMessageId: 101,
+        finished: true,
+      };
+    });
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    await runInlineAgentLoop({
+      ...createPayload(),
+      toolDescriptors: createArtifactToolDescriptors('en'),
+    }, {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_ERROR', expect.objectContaining({
+      error: expect.stringContaining('without a continuable response message'),
+    }));
+  });
+
+  it('refuses to execute nudge tool calls returned without a continuable message id', async () => {
+    vi.useFakeTimers();
+    adapterMocks.submitPromptStreaming
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onTextChunk('I will call artifact_create next.');
+        return {
+          assistantText: '',
+          responseMessageId: 102,
+          requestMessageId: 101,
+          finished: true,
+        };
+      })
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onTextChunk('<artifact_create>{"filename":"a.txt","content":"ok"}</artifact_create>');
+        return {
+          assistantText: '',
+          responseMessageId: null,
+          requestMessageId: 103,
+          finished: true,
+        };
+      });
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    const run = runInlineAgentLoop({
+      ...createPayload(),
+      toolDescriptors: createArtifactToolDescriptors('en'),
+    }, {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+
+    await vi.advanceTimersByTimeAsync(7000);
+    await run;
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(2);
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_ERROR', expect.objectContaining({
+      error: expect.stringContaining('nudge tool calls without a continuable response message'),
+    }));
+  });
+
+  it('retries a timed-out step once when no text was received, then reports the timeout', async () => {
+    vi.useFakeTimers();
+    adapterMocks.submitPromptStreaming.mockImplementation((_input, _handlers, signal) =>
+      abortAwarePendingTurn(signal));
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    const run = runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    await vi.advanceTimersByTimeAsync(7_000);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await run;
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_ERROR', expect.objectContaining({
+      error: 'DeepSeek agent step timed out after retry.',
+    }));
+  });
+
+  it('does not retry a timed-out step after text was already received', async () => {
+    vi.useFakeTimers();
+    adapterMocks.submitPromptStreaming.mockImplementation((_input, handlers, signal) => {
+      handlers.onTextChunk('partial answer...');
+      return abortAwarePendingTurn(signal);
+    });
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    const run = runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    await run;
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_ERROR', expect.objectContaining({
+      error: 'DeepSeek agent step timed out while streaming; the response was interrupted.',
+    }));
+  });
+
+  it('keeps a user abort mid-step silent with an empty final text', async () => {
+    const controller = new AbortController();
+    adapterMocks.submitPromptStreaming.mockImplementation((_input, _handlers, signal) =>
+      abortAwarePendingTurn(signal));
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    const run = runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await run;
+
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
+      finalText: '',
+      totalSteps: 0,
+    }));
+    expect(post).not.toHaveBeenCalledWith('AGENT_LOOP_ERROR', expect.anything());
   });
 });
 

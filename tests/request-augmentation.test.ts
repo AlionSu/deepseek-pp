@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TOOL_DESCRIPTORS } from '../core/tool';
+import { createBrowserControlToolDescriptors } from '../core/browser-control/tool';
 import {
   augmentRequestBody,
   decodeAugmentableDeepSeekRequestBody,
@@ -349,7 +350,7 @@ describe('page-native search projection', () => {
     expect(JSON.parse(result?.body ?? '{}').search_enabled).toBe(false);
   });
 
-  it('drops the local web_search schema and guidance when native search is enabled', () => {
+  it('drops both local web tool schemas and guidance when native search is enabled', () => {
     const result = augmentRequestBody(JSON.stringify({
       prompt: 'search latest DeepSeek news',
       parent_message_id: null,
@@ -360,7 +361,10 @@ describe('page-native search projection', () => {
       skills: [],
       activePreset: null,
       modelType: null,
-      toolDescriptors: DEFAULT_TOOL_DESCRIPTORS,
+      toolDescriptors: [
+        ...DEFAULT_TOOL_DESCRIPTORS,
+        ...createBrowserControlToolDescriptors('en'),
+      ],
       messageCount: 0,
       locale: 'en',
     });
@@ -368,7 +372,8 @@ describe('page-native search projection', () => {
     const prompt = JSON.parse(result?.body ?? '{}').prompt as string;
     expect(prompt).not.toContain('### Tool web_search');
     expect(prompt).not.toContain('## Web Search Rules');
-    expect(prompt).toContain('### Tool web_fetch');
+    expect(prompt).not.toContain('### Tool web_fetch');
+    expect(prompt).not.toContain('### Tool browser_navigate');
     expect(prompt).toContain('### Tool memory_save');
     expect(JSON.parse(result?.body ?? '{}').search_enabled).toBe(true);
   });
@@ -388,7 +393,10 @@ describe('page-native search projection', () => {
       }],
       activePreset: null,
       modelType: null,
-      toolDescriptors: DEFAULT_TOOL_DESCRIPTORS,
+      toolDescriptors: [
+        ...DEFAULT_TOOL_DESCRIPTORS,
+        ...createBrowserControlToolDescriptors('en'),
+      ],
       messageCount: 0,
       locale: 'en',
     });
@@ -396,7 +404,8 @@ describe('page-native search projection', () => {
     const prompt = JSON.parse(result?.body ?? '{}').prompt as string;
     expect(prompt).not.toContain('### Tool web_search');
     expect(prompt).not.toContain('## Web Search Rules');
-    expect(prompt).toContain('### Tool web_fetch');
+    expect(prompt).not.toContain('### Tool web_fetch');
+    expect(prompt).not.toContain('### Tool browser_navigate');
     expect(prompt).toContain('### Tool memory_save');
   });
 
