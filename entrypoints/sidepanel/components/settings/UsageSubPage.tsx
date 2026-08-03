@@ -228,6 +228,7 @@ function UsageDailyTrend({ summary, locale }: { summary: UsageSummary; locale: s
   const { t } = useI18n();
   const maxTokens = Math.max(1, ...summary.days.map((day) => day.tokens));
   const labelStep = summary.rangeDays === 30 ? 6 : 1;
+  const lastDayIndex = summary.days.length - 1;
 
   return (
     <section className="usage-panel">
@@ -237,10 +238,23 @@ function UsageDailyTrend({ summary, locale }: { summary: UsageSummary; locale: s
       <div
         className="usage-bars"
         aria-label={t('sidepanel.settings.usage.dailyTrendTitle')}
-        style={{ '--usage-day-count': summary.rangeDays } as CSSProperties}
+        style={{
+          '--usage-day-count': summary.rangeDays,
+          // 30-day charts use a tighter gap so columns keep usable width once
+          // the grid is allowed to shrink to the panel width.
+          '--usage-bar-gap': summary.rangeDays === 30 ? '2px' : '4px',
+        } as CSSProperties}
       >
         {summary.days.map((day, dayIndex) => {
           const height = day.tokens > 0 ? Math.max(5, (day.tokens / maxTokens) * 100) : 0;
+          const showLabel = dayIndex % labelStep === 0 || dayIndex === lastDayIndex;
+          // Anchor the first/last labels inward so they never spill past the
+          // chart edges; intermediate labels stay centered.
+          const labelClass = dayIndex === 0
+            ? 'usage-bar-label usage-bar-label-first'
+            : dayIndex === lastDayIndex
+              ? 'usage-bar-label usage-bar-label-last'
+              : 'usage-bar-label';
           return (
             <div
               key={day.day}
@@ -261,10 +275,8 @@ function UsageDailyTrend({ summary, locale }: { summary: UsageSummary; locale: s
                   ))}
                 </div>
               </div>
-              <span className="usage-bar-label">
-                {dayIndex % labelStep === 0 || dayIndex === summary.days.length - 1
-                  ? formatShortDate(day.timestamp, locale)
-                  : ''}
+              <span className={labelClass}>
+                {showLabel ? formatShortDate(day.timestamp, locale) : ''}
               </span>
             </div>
           );
