@@ -162,20 +162,17 @@ export function injectInlineAgentStyles(): void {
       color: var(--dpp-ui-text-muted);
     }
     .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-body,
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-process {
+    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-process,
+    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-tools,
+    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-results {
       max-height: 0;
       padding: 0 10px;
       opacity: 0;
       overflow: hidden;
     }
-    .dpp-agent-step-process {
+    .dpp-agent-step-process,
+    .dpp-agent-step-results {
       transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
-    }
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-tools {
-      max-height: 0;
-      padding: 0 10px;
-      opacity: 0;
-      overflow: hidden;
     }
     .dpp-agent-step-tools {
       padding: 4px 10px 8px;

@@ -77,6 +77,40 @@ describe('inline-agent model prompts', () => {
     expect(nudge).toContain('<tool_results_so_far>');
   });
 
+  it('bounds error payloads in windowed and full tool results', () => {
+    const bigError = {
+      code: 'shell_exit_nonzero',
+      message: 'E'.repeat(2_000),
+      retryable: true,
+      details: { huge: 'x'.repeat(50_000) },
+    };
+    const executions = [
+      { ...FAILED_EXECUTION, result: { ...FAILED_EXECUTION.result, error: bigError } },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        ...SUCCESS_EXECUTION,
+        result: { ...SUCCESS_EXECUTION.result, summary: `Execution ${index + 2}` },
+      })),
+    ];
+
+    const prompt = buildContinuationPrompt('Run all six steps.', executions, 'en');
+    const resultJson = prompt.match(/<tool_results>\n([\s\S]*?)\n<\/tool_results>/)?.[1] ?? '[]';
+    const results = JSON.parse(resultJson) as Array<Record<string, unknown>>;
+
+    const windowed = results[0];
+    expect(windowed.windowed).toBe(true);
+    expect(windowed.error).toEqual({
+      code: 'shell_exit_nonzero',
+      message: 'E'.repeat(400) + '\n...[truncated]',
+      retryable: true,
+    });
+    expect((windowed.error as Record<string, unknown>).details).toBeUndefined();
+
+    const full = results[results.length - 1];
+    expect(full.windowed).toBeUndefined();
+    expect(full.error).toBeUndefined();
+    expect((full as Record<string, unknown>).detail).toContain('One result');
+  });
+
   it('counts the first real nudge correction as attempt 1', () => {
     const english = buildNudgePrompt('Ship it', 'I will continue.', [SUCCESS_EXECUTION], 1, 'en');
     const chinese = buildNudgePrompt('发货', '我会继续。', [SUCCESS_EXECUTION], 1, 'zh-CN');

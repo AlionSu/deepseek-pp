@@ -1,5 +1,5 @@
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
-import type { ToolExecutionRecord } from '../types';
+import type { ToolError, ToolExecutionRecord } from '../types';
 
 const PENDING_ACTION_RE = /(?:我(?:将|会|想|要|先|直接|现在|继续|尝试|开始|需要|还需要|仍需|打算|计划|马上|随后|稍后|先去|先来|接下来).{0,48}(?:调用|创建|编辑|检查|验证|生成|保存|尝试|搜索|获取|打开|执行|查看|访问|读取|抓取|下载|上传|修改|更新|删除|写入|分析|比对|比较|监控|查询|发送|提交|安装|启动|停止|清理|转换|解析|提取|汇总|整理|核对|核实|扫描|截屏|渲染)|(?:接下来|下一步|然后).{0,48}(?:调用|创建|编辑|检查|验证|生成|保存|尝试|搜索|获取|打开|执行|查看|访问|读取|抓取|下载|上传|修改|更新|删除|写入|分析|比对|比较|监控|查询|发送|提交|安装|启动|停止|清理|转换|解析|提取|汇总|整理|核对|核实|扫描|截屏|渲染)|(?:i(?:'ll| will|'m| am|'d| would| want to| should| have to| (?:still\s+)?need to|'m going to| am going to|'m about to| am about to|'ve got to| have got to)|let me|let's|next,? (?:i|we)|we(?:'ll| will| need to| can)|(?:my|the) next step is to).{0,64}(?:call|create|edit|inspect|validate|generate|save|try|search|fetch|open|run|browse|read|check|look|use|verify|test|download|write|update|review|analyze|extract|query|send|post|investigate|monitor|compare|install|start|stop|convert|parse|list|collect|request|retry|scroll|click|type|navigate))/gi;
 const NUDGE_DECISION_TAIL_MAX_CHARS = 600;
@@ -200,7 +200,7 @@ function renderToolResult(e: ToolExecutionRecord) {
     ok: e.result.ok,
     summary: e.result.summary,
     detail: clampText(e.result.detail, 4000),
-    error: e.result.error,
+    error: boundToolError(e.result.error),
     output: clampText(
       e.result.output === undefined ? undefined : JSON.stringify(e.result.output),
       8000,
@@ -215,9 +215,18 @@ function renderCompressedToolResult(e: ToolExecutionRecord) {
     provider: e.provider?.displayName,
     ok: e.result.ok,
     summary: clampText(e.result.summary, 400),
-    error: e.result.error,
+    error: boundToolError(e.result.error),
     windowed: true,
     truncated: e.result.truncated === true,
+  };
+}
+
+function boundToolError(error: ToolError | undefined): ToolError | undefined {
+  if (!error) return undefined;
+  return {
+    code: error.code,
+    message: clampText(error.message, 400) ?? '',
+    retryable: error.retryable,
   };
 }
 

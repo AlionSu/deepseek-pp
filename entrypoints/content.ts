@@ -482,6 +482,11 @@ function hideAgentRunningIndicator(): void {
   );
 }
 
+function removeAgentRunningIndicator(): void {
+  agentRunningIndicator?.remove();
+  agentRunningIndicator = null;
+}
+
 function getHistoryOrganizerLabels() {
   return {
     enhancedSearchTitle: contentT('content.historyOrganizer.enhancedSearchTitle'),
@@ -809,6 +814,7 @@ async function stopInlineAgentCapability(): Promise<void> {
   pendingRestoredInlineAgentTraceIds.clear();
   restoredInlineAgentRenderAttempts = 0;
   document.querySelectorAll('.dpp-agent-container').forEach((node) => node.remove());
+  removeAgentRunningIndicator();
   removeInlineAgentStyles();
   if (contentToastTimer) {
     clearTimeout(contentToastTimer);
@@ -3663,7 +3669,7 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
   const abort = new AbortController();
   activeAgentAbort = abort;
 
-  agentRunningToolCount = 0;
+  agentRunningToolCount = payload.toolExecutions.length;
   const authorizationRequestKey = `agent:${payload.loopId}`;
   const capabilityScopeRequestId = payload.capabilityScopeRequestId ?? authorizationRequestKey;
   let authorization: ToolAuthorizationGrantSummary;

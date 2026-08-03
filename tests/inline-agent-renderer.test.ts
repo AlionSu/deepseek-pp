@@ -130,6 +130,7 @@ describe('inline agent renderer', () => {
     expect(agentStyle?.textContent).toContain('color: var(--dpp-ui-text);');
     expect(agentStyle?.textContent).toContain('[data-dpp-body-text]');
     expect(agentStyle?.textContent).toContain('color: var(--dpp-ui-accent);');
+    expect(agentStyle?.textContent).toContain('.dpp-agent-step[data-collapsed="true"] .dpp-agent-step-results');
     expect(agentStyle?.textContent).not.toContain('var(--ds-text');
   });
 });
