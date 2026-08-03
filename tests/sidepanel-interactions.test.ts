@@ -11,6 +11,12 @@ import LocalSkillImportPanel from '../entrypoints/sidepanel/components/LocalSkil
 import ScenarioManager from '../entrypoints/sidepanel/components/ScenarioManager';
 import ChatPage from '../entrypoints/sidepanel/pages/ChatPage';
 import SavedPage from '../entrypoints/sidepanel/pages/SavedPage';
+import ProjectFilesSubPage from '../entrypoints/sidepanel/components/settings/ProjectFilesSubPage';
+import { TRUSTED_DIRECTORY_STORAGE_KEY } from '../core/trusted-directory/store';
+import {
+  buildTrustedDirectorySession,
+  setTrustedDirectorySession,
+} from '../entrypoints/sidepanel/trusted-directory';
 
 let container: HTMLDivElement;
 let root: Root | null;
@@ -731,6 +737,188 @@ describe('sidepanel interactions', () => {
     resolveReset({ ok: true });
     await flushPromises();
     expect(container.textContent).not.toContain('已添加');
+  });
+});
+
+function withRelativePath(file: File, relativePath: string): File {
+  Object.defineProperty(file, 'webkitRelativePath', { value: relativePath, configurable: true });
+  return file;
+}
+
+describe('trusted-directory @ file references', () => {
+  beforeEach(() => {
+    setTrustedDirectorySession(null);
+  });
+
+  function installSession() {
+    const session = buildTrustedDirectorySession([
+      withRelativePath(new File(['abc'], 'shot.png', { type: 'image/png' }), 'proj/assets/shot.png'),
+      withRelativePath(new File(['readme'], 'README.md', { type: 'text/markdown' }), 'proj/README.md'),
+    ]);
+    expect(session).not.toBeNull();
+    setTrustedDirectorySession(session);
+  }
+
+  function stubWebChat() {
+    const sendMessage = vi.fn(async (message: { type: string; payload?: unknown }) => {
+      if (message.type === 'GET_AUTH_STATUS') return { available: true, provider: 'deepseek-web' };
+      if (message.type === 'GET_OFFICIAL_API_CHAT_CONFIG') return {};
+      if (message.type === 'GET_MODEL_TYPE') return 'vision';
+      if (message.type === 'GET_VOICE_SETTINGS') return {};
+      if (message.type === 'UPLOAD_DEEPSEEK_IMAGE') {
+        return { ok: true, file: { id: 'file-image-1', fileName: 'shot.png', status: 'SUCCESS' } };
+      }
+      if (message.type === 'CHAT_SUBMIT_PROMPT') return { ok: true };
+      return null;
+    });
+    stubChrome(sendMessage);
+    return sendMessage;
+  }
+
+  it('opens the @ panel, uploads a selected image, and includes its file id on send', async () => {
+    const sendMessage = stubWebChat();
+    stubObjectUrl();
+    stubFileReader('data:image/png;base64,YWJj');
+    installSession();
+
+    await renderElement(React.createElement(ChatPage));
+    await flushPromises();
+
+    const textarea = inputByPlaceholder('给 DeepSeek++ 发送消息') as HTMLTextAreaElement;
+    await act(async () => {
+      setTextControlValue(textarea, '看下 @');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const rows = Array.from(container.querySelectorAll('.ds-chat-at-row')) as HTMLButtonElement[];
+    expect(rows).toHaveLength(2);
+
+    const imageRow = rows.find((row) => row.textContent?.includes('shot.png'));
+    const textRow = rows.find((row) => row.textContent?.includes('README.md'));
+    expect(imageRow).toBeTruthy();
+    expect(textRow?.disabled).toBe(true);
+    expect(textRow?.title).toBe('文本文件引用将在后续版本支持');
+
+    await act(async () => {
+      imageRow?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushPromises();
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'UPLOAD_DEEPSEEK_IMAGE',
+      payload: {
+        dataUrl: 'data:image/png;base64,YWJj',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        sizeBytes: 3,
+      },
+    });
+    expect(container.textContent).toContain('已添加');
+
+    await enterText('给 DeepSeek++ 发送消息', '描述这张图片');
+    await clickButtonByLabel('发送');
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'CHAT_SUBMIT_PROMPT',
+      payload: {
+        text: '描述这张图片',
+        refFileIds: ['file-image-1'],
+      },
+    });
+  });
+
+  it('filters rows by the @ query and disables non-image rows', async () => {
+    stubWebChat();
+    installSession();
+
+    await renderElement(React.createElement(ChatPage));
+    await flushPromises();
+
+    const textarea = inputByPlaceholder('给 DeepSeek++ 发送消息') as HTMLTextAreaElement;
+    await act(async () => {
+      setTextControlValue(textarea, '看下 @read');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const rows = Array.from(container.querySelectorAll('.ds-chat-at-row')) as HTMLButtonElement[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('README.md');
+  });
+
+  it('shows the no-directory hint and closes on Escape', async () => {
+    stubWebChat();
+
+    await renderElement(React.createElement(ChatPage));
+    await flushPromises();
+
+    const textarea = inputByPlaceholder('给 DeepSeek++ 发送消息') as HTMLTextAreaElement;
+    await act(async () => {
+      setTextControlValue(textarea, '参考 @src');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('尚未授权项目目录');
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(container.querySelector('.ds-chat-at-panel')).toBeNull();
+  });
+});
+
+describe('trusted-directory settings subpage', () => {
+  it('authorizes a picked directory and persists its summary', async () => {
+    const sendMessage = vi.fn(async () => null);
+    const storageValues: Record<string, unknown> = {};
+    const chromeStub = {
+      runtime: {
+        sendMessage,
+        onMessage: {
+          addListener: vi.fn((listener: (message: unknown) => void) => {
+            runtimeListeners.push(listener);
+          }),
+          removeListener: vi.fn((listener: (message: unknown) => void) => {
+            runtimeListeners = runtimeListeners.filter((item) => item !== listener);
+          }),
+        },
+      },
+      storage: {
+        local: {
+          get: vi.fn(async (key: string) => ({ [key]: storageValues[key] })),
+          set: vi.fn(async (values: Record<string, unknown>) => {
+            Object.assign(storageValues, values);
+          }),
+          remove: vi.fn(async (key: string) => {
+            delete storageValues[key];
+          }),
+        },
+      },
+    };
+    vi.stubGlobal('chrome', chromeStub);
+
+    await renderElement(React.createElement(ProjectFilesSubPage));
+    await flushPromises();
+    expect(container.textContent).toContain('选择目录');
+
+    const picker = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const image = withRelativePath(new File(['abc'], 'shot.png', { type: 'image/png' }), 'proj/shot.png');
+    const readme = withRelativePath(new File(['readme'], 'README.md', { type: 'text/markdown' }), 'proj/README.md');
+    Object.defineProperty(picker, 'files', { value: [image, readme], configurable: true });
+
+    await act(async () => {
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flushPromises();
+
+    expect(container.textContent).toContain('proj');
+    expect(container.textContent).toContain('已授权');
+    expect(container.textContent).toContain('2 个文件');
+    expect(container.textContent).toContain('图片 1 个');
+    expect(container.textContent).toContain('文本 1 个');
+    expect(storageValues[TRUSTED_DIRECTORY_STORAGE_KEY]).toMatchObject({
+      rootName: 'proj',
+      fileCount: 2,
+      skippedCount: 0,
+    });
   });
 });
 

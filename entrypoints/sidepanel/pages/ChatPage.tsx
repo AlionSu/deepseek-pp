@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -22,7 +23,9 @@ import {
   type VoiceSettings,
 } from '../../../core/voice/settings';
 import { DEEPSEEK_IMAGE_UPLOAD_MAX_BYTES } from '../../../core/deepseek/upload-limits';
+import { parseAtTrigger } from '../../../core/trusted-directory/at-panel';
 import type { ChatMessage as ChatMessageType, ModelType } from '../../../core/types';
+import AtFilePanel, { type AtAttachmentStatus } from '../components/AtFilePanel';
 import ChatMessage from '../components/ChatMessage';
 import { StatusMessage, useConfirm } from '../components/settings/feedback-primitives';
 import { createRequestGenerationFence } from '../async-state';
@@ -37,6 +40,7 @@ import {
 } from '../controllers/chat-controller';
 import { consumePendingText, onPendingText } from '../pending-text';
 import { useI18n } from '../i18n';
+import { getTrustedDirectorySession, type TrustedDirectorySession, type TrustedDirectorySessionFile } from '../trusted-directory';
 import { getRuntimeErrorMessage } from '../runtime-response';
 
 interface ChatStreamMessage extends Partial<ChatAuthStatus> {
@@ -60,6 +64,8 @@ interface VisionImageAttachment {
   previewUrl: string;
   status: VisionImageUploadStatus;
   error: string | null;
+  /** Trusted-directory root-relative path when added via the @ panel. */
+  sourcePath: string | null;
 }
 
 const MAX_VISION_IMAGE_ATTACHMENTS = 4;
@@ -95,6 +101,8 @@ export default function ChatPage() {
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
   const [isListening, setIsListening] = useState(false);
   const [imageAttachments, setImageAttachments] = useState<VisionImageAttachment[]>([]);
+  const [trustedSession] = useState<TrustedDirectorySession | null>(() => getTrustedDirectorySession());
+  const [atTrigger, setAtTrigger] = useState<{ active: boolean; query: string }>({ active: false, query: '' });
   const [msgSeq, setMsgSeq] = useState(0);
   const { confirm, node: confirmNode } = useConfirm();
   const listRef = useRef<HTMLDivElement>(null);
@@ -119,6 +127,13 @@ export default function ChatPage() {
       .filter((item) => item.status === 'ready' && item.fileId)
       .map((item) => item.fileId as string)
     : [];
+  const atStatusByPath = useMemo(() => {
+    const map = new Map<string, AtAttachmentStatus>();
+    for (const attachment of imageAttachments) {
+      if (attachment.sourcePath) map.set(attachment.sourcePath, attachment.status);
+    }
+    return map;
+  }, [imageAttachments]);
   const canSendMessage = !isStreaming && !hasUploadingImageAttachment && !hasFailedImageAttachment && !!inputText.trim();
 
   const scrollMessagesToBottom = useCallback(() => {
@@ -206,7 +221,7 @@ export default function ChatPage() {
   useEffect(() => {
     const handler = (msg: ChatStreamMessage) => {
       if (msg.type === 'CHAT_SET_INPUT_TEXT' && typeof msg.text === 'string') {
-        setInputText(msg.text);
+        updateInputText(msg.text);
         inputRef.current?.focus();
         return;
       }
@@ -282,6 +297,7 @@ export default function ChatPage() {
     const text = inputText.trim();
     if (!text || !canSendMessage) return;
     const refFileIds = readyImageFileIds;
+    setAtTrigger({ active: false, query: '' });
 
     setMessages((prev) => {
       const next = [...prev, { role: 'user' as const, text }];
@@ -325,6 +341,8 @@ export default function ChatPage() {
     setMessages([]);
     setError(null);
     setIsStreaming(false);
+    setInputText('');
+    setAtTrigger({ active: false, query: '' });
     clearImageAttachments();
     stopVoiceInput();
     inputRef.current?.focus();
@@ -333,7 +351,7 @@ export default function ChatPage() {
   const retryLast = () => {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (!lastUser) return;
-    setInputText(lastUser.text);
+    updateInputText(lastUser.text);
     inputRef.current?.focus();
   };
 
@@ -404,7 +422,7 @@ export default function ChatPage() {
     }
   };
 
-  const uploadImageFile = async (file: File) => {
+  const uploadImageFile = async (file: File, sourcePath: string | null = null) => {
     const validationError = validateImageFile(file, t);
     if (validationError) {
       setError(validationError);
@@ -422,6 +440,7 @@ export default function ChatPage() {
       previewUrl,
       status: 'uploading',
       error: null,
+      sourcePath,
     };
 
     setImageAttachments((prev) => [...prev, baseAttachment]);
@@ -459,6 +478,21 @@ export default function ChatPage() {
     }
   };
 
+  const toggleAtFile = (file: TrustedDirectorySessionFile) => {
+    if (!visionAttachmentsEnabled || isStreaming || file.kind !== 'image') return;
+    const existing = atStatusByPath.get(file.relativePath);
+    if (existing) {
+      const attachment = imageAttachmentsRef.current.find((item) => item.sourcePath === file.relativePath);
+      if (attachment) removeImageAttachment(attachment.id);
+      return;
+    }
+    if (imageAttachmentsRef.current.length >= MAX_VISION_IMAGE_ATTACHMENTS) {
+      setError(t('sidepanel.chatPage.imageUploadMax', { count: MAX_VISION_IMAGE_ATTACHMENTS }));
+      return;
+    }
+    void uploadImageFile(file.file, file.relativePath);
+  };
+
   const removeImageAttachment = (attachmentId: string) => {
     setImageAttachments((prev) => {
       const removed = prev.find((item) => item.id === attachmentId);
@@ -487,7 +521,7 @@ export default function ChatPage() {
         .map((result) => result[0]?.transcript ?? '')
         .join('')
         .trim();
-      if (transcript) setInputText(transcript);
+      if (transcript) updateInputText(transcript);
     };
     recognition.onend = () => {
       recognitionRef.current = null;
@@ -509,6 +543,11 @@ export default function ChatPage() {
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape' && atTrigger.active) {
+      e.preventDefault();
+      setAtTrigger({ active: false, query: '' });
+      return;
+    }
     if (shouldSubmitChatComposer({
       key: e.key,
       shiftKey: e.shiftKey,
@@ -518,6 +557,17 @@ export default function ChatPage() {
       e.preventDefault();
       sendMessage();
     }
+  };
+
+  const handleInputChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setInputText(value);
+    setAtTrigger(parseAtTrigger(value));
+  };
+
+  const updateInputText = (value: string) => {
+    setInputText(value);
+    setAtTrigger(parseAtTrigger(value));
   };
 
   if (authStatus?.available === false) {
@@ -699,10 +749,18 @@ export default function ChatPage() {
             className="ds-chat-file-input"
             onChange={handleImageFileChange}
           />
+          <AtFilePanel
+            open={atTrigger.active && visionAttachmentsEnabled}
+            query={atTrigger.query}
+            session={trustedSession}
+            statusByPath={atStatusByPath}
+            onToggleFile={toggleAtFile}
+            onClose={() => setAtTrigger({ active: false, query: '' })}
+          />
           <textarea
             ref={inputRef}
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={t('sidepanel.chatPage.inputPlaceholder')}
