@@ -1696,10 +1696,13 @@ input[type='range'] {
 
 .usage-bars {
   display: grid;
-  grid-template-columns: repeat(var(--usage-day-count, 30), minmax(8px, 1fr));
+  /* Columns shrink to the panel width so a 30-day axis never overflows the
+     chart box; overflow is clipped only beyond the chart, never inside it. */
+  grid-template-columns: repeat(var(--usage-day-count, 30), minmax(0, 1fr));
   align-items: end;
-  gap: 4px;
+  gap: var(--usage-bar-gap, 4px);
   min-height: 150px;
+  overflow: hidden;
 }
 
 .usage-bar-column {
@@ -1745,6 +1748,14 @@ input[type='range'] {
   line-height: 1.1;
   text-align: center;
   white-space: nowrap;
+}
+
+.usage-bar-label-first {
+  text-align: left;
+}
+
+.usage-bar-label-last {
+  text-align: right;
 }
 
 .usage-model-layout {
