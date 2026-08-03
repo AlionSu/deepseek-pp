@@ -6,6 +6,7 @@ import {
   isInlineAgentContinuationStructure,
   normalizeInlineAgentFinalAnswerText,
   replaceTaskCompleteBlocks,
+  INLINE_AGENT_FULL_TOOL_RESULT_WINDOW,
   shouldNudge,
 } from '../core/inline-agent/prompt';
 import { buildAutomationToolContinuationPrompt } from '../core/automation/runner';
@@ -76,6 +77,49 @@ describe('inline-agent model prompts', () => {
     expect(nudge).toContain('<tool_results_so_far>');
   });
 
+  it('counts the first real nudge correction as attempt 1', () => {
+    const english = buildNudgePrompt('Ship it', 'I will continue.', [SUCCESS_EXECUTION], 1, 'en');
+    const chinese = buildNudgePrompt('发货', '我会继续。', [SUCCESS_EXECUTION], 1, 'zh-CN');
+
+    expect(english).toContain('This is no-tool-call correction attempt 1.');
+    expect(chinese).toContain('这是第 1 次无工具调用纠偏。');
+  });
+
+  it('keeps recent tool results full and compresses older executions', () => {
+    const executions = Array.from({ length: 6 }, (_, index) => ({
+      ...SUCCESS_EXECUTION,
+      name: index % 2 === 0 ? 'web_search' : 'mcp_tool',
+      provider: index % 2 === 0 ? SUCCESS_EXECUTION.provider : FAILED_EXECUTION.provider,
+      result: {
+        ...SUCCESS_EXECUTION.result,
+        ok: index !== 3,
+        summary: `Execution ${index + 1}`,
+        detail: `Detail ${index + 1}`,
+      },
+    }));
+
+    const prompt = buildContinuationPrompt('Run all six steps.', executions, 'en');
+    const resultJson = prompt.match(/<tool_results>\n([\s\S]*?)\n<\/tool_results>/)?.[1] ?? '[]';
+    const results = JSON.parse(resultJson) as Array<Record<string, unknown>>;
+
+    expect(results).toHaveLength(6);
+    const firstTwo = results.slice(0, INLINE_AGENT_FULL_TOOL_RESULT_WINDOW - 2);
+    const lastFour = results.slice(-INLINE_AGENT_FULL_TOOL_RESULT_WINDOW);
+
+    for (const entry of firstTwo) {
+      expect(entry.windowed).toBe(true);
+      expect(entry.detail).toBeUndefined();
+      expect(entry.output).toBeUndefined();
+      expect(entry.summary).toContain('Execution');
+    }
+    for (const entry of lastFour) {
+      expect(entry.windowed).toBeUndefined();
+      expect(entry.detail).toBe('Detail ' + (results.indexOf(entry) + 1));
+      expect(entry.error).toBeUndefined();
+    }
+    expect(results[3].ok).toBe(false);
+  });
+
   it('detects inline-agent continuation prompts as internal requests', () => {
     const continuation = buildContinuationPrompt('查港股行情', [SUCCESS_EXECUTION], 'zh-CN');
     const nudge = buildNudgePrompt('查港股行情', 'I will continue.', [SUCCESS_EXECUTION], 0, 'en');
@@ -133,6 +177,12 @@ describe('inline-agent model prompts', () => {
     expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '')).toBe(true);
     expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '我会调用 web_search 获取最新行情。')).toBe(true);
     expect(shouldNudge('查行情', [SUCCESS_EXECUTION], 'I still need to call search next.')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '我想下载这份报告。')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '我打算先核对一下刚才的结果。')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], "I'm going to look up the latest price.")).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], 'I need to check the file now.')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], "Let's fetch the second page.")).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], 'I will summarize the findings now.')).toBe(false);
 
     const answerAfterPlanning = [
       '要求查看贵金属走势，之前的搜索已经提供了一些结果。我需要基于这些结果给出一个全面的回答。',

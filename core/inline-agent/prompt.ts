@@ -1,7 +1,7 @@
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
 import type { ToolExecutionRecord } from '../types';
 
-const PENDING_ACTION_RE = /(?:我(?:将|会|先|直接|现在|继续|尝试|开始|需要|还需要|仍需).{0,48}(?:调用|创建|编辑|检查|验证|生成|保存|尝试|搜索|获取|打开|执行|查看|访问|读取|抓取)|(?:接下来|下一步|然后).{0,48}(?:调用|创建|编辑|检查|验证|生成|保存|尝试|搜索|获取|打开|执行|查看|访问|读取|抓取)|(?:i(?:'ll| will| (?:still\s+)?need to)|let me|next,? i).{0,64}(?:call|create|edit|inspect|validate|generate|save|try|search|fetch|open|run|browse|read))/gi;
+const PENDING_ACTION_RE = /(?:我(?:将|会|想|要|先|直接|现在|继续|尝试|开始|需要|还需要|仍需|打算|计划|马上|随后|稍后|先去|先来|接下来).{0,48}(?:调用|创建|编辑|检查|验证|生成|保存|尝试|搜索|获取|打开|执行|查看|访问|读取|抓取|下载|上传|修改|更新|删除|写入|分析|比对|比较|监控|查询|发送|提交|安装|启动|停止|清理|转换|解析|提取|汇总|整理|核对|核实|扫描|截屏|渲染)|(?:接下来|下一步|然后).{0,48}(?:调用|创建|编辑|检查|验证|生成|保存|尝试|搜索|获取|打开|执行|查看|访问|读取|抓取|下载|上传|修改|更新|删除|写入|分析|比对|比较|监控|查询|发送|提交|安装|启动|停止|清理|转换|解析|提取|汇总|整理|核对|核实|扫描|截屏|渲染)|(?:i(?:'ll| will|'m| am|'d| would| want to| should| have to| (?:still\s+)?need to|'m going to| am going to|'m about to| am about to|'ve got to| have got to)|let me|let's|next,? (?:i|we)|we(?:'ll| will| need to| can)|(?:my|the) next step is to).{0,64}(?:call|create|edit|inspect|validate|generate|save|try|search|fetch|open|run|browse|read|check|look|use|verify|test|download|write|update|review|analyze|extract|query|send|post|investigate|monitor|compare|install|start|stop|convert|parse|list|collect|request|retry|scroll|click|type|navigate))/gi;
 const NUDGE_DECISION_TAIL_MAX_CHARS = 600;
 const PENDING_ACTION_AFTER_MAX_CHARS = 80;
 const TASK_COMPLETE_RE = /<task_complete>\s*([\s\S]*?)\s*<\/task_complete>/;
@@ -11,6 +11,13 @@ const TASK_COMPLETE_BLOCK_RE = /<task_complete>\s*([\s\S]*?)\s*<\/task_complete>
 // parent/child message chain, while making the internal marker invisible even
 // if DeepSeek temporarily exposes the turn in an editor.
 export const INLINE_AGENT_CONTINUATION_PLACEHOLDER = '\u2063\u2064\u2063';
+/**
+ * The most recent tool executions rendered with full detail/output in
+ * continuation and nudge prompts. Older executions are compressed to a
+ * bounded summary so the model-facing context stays near-constant across
+ * steps instead of growing with every executed tool.
+ */
+export const INLINE_AGENT_FULL_TOOL_RESULT_WINDOW = 4;
 
 export function extractTaskCompleteSignal(text: string): { summary: string; artifacts: string[] } | null {
   const match = TASK_COMPLETE_RE.exec(text);
@@ -124,7 +131,7 @@ export function buildContinuationPrompt(
   locale: SupportedLocale = DEFAULT_LOCALE,
 ): string {
   const hasFailures = executions.some((e) => !e.result.ok);
-  const results = renderToolResults(executions);
+  const results = renderWindowedToolResults(executions);
 
   return [
     translate(locale, 'prompt.inlineAgent.continuationIntro'),
@@ -151,14 +158,14 @@ export function buildNudgePrompt(
   nudgeCount: number,
   locale: SupportedLocale = DEFAULT_LOCALE,
 ): string {
-  const results = renderToolResults(executions);
+  const results = renderWindowedToolResults(executions);
 
   return [
     translate(locale, 'prompt.inlineAgent.nudgeNoTools'),
     translate(locale, 'prompt.inlineAgent.nudgeChoice'),
     translate(locale, 'prompt.inlineAgent.nudgeNextTool'),
     translate(locale, 'prompt.inlineAgent.nudgeComplete'),
-    translate(locale, 'prompt.inlineAgent.nudgeCount', { count: nudgeCount + 1 }),
+    translate(locale, 'prompt.inlineAgent.nudgeCount', { count: nudgeCount }),
     '',
     '<original_task>',
     clampText(originalTask, 8000),
@@ -174,8 +181,20 @@ export function buildNudgePrompt(
   ].join('\n');
 }
 
-function renderToolResults(executions: ToolExecutionRecord[]) {
-  return executions.map((e) => ({
+function renderWindowedToolResults(executions: ToolExecutionRecord[]) {
+  if (executions.length <= INLINE_AGENT_FULL_TOOL_RESULT_WINDOW) {
+    return executions.map(renderToolResult);
+  }
+  const older = executions.slice(0, -INLINE_AGENT_FULL_TOOL_RESULT_WINDOW);
+  const recent = executions.slice(-INLINE_AGENT_FULL_TOOL_RESULT_WINDOW);
+  return [
+    ...older.map(renderCompressedToolResult),
+    ...recent.map(renderToolResult),
+  ];
+}
+
+function renderToolResult(e: ToolExecutionRecord) {
+  return {
     tool: e.name,
     provider: e.provider?.displayName,
     ok: e.result.ok,
@@ -187,7 +206,19 @@ function renderToolResults(executions: ToolExecutionRecord[]) {
       8000,
     ),
     truncated: e.result.truncated === true,
-  }));
+  };
+}
+
+function renderCompressedToolResult(e: ToolExecutionRecord) {
+  return {
+    tool: e.name,
+    provider: e.provider?.displayName,
+    ok: e.result.ok,
+    summary: clampText(e.result.summary, 400),
+    error: e.result.error,
+    windowed: true,
+    truncated: e.result.truncated === true,
+  };
 }
 
 function clampText(value: string | undefined, maxLength: number): string | undefined {
