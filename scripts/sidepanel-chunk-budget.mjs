@@ -39,6 +39,10 @@ const BASELINE = Object.freeze({
 
 // W2.6 pre-change Chrome measurement at 450b5e2. The rich Markdown renderer
 // was part of ChatPage's static graph, leaving less than 1% budget headroom.
+// firstChatScreen raw cap raised 400000 -> 400500 for #475: the @ panel
+// measured 399840 at PR #491 head bbd2064 (160B headroom), and the review
+// fix for extension-classified image MIME normalization added 249B (400089
+// measured locally). gzip stays 122000 (121346 measured).
 const WAVE_2_CHAT_BASELINE = Object.freeze({
   firstChatScreen: { raw: 498_013, gzip: 150_087 },
   ChatPage: { raw: 134_902, gzip: 40_039 },
@@ -54,7 +58,7 @@ const BUDGET = Object.freeze({
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 400_000, gzip: 122_000 },
+  firstChatScreen: { raw: 400_500, gzip: 122_000 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },
