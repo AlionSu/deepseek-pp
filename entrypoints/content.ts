@@ -181,6 +181,7 @@ import {
   type ContentMutationHub,
 } from './content/controllers/mutation-hub';
 import { notifyContentAuthStatusChanged } from './content/auth-status-notifier';
+import { createContentPersistenceTracker } from './content/persistence-tracking';
 import { getRestoredMessageMutationAction } from './content/restored-message-targets';
 import { bindNewChatToolCallToBrowserSession } from './content/tool-session-binding';
 
@@ -650,26 +651,13 @@ function reportContentLifecycleError(error: unknown): void {
   console.error('[DeepSeek++] content lifecycle failed', error);
 }
 
-function trackContentPersistence<T>(
-  owner: 'tool' | 'inline-agent',
-  label: string,
-  operation: Promise<T>,
-): Promise<T> {
-  const tracked = operation.catch((error) => {
-    if (isExtensionInvalidatedError(error)) invalidateExtensionContext();
+const contentPersistenceTracker = createContentPersistenceTracker({
+  isExtensionInvalidated: isExtensionInvalidatedError,
+  invalidateExtension: () => invalidateExtensionContext(),
+  reportFailure(label, error) {
     console.error(`[DeepSeek++] ${label} persistence failed`, error);
-    throw error;
-  });
-  const operations = owner === 'tool'
-    ? pendingToolPersistenceOperations
-    : pendingInlineAgentPersistenceOperations;
-  operations.add(tracked);
-  void tracked.then(
-    () => operations.delete(tracked),
-    () => operations.delete(tracked),
-  );
-  return tracked;
-}
+  },
+});
 
 function observeReportedPersistence(operation: Promise<unknown>): void {
   // The persistence boundary logged the rejection; this terminal observer prevents
@@ -4758,8 +4746,8 @@ function scheduleInlineAgentTraceWrite(trace: InlineAgentTraceRecord): void {
 
 async function writeInlineAgentTrace(trace: InlineAgentTraceRecord): Promise<void> {
   const stored = sanitizeInlineAgentTraceForStorage(trace);
-  await trackContentPersistence(
-    'inline-agent',
+  await contentPersistenceTracker.track(
+    pendingInlineAgentPersistenceOperations,
     'inline-agent trace write',
     upsertPersistedInlineAgentTrace(stored),
   );
@@ -4767,8 +4755,8 @@ async function writeInlineAgentTrace(trace: InlineAgentTraceRecord): Promise<voi
 }
 
 async function getPersistedInlineAgentTraces(): Promise<InlineAgentTraceRecord[]> {
-  return trackContentPersistence(
-    'inline-agent',
+  return contentPersistenceTracker.track(
+    pendingInlineAgentPersistenceOperations,
     'inline-agent trace read',
     readPersistedInlineAgentTraces(),
   );
@@ -4837,8 +4825,8 @@ function shouldTryRestoreInlineAgentTrace(trace: InlineAgentTraceRecord, current
 }
 
 async function getPersistedToolBlocks(): Promise<PersistedToolBlock[]> {
-  return trackContentPersistence(
-    'tool',
+  return contentPersistenceTracker.track(
+    pendingToolPersistenceOperations,
     'tool execution block read',
     readPersistedToolExecutionBlocks(),
   );
@@ -4934,8 +4922,8 @@ async function persistToolBlockSession(session: ActiveToolBlockSession, fullText
     },
   };
 
-  await trackContentPersistence(
-    'tool',
+  await contentPersistenceTracker.track(
+    pendingToolPersistenceOperations,
     'tool execution block write',
     upsertPersistedToolExecutionBlock(block),
   );
