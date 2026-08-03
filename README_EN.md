@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1119-release-highlights">1.11.9 Highlights</a>
+  <a href="#1120-release-highlights">1.12.0 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.11.9 Release Highlights](#1119-release-highlights)
+- [1.12.0 Release Highlights](#1120-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -299,7 +299,25 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.11.9 Release Highlights
+## 1.12.0 Release Highlights
+
+1.12.0 improves Agent workspace and file-reference experience: inline agent runs are more reliable with visible steps, and you can reference files from a trusted local directory in chat with @.
+
+| Area | Main changes |
+|------|--------------|
+| Agent runs | Structured step UI with a global running indicator; loop endings are visible, repeated steps have bounded retries, windowed tool results are shown per window, and continuation nudges are more accurate. |
+| Native search | Agent runs using DeepSeek native intelligent search no longer trigger the extension's built-in web search tool. |
+| File references | New trusted directory and @ file references: after choosing a local directory (with scan budgets) in Settings, you can reference images from it in chat; out-of-bounds paths are ignored. |
+| File robustness | Image MIME normalization avoids duplicate uploads; an invalidated extension context (e.g. a leftover page after an extension reload) no longer causes false save-failure reports. |
+| Usage chart | The 30-day token trend X axis shows dates only and no longer overflows the chart panel. |
+| MCP compatibility | The MCP client advertises protocol-valid capabilities, making connections to capability-checking servers more stable. |
+| Page loading | Extension pages no longer emit modulepreload links, removing browser console noise. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.11.9 - 0.2.0)</summary>
+
+### 1.11.9 Release Highlights
 
 1.11.9 focuses on chat and MCP usability, fixing edited-message context injection, output speed statistics, IME Enter handling, and MCP tool selection, while keeping DeepSeek native intelligent search coordinated with the extension's tools.
 
@@ -311,9 +329,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | MCP compatibility | Improves compatibility with MCP services using standard streaming formats; manual tool selection stays clear and switching tools no longer clears discovered service information. |
 | Native search | With DeepSeek native intelligent search enabled, regular conversations and agent continuations keep native search active without triggering a duplicate built-in web search. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.8 - 0.2.0)</summary>
 
 ### 1.11.8 Release Highlights
 
