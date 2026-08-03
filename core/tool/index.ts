@@ -72,6 +72,7 @@ export {
 } from './web-search';
 
 export {
+  isExtensionOwnedWebFetchDescriptor,
   isExtensionOwnedWebSearchDescriptor,
   projectToolDescriptorsForNativeSearch,
 } from './native-search-projection';

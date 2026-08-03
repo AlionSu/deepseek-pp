@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDefaultToolDescriptors,
+  isExtensionOwnedWebFetchDescriptor,
   isExtensionOwnedWebSearchDescriptor,
   projectToolDescriptorsForNativeSearch,
 } from '../core/tool';
@@ -19,7 +20,7 @@ describe('projectToolDescriptorsForNativeSearch', () => {
     );
   });
 
-  it('removes only the extension-owned local web_search descriptor when native search is enabled', () => {
+  it('removes both extension-owned local web tools when native search is enabled', () => {
     const descriptors = createDefaultToolDescriptors('en');
     expect(descriptors.map((descriptor) => descriptor.name))
       .toEqual(['memory_save', 'memory_update', 'memory_delete', 'web_search', 'web_fetch']);
@@ -27,7 +28,7 @@ describe('projectToolDescriptorsForNativeSearch', () => {
     const projected = projectToolDescriptorsForNativeSearch(descriptors, true);
 
     expect(projected.map((descriptor) => descriptor.name))
-      .toEqual(['memory_save', 'memory_update', 'memory_delete', 'web_fetch']);
+      .toEqual(['memory_save', 'memory_update', 'memory_delete']);
   });
 
   it('preserves descriptor order for the remaining descriptors', () => {
@@ -38,7 +39,6 @@ describe('projectToolDescriptorsForNativeSearch', () => {
       'local:memory:memory_save',
       'local:memory:memory_update',
       'local:memory:memory_delete',
-      'local:web:web_fetch',
     ]);
   });
 
@@ -63,7 +63,6 @@ describe('projectToolDescriptorsForNativeSearch', () => {
     expect(projected.map((descriptor) => descriptor.id)).toEqual([
       'local:memory:memory_save',
       'mcp:browser-tools:web_search',
-      'local:web:web_fetch',
     ]);
   });
 
@@ -73,6 +72,12 @@ describe('projectToolDescriptorsForNativeSearch', () => {
     expect(isExtensionOwnedWebSearchDescriptor(mcpWebSearchDescriptor())).toBe(false);
     expect(isExtensionOwnedWebSearchDescriptor(createDefaultToolDescriptors('en')
       .find((descriptor) => descriptor.name === 'web_fetch')!)).toBe(false);
+
+    expect(isExtensionOwnedWebFetchDescriptor(createDefaultToolDescriptors('en')
+      .find((descriptor) => descriptor.name === 'web_fetch')!)).toBe(true);
+    expect(isExtensionOwnedWebFetchDescriptor(createDefaultToolDescriptors('en')
+      .find((descriptor) => descriptor.name === 'web_search')!)).toBe(false);
+    expect(isExtensionOwnedWebFetchDescriptor(mcpWebSearchDescriptor())).toBe(false);
   });
 });
 
