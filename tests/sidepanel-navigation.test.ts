@@ -16,6 +16,13 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   root = null;
+  // jsdom has no ResizeObserver; SubTabs uses it to recompute overflow
+  // chevrons. Browsers always provide it.
+  vi.stubGlobal('ResizeObserver', class {
+    observe(): void {}
+    disconnect(): void {}
+    unobserve(): void {}
+  });
 
   vi.stubGlobal('chrome', {
     runtime: {

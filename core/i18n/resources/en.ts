@@ -61,6 +61,10 @@ export const en = {
     en: 'English',
   },
   sidepanel: {
+    subTabs: {
+      scrollLeft: 'Scroll tabs left',
+      scrollRight: 'Scroll tabs right',
+    },
     libraryPage: {
       navLabel: 'Library navigation',
       tabs: {
