@@ -335,11 +335,12 @@ export function createToolAuthorizationResult(
   error: ToolAuthorizationError,
   call?: Pick<ToolCall, 'id' | 'name' | 'descriptorId' | 'provider'>,
   summary: string = 'Tool authorization rejected',
+  hint?: string,
 ): ToolResult {
   return {
     ok: false,
     summary,
-    detail: error.message,
+    detail: hint ? `${error.message}。${hint}` : error.message,
     callId: call?.id,
     name: call?.name,
     descriptorId: call?.descriptorId,

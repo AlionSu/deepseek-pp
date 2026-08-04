@@ -334,6 +334,16 @@ export default function DataSubPage({ state }: { state: SettingsState }) {
             {t('sidepanel.settings.exportMemories')}
           </button>
           <button
+            onClick={() => void state.handleExportLogs().catch(() => banner.show('error', t('sidepanel.settings.operationFailed')))}
+            className="ds-btn-secondary flex-1 py-2.5 text-xs font-medium rounded-lg transition-all duration-150 flex items-center justify-center gap-1.5"
+            title={t('sidepanel.settings.exportLogsHint')}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d={SVG_PATHS.download} />
+            </svg>
+            {t('sidepanel.settings.exportLogs')}
+          </button>
+          <button
             onClick={() => state.handleImport(
               {
                 arrayError: t('sidepanel.settings.importMemoryArrayError'),
