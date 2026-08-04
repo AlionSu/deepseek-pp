@@ -177,7 +177,7 @@ describe('runInlineAgentLoop', () => {
       .toContain('This is no-tool-call correction attempt 1.');
     expect(executeTool).not.toHaveBeenCalled();
     expect(post).toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
-      finalText: expect.stringContaining('paused after 25 automated tool-continuation rounds'),
+      finalText: expect.stringContaining('paused after 1 automated tool-continuation round'),
       totalTools: 1,
     }));
     expect(post).not.toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
