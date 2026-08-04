@@ -639,6 +639,14 @@ async function createPowChallenge(
     'pow',
     context,
   );
+  // HTTP 401/403 means the token itself is rejected; classify as auth so the
+  // caller refreshes credentials instead of treating it as a PoW failure and
+  // retry-storming (401/403 PoW misclassification).
+  if (response.status === 401 || response.status === 403) {
+    throw new DeepSeekAuthError(
+      `DeepSeek auth token was rejected (HTTP ${response.status}) while creating PoW challenge.`,
+    );
+  }
   const json = await readJsonResponse(response, 'DeepSeek PoW challenge', 'pow');
   const data = json?.data;
   const challenge = data?.biz_data?.challenge;

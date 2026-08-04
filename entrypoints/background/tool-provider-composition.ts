@@ -145,8 +145,10 @@ function createLocalProvider(
 function createMcpProvider(): RuntimeToolProvider {
   return {
     registration: { kind: 'mcp' },
-    listTools({ includeDisabled }) {
-      return getMcpToolDescriptors(includeDisabled ? { includeDisabled: true } : undefined);
+    async listTools({ includeDisabled }) {
+      return disambiguateMcpInvocationNames(
+        await getMcpToolDescriptors(includeDisabled ? { includeDisabled: true } : undefined),
+      );
     },
     async refresh() {
       const servers = await getAllMcpServers({ includeSecrets: false });
@@ -164,6 +166,26 @@ function createMcpProvider(): RuntimeToolProvider {
       });
     },
   };
+}
+
+/**
+ * MCP invocation names are derived from sanitized server/tool identifiers, so
+ * distinct servers can collide (e.g. `my-server` vs `my_server`). The registry
+ * treats duplicate invocation names as fatal and would disable the whole tool
+ * registry (M18); disambiguate the later duplicates deterministically instead.
+ */
+function disambiguateMcpInvocationNames(
+  descriptors: readonly ToolDescriptor[],
+): ToolDescriptor[] {
+  if (!Array.isArray(descriptors)) return descriptors as ToolDescriptor[];
+  const seen = new Map<string, number>();
+  return descriptors.map((descriptor) => {
+    const base = descriptor.invocationName;
+    const occurrence = seen.get(base) ?? 0;
+    seen.set(base, occurrence + 1);
+    if (occurrence === 0) return descriptor;
+    return { ...descriptor, invocationName: `${base}_${occurrence + 1}` };
+  });
 }
 
 function createMcpCapabilityProvider(): RuntimeToolProvider {

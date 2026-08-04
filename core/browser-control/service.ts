@@ -224,12 +224,14 @@ export class BrowserControlService {
     const url = normalizeUrl(requireString(payload, 'url'));
     const newTab = readOptionalBoolean(payload, 'newTab', true);
     let tabId: number;
+    let previousUrl: string | undefined;
     if (newTab) {
       const tab = await this.requireChromeApi().tabs.create({ url, active: true });
       if (typeof tab.id !== 'number') {
         throw new BrowserControlError('browser_tab_create_failed', 'Chrome did not return a tab id for the new tab.');
       }
       tabId = tab.id;
+      previousUrl = tab.url ?? 'about:blank';
       if (this.connection?.attached) {
         await this.connection.detach();
       }
@@ -237,10 +239,21 @@ export class BrowserControlService {
     } else {
       tabId = await this.ensureTargetTabId(settings, { createIfMissing: true, navigateUrl: url });
       await this.ensureAttached(tabId);
+      const before = await this.requireChromeApi().tabs.get(tabId);
+      previousUrl = before.url;
       await this.connection!.sendCommand('Page.navigate', { url });
     }
 
-    await this.waitForTabUrl(tabId, url, 3_000).catch(() => {});
+    const settled = await this.waitForTabUrl(tabId, url, previousUrl, 3_000).catch(() => false);
+    if (!settled) {
+      // Navigation did not reach the requested URL within the window; report
+      // it instead of silently claiming success.
+      throw new BrowserControlError(
+        'browser_navigation_timeout',
+        `Controlled tab did not reach ${url} within 3 seconds.`,
+        { retryable: true },
+      );
+    }
     return this.withOptionalSnapshot({
       ok: true,
       summary: newTab ? `Opened ${url}` : `Navigated to ${url}`,
@@ -595,8 +608,15 @@ export class BrowserControlService {
     options: { createIfMissing?: boolean; navigateUrl?: string } = {},
   ): Promise<number> {
     if (typeof settings.targetTabId === 'number') {
-      const target = await this.getTargetOrThrow(settings.targetTabId);
-      if (target.controllable) return settings.targetTabId;
+      try {
+        const target = await this.getTargetOrThrow(settings.targetTabId);
+        if (target.controllable) return settings.targetTabId;
+      } catch (error) {
+        // The stored target tab is gone (closed or invalidated): clear the
+        // stale binding instead of failing every subsequent call (M22).
+        if (!isMissingTargetError(error)) throw error;
+        await saveBrowserControlSettings({ targetTabId: null }).catch(() => undefined);
+      }
     }
 
     const targets = await this.listTargets();
@@ -821,13 +841,24 @@ export class BrowserControlService {
     };
   }
 
-  private async waitForTabUrl(tabId: number, url: string, timeoutMs: number): Promise<void> {
+  private async waitForTabUrl(
+    tabId: number,
+    url: string,
+    previousUrl: string | undefined,
+    timeoutMs: number,
+  ): Promise<boolean> {
     const started = this.now();
     while (this.now() - started <= timeoutMs) {
       const tab = await this.requireChromeApi().tabs.get(tabId);
-      if (tab.url === url || tab.pendingUrl === url) return;
+      if (tab.url === url || tab.pendingUrl === url) return true;
+      // Sites commonly redirect (http→https, trailing slash, canonical host),
+      // so an exact match is too strict: any navigation away from the
+      // pre-navigation URL means the command took effect. A tab that never
+      // navigates (e.g. navigation blocked) still fails the timeout.
+      if (previousUrl && tab.url && tab.url !== previousUrl) return true;
       await delay(100);
     }
+    return false;
   }
 
   private requireChromeApi(): typeof chrome {
@@ -893,7 +924,7 @@ export async function getBrowserControlElementPoint(this: Element): Promise<Elem
 export function getControllableState(url: string): { controllable: boolean; reason?: string } {
   if (!url) return { controllable: true };
   if (url === 'about:blank') return { controllable: true };
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://')) {
+  if (url.startsWith('http://') || url.startsWith('https://')) {
     return { controllable: true };
   }
   return {
@@ -943,7 +974,9 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
 function normalizeUrl(input: string): string {
   try {
     const url = new URL(input);
-    if (!['http:', 'https:', 'file:'].includes(url.protocol)) {
+    // file: is deliberately excluded: browser control must not navigate to or
+    // read local files (H6) — the AX-tree snapshot would expose file contents.
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new Error(`Unsupported URL protocol: ${url.protocol}`);
     }
     return url.toString();
@@ -1053,4 +1086,9 @@ function toJsonSafe(value: unknown): unknown {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isMissingTargetError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('No tab with id') || message.includes('Invalid tab id');
 }

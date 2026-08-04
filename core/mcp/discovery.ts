@@ -67,7 +67,7 @@ export async function getMcpToolDescriptors(options?: {
     descriptors.push(
       ...policyDescriptors.filter((descriptor) =>
         options?.includeDisabled ||
-        (descriptor.execution.enabled && descriptor.execution.mode === 'auto'),
+        (descriptor.execution.enabled && descriptor.execution.mode !== 'disabled'),
       ),
     );
   }

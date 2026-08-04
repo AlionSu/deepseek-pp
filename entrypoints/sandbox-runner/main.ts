@@ -17,6 +17,8 @@ type SandboxRunnerRequest = SandboxRunRequest & {
 
 const HTML_EXECUTION_DELAY_MS = 250;
 const HTML_OUTPUT_LIMIT = 12_000;
+const HTML_LOG_LINE_MAX_CHARS = 8_000;
+const HTML_LOG_BUFFER_MAX_CHARS = 128_000;
 const runnerUrl = new URL(window.location.href);
 const EXTENSION_ORIGIN = `${runnerUrl.protocol}//${runnerUrl.host}`;
 
@@ -99,6 +101,7 @@ function runHtmlSandbox(request: SandboxRunnerRequest): Promise<SandboxExecution
 
   const logs: string[] = [];
   const errors: string[] = [];
+  let logBytes = 0;
   let settled = false;
   const htmlRequestId = crypto.randomUUID();
 
@@ -145,11 +148,26 @@ function runHtmlSandbox(request: SandboxRunnerRequest): Promise<SandboxExecution
       if (value.type === SANDBOX_MESSAGE_TYPES.htmlLog) {
         const level = typeof value.level === 'string' ? value.level : 'log';
         const values = Array.isArray(value.values) ? value.values : [];
-        logs.push(`[${level}] ${values.map(formatHtmlValue).join(' ')}`);
+        // Cap per-line and cumulative log growth so a chatty sandbox cannot
+        // exhaust the offscreen document's memory (M11).
+        const line = `[${level}] ${values.map(formatHtmlValue).join(' ')}`;
+        const bounded = limitText(line, HTML_LOG_LINE_MAX_CHARS);
+        if (logBytes < HTML_LOG_BUFFER_MAX_CHARS) {
+          logs.push(bounded.text);
+          logBytes += bounded.text.length;
+        }
         return;
       }
       if (value.type === SANDBOX_MESSAGE_TYPES.htmlError) {
-        errors.push(typeof value.message === 'string' ? value.message : 'HTML runtime error.');
+        const line = typeof value.message === 'string' ? value.message : 'HTML runtime error.';
+        // Count the bounded length (like the log path) so a single huge error
+        // line cannot silently consume the whole shared budget and silence
+        // every later log/error for this run.
+        const bounded = limitText(line, HTML_LOG_LINE_MAX_CHARS);
+        if (logBytes < HTML_LOG_BUFFER_MAX_CHARS) {
+          errors.push(bounded.text);
+          logBytes += bounded.text.length;
+        }
         return;
       }
       if (value.type === SANDBOX_MESSAGE_TYPES.htmlDone) {

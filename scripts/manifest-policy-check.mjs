@@ -51,6 +51,10 @@ const expectedSandboxCsp = [
   "child-src 'self' blob: data:",
   "frame-src 'self' blob: data:",
   "connect-src 'self' blob:",
+  "img-src 'self' blob: data:",
+  "style-src 'self' 'unsafe-inline'",
+  "media-src 'self' blob: data:",
+  "font-src 'self' blob: data:",
   "object-src 'none'",
 ].join('; ');
 const expectedFirefoxId = 'deepseek-pp@zhu1090093659.github';

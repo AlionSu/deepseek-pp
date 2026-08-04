@@ -26,7 +26,9 @@ export const TOOL_EXECUTION_TRIGGERS = [
 
 export type ToolExecutionTrigger = typeof TOOL_EXECUTION_TRIGGERS[number];
 
-export const TOOL_EXECUTION_MODES = ['auto', 'manual', 'disabled'] as const;
+// 'manual' was removed: enabled tools are auto-executable by the model on
+// trusted surfaces; 'disabled' is the only opt-out.
+export const TOOL_EXECUTION_MODES = ['auto', 'disabled'] as const;
 
 export type ToolExecutionMode = typeof TOOL_EXECUTION_MODES[number];
 

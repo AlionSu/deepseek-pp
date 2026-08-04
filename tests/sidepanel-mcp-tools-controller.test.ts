@@ -166,51 +166,51 @@ describe('sidepanel MCP and Tools controller', () => {
       .toThrow('only supports http/https');
   });
 
-  it('keeps allowlist selection independent of execution policy for manual-mode toggles', () => {
-    const manualServer: McpServerConfig = {
+  it('keeps allowlist selection independent of execution policy for disabled-mode toggles', () => {
+    const disabledModeServer: McpServerConfig = {
       ...server,
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
     };
     const disabledServer: McpServerConfig = {
       ...server,
       enabled: false,
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
     };
 
-    expect(isMcpToolEnabled(manualServer, pythonTool)).toBe(false);
-    expect(isMcpToolSelected(manualServer, pythonTool)).toBe(true);
+    expect(isMcpToolEnabled(disabledModeServer, pythonTool)).toBe(false);
+    expect(isMcpToolSelected(disabledModeServer, pythonTool)).toBe(true);
     expect(isMcpToolSelected(disabledServer, pythonTool)).toBe(true);
 
     const off = nextMcpToolAllowlist(
-      manualServer.allowlist,
+      disabledModeServer.allowlist,
       pythonTool,
-      !isMcpToolSelected(manualServer, pythonTool),
+      !isMcpToolSelected(disabledModeServer, pythonTool),
     );
     expect(off).toEqual({ mode: 'deny', toolNames: ['python_exec'] });
-    expect(isMcpToolSelected({ ...manualServer, allowlist: off }, pythonTool)).toBe(false);
+    expect(isMcpToolSelected({ ...disabledModeServer, allowlist: off }, pythonTool)).toBe(false);
 
     const backOn = nextMcpToolAllowlist(off, pythonTool, !isMcpToolSelected(
-      { ...manualServer, allowlist: off },
+      { ...disabledModeServer, allowlist: off },
       pythonTool,
     ));
     expect(backOn).toEqual({ mode: 'all', toolNames: [] });
-    expect(isMcpToolSelected({ ...manualServer, allowlist: backOn }, pythonTool)).toBe(true);
+    expect(isMcpToolSelected({ ...disabledModeServer, allowlist: backOn }, pythonTool)).toBe(true);
   });
 
-  it('deselects an allow-listed tool in manual mode instead of only ever enabling', () => {
-    const manualServer: McpServerConfig = {
+  it('deselects an allow-listed tool in disabled mode instead of only ever enabling', () => {
+    const disabledModeServer: McpServerConfig = {
       ...server,
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
       allowlist: { mode: 'allow', toolNames: ['python_exec'] },
     };
 
-    expect(isMcpToolEnabled(manualServer, pythonTool)).toBe(false);
-    expect(isMcpToolSelected(manualServer, pythonTool)).toBe(true);
+    expect(isMcpToolEnabled(disabledModeServer, pythonTool)).toBe(false);
+    expect(isMcpToolSelected(disabledModeServer, pythonTool)).toBe(true);
 
     const next = nextMcpToolAllowlist(
-      manualServer.allowlist,
+      disabledModeServer.allowlist,
       pythonTool,
-      !isMcpToolSelected(manualServer, pythonTool),
+      !isMcpToolSelected(disabledModeServer, pythonTool),
     );
     expect(next).toEqual({ mode: 'allow', toolNames: [] });
   });

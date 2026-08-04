@@ -58,7 +58,7 @@ export function normalizeDeepSeekFileMetadata(raw: unknown, includeRaw: boolean)
     fileName: firstString(value.file_name, value.fileName, value.name),
     mimeType: firstString(value.mime_type, value.mimeType, value.type),
     sizeBytes: coerceNullableNumber(value.file_size, value.fileSize, value.size),
-    status: firstString(value.status) ? 'metadata_available' : 'metadata_available',
+    status: firstString(value.status) ? 'metadata_available' : 'metadata_unavailable',
     sourceMessageIds: [],
     signedPath: firstString(value.signed_path, value.signedPath),
     auditResult: firstString(value.audit_result, value.auditResult),

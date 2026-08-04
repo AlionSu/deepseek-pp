@@ -72,15 +72,23 @@ describe('tool authorization context', () => {
     expect(authorized.descriptor).toEqual(descriptor);
   });
 
-  it('preserves released manual/high tools when the exact policy was advertised', async () => {
+  it('executes high-risk auto tools on both the grant (page) and trusted surfaces', async () => {
+    // 'manual' execution mode was removed; risk level alone never gates
+    // execution — enabled tools are auto-executable on every surface.
     const descriptor = makeDescriptor({
-      execution: { mode: 'manual', enabled: true, risk: 'high' },
+      execution: { mode: 'auto', enabled: true, risk: 'high' },
     });
     const grant = await createGrant([descriptor]);
 
     await expect(authorizeToolExecution(
       makeCall(),
       { kind: 'grant', grantId: grant.id, subject: SUBJECT },
+      [descriptor],
+    )).resolves.toMatchObject({ descriptor });
+
+    await expect(authorizeToolExecution(
+      makeCall(),
+      { kind: 'trusted', trigger: 'sidepanel_chat', requestId: 'trusted-1' },
       [descriptor],
     )).resolves.toMatchObject({ descriptor });
   });
@@ -251,7 +259,7 @@ describe('tool authorization context', () => {
     },
     {
       name: 'changed mode',
-      current: makeDescriptor({ execution: { mode: 'manual', enabled: true, risk: 'low' } }),
+      current: makeDescriptor({ execution: { mode: 'disabled', enabled: true, risk: 'low' } }),
     },
     {
       name: 'changed risk',

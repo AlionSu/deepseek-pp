@@ -479,7 +479,7 @@ async function getShellMcpServer(): Promise<McpServerConfig> {
     throw new Error('Shell MCP is disabled. Enable Shell Local on the MCP page first.');
   }
   if (!server.execution.enabled || server.execution.mode === 'disabled') {
-    throw new Error('Shell MCP execution is disabled. Enable manual execution on the MCP page before importing local Skills.');
+    throw new Error('Shell MCP execution is disabled. Enable execution on the MCP page before importing local Skills.');
   }
   server = await ensureLocalSkillShellToolsAllowed(server);
   return server;

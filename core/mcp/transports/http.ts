@@ -84,7 +84,7 @@ async function sendHttpMessage<TParams extends Record<string, unknown> | undefin
   const rpcResponse = await readJsonRpcResponse<TResult>(
     response,
     message,
-    { maxBytes: maxResponseBytes },
+    { maxBytes: maxResponseBytes, timeoutMs },
   );
   capturePendingStreamableSession(
     options.session,

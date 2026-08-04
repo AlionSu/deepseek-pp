@@ -321,7 +321,7 @@ function requireIdentity(value: unknown, label: string): string {
 function isExecutableDescriptor(descriptor: ToolDescriptor): boolean {
   return descriptor.provider.kind === 'mcp' &&
     descriptor.execution.enabled &&
-    descriptor.execution.mode === 'auto';
+    descriptor.execution.mode !== 'disabled';
 }
 
 async function readState(): Promise<McpCapabilityLeaseState> {

@@ -8,12 +8,12 @@ import {
 import { SHELL_TOOL_NAMES } from '../core/shell/contracts';
 
 describe('createShellMcpPresetInput', () => {
-  it('defaults Shell MCP to explicit manual opt-in', () => {
+  it('defaults Shell MCP to auto execution while disabled by default', () => {
     const preset = createShellMcpPresetInput();
 
     expect(preset.enabled).toBe(false);
     expect(preset.allowlist).toEqual({ mode: 'allow', toolNames: [...DEFAULT_SHELL_MCP_ALLOWLIST_TOOL_NAMES] });
-    expect(preset.execution).toEqual({ enabled: false, mode: 'manual' });
+    expect(preset.execution).toEqual({ enabled: false, mode: 'auto' });
   });
 
   it('keeps shell_exec and the persistent session tools out of the default allowlist', () => {

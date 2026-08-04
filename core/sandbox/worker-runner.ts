@@ -156,14 +156,29 @@ function normalizeWorkerResult(value: unknown): Omit<SandboxExecutionResult, 'du
     };
   }
   const result = value as Partial<SandboxExecutionResult>;
+  // Hard caps on every string field regardless of envelope provenance: user
+  // code inside the worker can self.postMessage a fabricated envelope, so the
+  // receiver must not trust the worker-side truncation (H2).
+  const stdout = limitText(typeof result.stdout === 'string' ? result.stdout : '', WORKER_RESULT_MAX_CHARS);
+  const stderr = limitText(typeof result.stderr === 'string' ? result.stderr : '', WORKER_STDERR_MAX_CHARS);
+  const rawResult = typeof result.result === 'string' ? result.result : undefined;
+  const resultText = limitText(rawResult ?? '', WORKER_RESULT_MAX_CHARS);
   return {
     ok: result.ok === true,
-    stdout: typeof result.stdout === 'string' ? result.stdout : '',
-    stderr: typeof result.stderr === 'string' ? result.stderr : '',
-    result: typeof result.result === 'string' ? result.result : undefined,
-    truncated: result.truncated === true,
+    stdout: stdout.text,
+    stderr: stderr.text,
+    result: rawResult === undefined ? undefined : resultText.text,
+    truncated: result.truncated === true || stdout.truncated || stderr.truncated || resultText.truncated,
     error: typeof result.error === 'string' ? result.error : undefined,
   };
+}
+
+const WORKER_RESULT_MAX_CHARS = 512 * 1024;
+const WORKER_STDERR_MAX_CHARS = 64 * 1024;
+
+function limitText(text: string, limit: number): { text: string; truncated: boolean } {
+  if (text.length <= limit) return { text, truncated: false };
+  return { text: `${text.slice(0, limit)}\n...[truncated]`, truncated: true };
 }
 
 function transpileTypeScript(code: string): string {
@@ -177,6 +192,8 @@ function transpileTypeScript(code: string): string {
 function createWorkerSource(): string {
   return `
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+const WORKER_RESULT_MAX_CHARS = 512 * 1024;
+const WORKER_STDERR_MAX_CHARS = 64 * 1024;
 self.onmessage = async (event) => {
   const { code, input, outputLimit } = event.data || {};
   const logs = [];
@@ -194,14 +211,16 @@ self.onmessage = async (event) => {
     const fn = new AsyncFunction('input', 'console', '"use strict";\\n' + String(code));
     const result = await fn(input, consoleProxy);
     const stdout = limitText(logs.join('\\n'), outputLimit);
-    self.postMessage({ ok: true, stdout: stdout.text, stderr: '', result: formatValue(result), truncated: stdout.truncated });
+    const resultText = limitText(formatValue(result), WORKER_RESULT_MAX_CHARS);
+    self.postMessage({ ok: true, stdout: stdout.text, stderr: '', result: resultText.text, truncated: stdout.truncated || resultText.truncated });
   } catch (error) {
     const stdout = limitText(logs.join('\\n'), outputLimit);
+    const stderr = limitText(error && error.stack ? String(error.stack) : String(error), WORKER_STDERR_MAX_CHARS);
     self.postMessage({
       ok: false,
       stdout: stdout.text,
-      stderr: error && error.stack ? String(error.stack) : String(error),
-      truncated: stdout.truncated,
+      stderr: stderr.text,
+      truncated: stdout.truncated || stderr.truncated,
       error: 'sandbox_exception',
     });
   }

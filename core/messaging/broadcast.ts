@@ -37,7 +37,9 @@ export async function broadcastRuntimeUpdate(
   }
 
   for (const tab of tabs) {
-    if (tab.id && tab.id !== excludeTabId) {
+    // Accept tab id 0 as a valid id (Chrome may assign it in edge cases);
+    // truthiness checks silently skip it.
+    if (typeof tab.id === 'number' && tab.id !== excludeTabId) {
       deliverRuntimeMessageBestEffort(
         dependencies.sendTabMessage(tab.id, payload),
         'broadcast_tab_delivery_failed',

@@ -1,12 +1,29 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   registerDefaultToolResultRenderers,
   renderToolResultWithRegistry,
+  userClickGuard,
 } from '../core/ui/tool-result-renderer';
 import type { ToolCardResult } from '../core/types';
 
+/**
+ * Result-card actions are gated on `event.isTrusted` (M2). jsdom cannot
+ * synthesize trusted events, so trusted clicks are emulated by swapping the
+ * exported userClickGuard holder; the untrusted test keeps the real guard and
+ * asserts a plain `element.click()` (isTrusted=false) does nothing.
+ */
+function trustedClick(element: HTMLElement | null): void {
+  if (!element) return;
+  element.click();
+}
+
 describe('tool result renderer registry', () => {
+  beforeEach(() => {
+    userClickGuard.isTrusted = () => true;
+  });
+
   afterEach(() => {
+    userClickGuard.isTrusted = (event) => event.isTrusted;
     vi.useRealTimers();
     document.head.innerHTML = '';
     document.body.innerHTML = '';
@@ -40,6 +57,40 @@ describe('tool result renderer registry', () => {
     expect(target.textContent).toContain('report.md');
     expect(target.textContent).toContain('Download');
     expect(document.getElementById('dpp-injected-theme-css')).not.toBeNull();
+  });
+
+  it('ignores synthetic (untrusted) clicks on result-card actions (M2)', () => {
+    // Restore the real guard: jsdom clicks report isTrusted=false, which is
+    // exactly the page-world synthetic-click case the guard must block.
+    userClickGuard.isTrusted = (event) => event.isTrusted;
+    registerDefaultToolResultRenderers();
+    const target = document.createElement('div');
+    const result: ToolCardResult = {
+      ok: true,
+      summary: 'Draft ready',
+      output: {
+        kind: 'skill_draft',
+        draft: {
+          name: 'audit',
+          description: 'Review contrast-sensitive output.',
+          instructions: 'Check dark theme text.',
+          memoryEnabled: true,
+        },
+      },
+    };
+    const sendMessageMock = vi.fn();
+
+    expect(renderToolResultWithRegistry({
+      target,
+      result,
+      locale: 'en',
+      sendMessage: sendMessageMock,
+    })).toBe(true);
+
+    target.querySelector<HTMLButtonElement>('.dpp-result-action')?.click();
+    // The save button must exist but the synthetic click must not persist.
+    expect(target.querySelector('.dpp-result-action')).not.toBeNull();
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('uses the shared injected theme variables for result text contrast', () => {
@@ -112,7 +163,7 @@ describe('tool result renderer registry', () => {
     expect(document.body.querySelector('.dpp-artifact-preview-panel')).toBeNull();
     expect(sendMessageMock).not.toHaveBeenCalled();
 
-    target.querySelector<HTMLButtonElement>('.dpp-artifact-preview')?.click();
+    trustedClick(target.querySelector<HTMLButtonElement>('.dpp-artifact-preview'));
     await Promise.resolve();
     await Promise.resolve();
 
@@ -157,7 +208,7 @@ describe('tool result renderer registry', () => {
     });
 
     expect(rendered).toBe(true);
-    target.querySelector<HTMLButtonElement>('.dpp-artifact-preview')?.click();
+    trustedClick(target.querySelector<HTMLButtonElement>('.dpp-artifact-preview'));
     await Promise.resolve();
     await Promise.resolve();
 
@@ -201,7 +252,7 @@ describe('tool result renderer registry', () => {
       sendMessage,
     });
 
-    target.querySelector<HTMLButtonElement>('.dpp-artifact-preview')?.click();
+    trustedClick(target.querySelector<HTMLButtonElement>('.dpp-artifact-preview'));
     await Promise.resolve();
     await Promise.resolve();
     expect(document.body.querySelector('.dpp-artifact-preview-panel')).not.toBeNull();
@@ -264,7 +315,7 @@ describe('tool result renderer registry', () => {
       sendMessage,
     });
     const button = target.querySelector<HTMLButtonElement>('.dpp-artifact-run');
-    button?.click();
+    trustedClick(button);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(rendered).toBe(true);

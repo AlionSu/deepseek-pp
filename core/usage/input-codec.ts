@@ -55,13 +55,13 @@ function normalizePositiveInteger(value: unknown, fallback: number): number {
 }
 
 function normalizeNonNegativeInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
-    ? Math.round(value)
-    : null;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
 function normalizeNullableInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null;
+  // Integer-only: rounding fractional message ids could alias a different
+  // record (e.g. 3.6 → 4 collides with id 4).
+  return typeof value === 'number' && Number.isInteger(value) ? value : null;
 }
 
 function normalizeMetricSource(value: unknown): TokenMetricSource {

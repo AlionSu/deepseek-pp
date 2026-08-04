@@ -9,9 +9,20 @@ function buildUrl(config: WebdavSyncConfig, file?: string): string {
 
 function headers(config: WebdavSyncConfig, extra?: Record<string, string>): Record<string, string> {
   return {
-    Authorization: 'Basic ' + btoa(`${config.username}:${config.password}`),
+    Authorization: 'Basic ' + toBase64Utf8(`${config.username}:${config.password}`),
     ...extra,
   };
+}
+
+/**
+ * UTF-8-safe base64 for the Basic auth header. `btoa` throws on non-Latin-1
+ * characters (e.g. CJK credentials), breaking WebDAV sync entirely (M9).
+ */
+function toBase64Utf8(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 export async function webdavTest(config: WebdavSyncConfig): Promise<void> {
