@@ -9,11 +9,14 @@ export interface ContentUxPolishLabels {
   codeDownloadButton: string;
   messageMarkdownButton: string;
   messageMarkdownTitle: string;
+  messageCopyButton: string;
+  messageCopyTitle: string;
 }
 
 const STYLE_ID = 'dpp-content-ux-polish-css';
 const CODE_BUTTON_CLASS = 'dpp-code-download';
 const MESSAGE_BUTTON_CLASS = 'dpp-message-download';
+const MESSAGE_COPY_CLASS = 'dpp-message-copy';
 const MESSAGE_SELECTOR = '[data-message-id][data-message-role], [data-message-author-role]';
 const POLISH_MOUNT_DELAY_MS = 50;
 const CODE_BUTTON_OFFSET_PX = 6;
@@ -49,7 +52,7 @@ export function startContentUxPolish(
       window.removeEventListener('resize', syncCodeButtons);
       codeButtons.forEach((button) => button.remove());
       codeButtons.clear();
-      document.querySelectorAll(`.${MESSAGE_BUTTON_CLASS}`).forEach((button) => button.remove());
+      document.querySelectorAll(`.${MESSAGE_BUTTON_CLASS}, .${MESSAGE_COPY_CLASS}`).forEach((button) => button.remove());
       document.getElementById(STYLE_ID)?.remove();
     },
   };
@@ -73,7 +76,7 @@ function mountPolish(
   codeButtons: Map<HTMLElement, HTMLButtonElement>,
 ): void {
   collectCodeBlocks(root).forEach((pre, index) => mountCodeDownload(pre, index, labels, codeButtons));
-  collectMessageNodes(root).forEach((message) => mountMessageDownload(message, labels));
+  collectMessageNodes(root).forEach((message) => mountMessageActions(message, labels));
   applyPolishLabels(root, labels);
   syncCodeButtonPositions(codeButtons);
 }
@@ -111,17 +114,17 @@ export function getCodeBlockText(pre: HTMLElement): string {
 
 function collectMessageNodes(root: ParentNode): HTMLElement[] {
   return queryIncludingRoot<HTMLElement>(root, MESSAGE_SELECTOR)
-    .filter((node) => !node.querySelector(`:scope > .${MESSAGE_BUTTON_CLASS}`))
+    .filter((node) => !node.querySelector(`:scope > .${MESSAGE_BUTTON_CLASS}, :scope > .${MESSAGE_COPY_CLASS}`))
     .filter((node) => node.textContent?.trim());
 }
 
-function mountMessageDownload(message: HTMLElement, labels: ContentUxPolishLabels): void {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = MESSAGE_BUTTON_CLASS;
-  button.textContent = labels.messageMarkdownButton;
-  button.title = labels.messageMarkdownTitle;
-  button.addEventListener('click', (event) => {
+function mountMessageActions(message: HTMLElement, labels: ContentUxPolishLabels): void {
+  const markdownButton = document.createElement('button');
+  markdownButton.type = 'button';
+  markdownButton.className = MESSAGE_BUTTON_CLASS;
+  markdownButton.textContent = labels.messageMarkdownButton;
+  markdownButton.title = labels.messageMarkdownTitle;
+  markdownButton.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
     const artifact = createMessageMarkdownArtifact({
@@ -132,7 +135,36 @@ function mountMessageDownload(message: HTMLElement, labels: ContentUxPolishLabel
     });
     downloadText(artifact.filename, artifact.content, artifact.mimeType);
   });
-  message.appendChild(button);
+  message.appendChild(markdownButton);
+
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = MESSAGE_COPY_CLASS;
+  copyButton.textContent = labels.messageCopyButton;
+  copyButton.title = labels.messageCopyTitle;
+  copyButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void copyTextToClipboard(getMessageText(message)).catch((error) => {
+      console.warn('[DeepSeek++] copy full message output failed:', error);
+    });
+  });
+  message.appendChild(copyButton);
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
 }
 
 function applyPolishLabels(root: ParentNode, labels: ContentUxPolishLabels): void {
@@ -144,11 +176,15 @@ function applyPolishLabels(root: ParentNode, labels: ContentUxPolishLabels): voi
     button.textContent = labels.messageMarkdownButton;
     button.title = labels.messageMarkdownTitle;
   });
+  root.querySelectorAll<HTMLButtonElement>(`.${MESSAGE_COPY_CLASS}`).forEach((button) => {
+    button.textContent = labels.messageCopyButton;
+    button.title = labels.messageCopyTitle;
+  });
 }
 
 function getMessageText(message: HTMLElement): string {
   const clone = message.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll(`.${MESSAGE_BUTTON_CLASS}`).forEach((node) => node.remove());
+  clone.querySelectorAll(`.${MESSAGE_BUTTON_CLASS}, .${MESSAGE_COPY_CLASS}`).forEach((node) => node.remove());
   return clone.textContent?.trim() ?? '';
 }
 

@@ -241,6 +241,8 @@ import {
 import { requiresCurrentToolAuthorizationSubject } from '../core/messaging/tool-runtime-contracts';
 import { createRuntimeCommandRegistry } from '../core/messaging/runtime-command-registry';
 import { createBootstrapRuntimeHandlers } from './background/bootstrap-handlers';
+import { createDiagnosticsRuntimeHandlers } from './background/diagnostics-handlers';
+import { createArtifactRuntimeHandlers } from './background/artifact-handlers';
 import { createTrackedLocalStateMutationRunner } from './background/local-state-mutation-runner';
 import { createPersistenceMutationBindings } from './background/persistence-mutation-bindings';
 import { createPersistenceRuntimeHandlers } from './background/persistence-handlers';
@@ -397,6 +399,10 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
       dismissWhatsNew,
       refreshWhatsNewBadge,
     }),
+    ...createDiagnosticsRuntimeHandlers({
+      getVersion: getExtensionVersion,
+    }),
+    ...createArtifactRuntimeHandlers(),
     ...createPersistenceRuntimeHandlers({
       memory: {
         getAllMemories,

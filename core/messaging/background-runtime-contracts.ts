@@ -51,6 +51,17 @@ type SyncOperationSuccess = {
 };
 
 export interface BackgroundRuntimeCommandContracts {
+  EXPORT_DIAGNOSTIC_LOGS: {
+    request: { type: 'EXPORT_DIAGNOSTIC_LOGS' };
+    response: { exportedAt: string; extensionVersion: string; entries: readonly unknown[] };
+  };
+  SAVE_AGENT_OUTPUT_ARTIFACT: {
+    request: {
+      type: 'SAVE_AGENT_OUTPUT_ARTIFACT';
+      payload: { loopId?: string; content: string };
+    };
+    response: { ok: true; artifactId: string } | { ok: false; error: string };
+  };
   RECORD_USAGE_TURN: {
     request: DeclaredRuntimeRequest<'RECORD_USAGE_TURN'>;
     response: UsageTurnRecord;

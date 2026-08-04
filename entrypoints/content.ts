@@ -43,6 +43,7 @@ import { shouldIgnoreEmptyTokenSpeedProgress } from '../core/deepseek/stream-met
 import { readDeepSeekChatSessionId } from '../core/deepseek/chat-session';
 import { createUsageProgressWriteCoordinator } from '../core/usage/progress-write-coordinator';
 import { runInlineAgentLoop } from '../core/inline-agent/loop';
+import { shouldAutoSaveAgentOutput } from '../core/inline-agent/auto-save';
 import {
   INCOMPLETE_TOOL_CALL_ERROR_CODE,
   selectContinuableToolExecutions,
@@ -161,6 +162,7 @@ import {
 import { buildDeepSeekSessionUrl, createClientHeaders, rememberDeepSeekClientHeaders, saveClientHeadersToStorage } from '../core/deepseek/adapter';
 import type {
   ConversationExportArtifact,
+  ConversationExportContentScope,
   ConversationExportProgress,
   ConversationExportResult,
 } from '../core/export/types';
@@ -256,6 +258,32 @@ const CONVERSATION_EXPORT_FORMAT_OPTIONS: ConversationExportFormatOption[] = [
   { format: 'pdf', labelKey: 'content.export.formatPdf', defaultChecked: false },
   { format: 'image_manifest', labelKey: 'content.export.formatImageManifest', defaultChecked: false },
 ];
+
+interface ConversationExportScopeOption {
+  scope: ConversationExportContentScope;
+  labelKey: LocaleMessageKey;
+}
+
+const CONVERSATION_EXPORT_SCOPE_OPTIONS: ConversationExportScopeOption[] = [
+  { scope: 'full', labelKey: 'content.export.scopeFull' },
+  { scope: 'input-output', labelKey: 'content.export.scopeInputOutput' },
+];
+
+const CONVERSATION_EXPORT_SCOPE_STORAGE_KEY = 'dpp:export:content-scope';
+
+function getStoredConversationExportScope(): ConversationExportContentScope {
+  const stored = localStorage.getItem(CONVERSATION_EXPORT_SCOPE_STORAGE_KEY);
+  return stored === 'input-output' ? 'input-output' : 'full';
+}
+
+function storeConversationExportScope(scope: ConversationExportContentScope): void {
+  localStorage.setItem(CONVERSATION_EXPORT_SCOPE_STORAGE_KEY, scope);
+}
+
+function getSelectedConversationExportScope(menu: HTMLElement): ConversationExportContentScope {
+  const checked = menu.querySelector<HTMLInputElement>('input[name="contentScope"]:checked');
+  return checked?.value === 'input-output' ? 'input-output' : 'full';
+}
 // These states keep rotating pet lines during long stays; other states speak once on entry.
 const PET_BUBBLE_LOOPING_STATES: ReadonlySet<PetState> = new Set<PetState>([
   'idle',
@@ -542,6 +570,8 @@ function getContentUxPolishLabels() {
     codeDownloadButton: contentT('content.uxPolish.downloadCode'),
     messageMarkdownButton: contentT('content.uxPolish.downloadMessageMarkdownButton'),
     messageMarkdownTitle: contentT('content.uxPolish.downloadMessageMarkdownTitle'),
+    messageCopyButton: contentT('content.uxPolish.copyMessageButton'),
+    messageCopyTitle: contentT('content.uxPolish.copyMessageTitle'),
   };
 }
 
@@ -1827,6 +1857,26 @@ function showConversationExportMenu(button: HTMLButtonElement) {
     form.appendChild(label);
   }
 
+  const scopeTitle = document.createElement('div');
+  scopeTitle.className = 'dpp-export-menu-title';
+  scopeTitle.textContent = contentT('content.export.scopeLabel');
+  form.appendChild(scopeTitle);
+
+  const initialScope = getStoredConversationExportScope();
+  for (const option of CONVERSATION_EXPORT_SCOPE_OPTIONS) {
+    const label = document.createElement('label');
+    label.className = 'dpp-export-menu-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'contentScope';
+    input.value = option.scope;
+    input.checked = initialScope === option.scope;
+    const text = document.createElement('span');
+    text.textContent = contentT(option.labelKey);
+    label.append(input, text);
+    form.appendChild(label);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'dpp-export-menu-actions';
   const cancel = document.createElement('button');
@@ -1846,8 +1896,10 @@ function showConversationExportMenu(button: HTMLButtonElement) {
     event.preventDefault();
     const formats = getSelectedConversationExportFormats(menu);
     if (formats.length === 0) return;
+    const scope = getSelectedConversationExportScope(menu);
+    storeConversationExportScope(scope);
     closeConversationExportMenu();
-    void startCurrentConversationExport(formats);
+    void startCurrentConversationExport(formats, scope);
   });
 
   menu.appendChild(form);
@@ -1918,6 +1970,7 @@ function handleConversationExportMenuKeydown(event: KeyboardEvent) {
 
 async function startCurrentConversationExport(
   selectedFormats: ConversationExportArtifact['format'][] = ['html'],
+  contentScope: ConversationExportContentScope = 'full',
 ) {
   if (activeConversationExportId) return;
   const sessionId = getCurrentChatSessionId();
@@ -1933,7 +1986,7 @@ async function startCurrentConversationExport(
   showConversationExportToast(contentT('content.export.progress'), 'info');
 
   try {
-    const response = await sendConversationExportRequest(exportId, sessionId, formats);
+    const response = await sendConversationExportRequest(exportId, sessionId, formats, contentScope);
     if (!response?.ok) {
       throw new Error(response?.error ?? contentT('content.export.failed'));
     }
@@ -1978,6 +2031,7 @@ async function sendConversationExportRequest(
   exportId: string,
   sessionId: string,
   formats: ConversationExportArtifact['format'][],
+  contentScope: ConversationExportContentScope = 'full',
 ): Promise<ExportResponse | undefined> {
   if (!hasLiveExtensionContext()) return undefined;
   try {
@@ -1987,6 +2041,7 @@ async function sendConversationExportRequest(
         exportId,
         request: {
           mode: 'sanitized',
+          contentScope,
           formats,
           includeAttachmentMetadata: true,
           includeFileBodies: false,
@@ -3879,6 +3934,11 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
 
     const footer = createAgentFooter(msg.totalSteps, msg.totalTools, false, undefined, getAgentRendererLabels());
     inlineAgentContainer.appendChild(footer);
+
+    const executedToolNames = collectInlineAgentExecutedToolNames();
+    if (shouldAutoSaveAgentOutput(finalText, executedToolNames)) {
+      void persistLongAgentOutput(finalText, msg.loopId, inlineAgentContainer);
+    }
     updateActiveInlineAgentTrace((trace) => ({
       ...trace,
       status: 'complete',
@@ -3924,6 +3984,76 @@ function appendInlineAgentFinalAnswer(container: HTMLElement, text: string, loop
   textDiv.setAttribute('data-dpp-body-text', 'true');
   textDiv.setAttribute('data-dpp-agent-loop-id', loopId);
   parent.appendChild(textDiv);
+}
+
+function collectInlineAgentExecutedToolNames(): string[] {
+  const trace = activeInlineAgentTrace;
+  if (!trace) return [];
+  const names: string[] = [];
+  for (const step of trace.steps) {
+    for (const exec of step.toolExecutions) names.push(exec.name);
+  }
+  return names;
+}
+
+async function persistLongAgentOutput(
+  finalText: string,
+  loopId: string,
+  container: HTMLElement,
+): Promise<void> {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'SAVE_AGENT_OUTPUT_ARTIFACT',
+      payload: { loopId, content: finalText },
+    }) as { ok: boolean; artifactId?: string; error?: string } | undefined;
+    if (response?.ok && typeof response.artifactId === 'string') {
+      appendInlineAgentAutoSaveNote(container, response.artifactId);
+    } else {
+      console.warn('[DeepSeek++] agent output auto-save failed:', response?.error ?? 'unknown');
+    }
+  } catch (error) {
+    console.warn('[DeepSeek++] agent output auto-save request failed:', error);
+  }
+}
+
+function appendInlineAgentAutoSaveNote(container: HTMLElement, artifactId: string): void {
+  const note = document.createElement('div');
+  note.className = 'dpp-agent-autosave-note';
+  const label = document.createElement('span');
+  label.textContent = contentT('content.agent.autoSaved');
+  const download = document.createElement('button');
+  download.type = 'button';
+  download.textContent = contentT('content.agent.autoSavedDownload');
+  download.addEventListener('click', () => {
+    void downloadAgentOutputArtifact(artifactId);
+  });
+  note.append(label, download);
+  container.appendChild(note);
+}
+
+async function downloadAgentOutputArtifact(artifactId: string): Promise<void> {
+  try {
+    const response = await sendRuntimeMessageStrict<{ ok: true; artifact: { filename: string; mimeType: string; content: string } } | { ok: false; error: string }>({
+      type: 'GET_ARTIFACT',
+      payload: { id: artifactId },
+    });
+    if (!response?.ok) {
+      console.warn('[DeepSeek++] agent output artifact download failed:', response?.error ?? 'not found');
+      return;
+    }
+    const artifact = response.artifact;
+    const blob = new Blob([artifact.content], { type: artifact.mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = artifact.filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.warn('[DeepSeek++] agent output artifact download request failed:', error);
+  }
 }
 
 function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
