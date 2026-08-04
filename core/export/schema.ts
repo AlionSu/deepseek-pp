@@ -22,6 +22,7 @@ export class ConversationExportValidationError extends Error {
 export function normalizeConversationExportRequest(input: unknown): ConversationExportRequest {
   const value = isRecord(input) ? input : {};
   const mode = normalizeMode(value.mode);
+  const contentScope = normalizeContentScope(value.contentScope);
   const requestedFormats = normalizeFormats(value.formats);
 
   const formats = dedupeFormats(requestedFormats);
@@ -38,6 +39,7 @@ export function normalizeConversationExportRequest(input: unknown): Conversation
 
   return {
     mode,
+    contentScope,
     formats,
     includeAttachmentMetadata: value.includeAttachmentMetadata !== false,
     includeFileBodies: false,
@@ -74,6 +76,12 @@ function normalizeMode(value: unknown): ConversationExportRequest['mode'] {
   if (value === undefined || value === null || value === '') return 'sanitized';
   if (value === 'raw' || value === 'sanitized') return value;
   throw new ConversationExportValidationError('mode must be either raw or sanitized.');
+}
+
+function normalizeContentScope(value: unknown): ConversationExportRequest['contentScope'] {
+  if (value === undefined || value === null || value === '') return 'full';
+  if (value === 'full' || value === 'input-output') return value;
+  throw new ConversationExportValidationError('contentScope must be either full or input-output.');
 }
 
 function normalizeFormats(value: unknown): ConversationExportFormat[] {

@@ -162,6 +162,7 @@ import {
 import { buildDeepSeekSessionUrl, createClientHeaders, rememberDeepSeekClientHeaders, saveClientHeadersToStorage } from '../core/deepseek/adapter';
 import type {
   ConversationExportArtifact,
+  ConversationExportContentScope,
   ConversationExportProgress,
   ConversationExportResult,
 } from '../core/export/types';
@@ -257,6 +258,32 @@ const CONVERSATION_EXPORT_FORMAT_OPTIONS: ConversationExportFormatOption[] = [
   { format: 'pdf', labelKey: 'content.export.formatPdf', defaultChecked: false },
   { format: 'image_manifest', labelKey: 'content.export.formatImageManifest', defaultChecked: false },
 ];
+
+interface ConversationExportScopeOption {
+  scope: ConversationExportContentScope;
+  labelKey: LocaleMessageKey;
+}
+
+const CONVERSATION_EXPORT_SCOPE_OPTIONS: ConversationExportScopeOption[] = [
+  { scope: 'full', labelKey: 'content.export.scopeFull' },
+  { scope: 'input-output', labelKey: 'content.export.scopeInputOutput' },
+];
+
+const CONVERSATION_EXPORT_SCOPE_STORAGE_KEY = 'dpp:export:content-scope';
+
+function getStoredConversationExportScope(): ConversationExportContentScope {
+  const stored = localStorage.getItem(CONVERSATION_EXPORT_SCOPE_STORAGE_KEY);
+  return stored === 'input-output' ? 'input-output' : 'full';
+}
+
+function storeConversationExportScope(scope: ConversationExportContentScope): void {
+  localStorage.setItem(CONVERSATION_EXPORT_SCOPE_STORAGE_KEY, scope);
+}
+
+function getSelectedConversationExportScope(menu: HTMLElement): ConversationExportContentScope {
+  const checked = menu.querySelector<HTMLInputElement>('input[name="contentScope"]:checked');
+  return checked?.value === 'input-output' ? 'input-output' : 'full';
+}
 // These states keep rotating pet lines during long stays; other states speak once on entry.
 const PET_BUBBLE_LOOPING_STATES: ReadonlySet<PetState> = new Set<PetState>([
   'idle',
@@ -1830,6 +1857,26 @@ function showConversationExportMenu(button: HTMLButtonElement) {
     form.appendChild(label);
   }
 
+  const scopeTitle = document.createElement('div');
+  scopeTitle.className = 'dpp-export-menu-title';
+  scopeTitle.textContent = contentT('content.export.scopeLabel');
+  form.appendChild(scopeTitle);
+
+  const initialScope = getStoredConversationExportScope();
+  for (const option of CONVERSATION_EXPORT_SCOPE_OPTIONS) {
+    const label = document.createElement('label');
+    label.className = 'dpp-export-menu-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'contentScope';
+    input.value = option.scope;
+    input.checked = initialScope === option.scope;
+    const text = document.createElement('span');
+    text.textContent = contentT(option.labelKey);
+    label.append(input, text);
+    form.appendChild(label);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'dpp-export-menu-actions';
   const cancel = document.createElement('button');
@@ -1849,8 +1896,10 @@ function showConversationExportMenu(button: HTMLButtonElement) {
     event.preventDefault();
     const formats = getSelectedConversationExportFormats(menu);
     if (formats.length === 0) return;
+    const scope = getSelectedConversationExportScope(menu);
+    storeConversationExportScope(scope);
     closeConversationExportMenu();
-    void startCurrentConversationExport(formats);
+    void startCurrentConversationExport(formats, scope);
   });
 
   menu.appendChild(form);
@@ -1921,6 +1970,7 @@ function handleConversationExportMenuKeydown(event: KeyboardEvent) {
 
 async function startCurrentConversationExport(
   selectedFormats: ConversationExportArtifact['format'][] = ['html'],
+  contentScope: ConversationExportContentScope = 'full',
 ) {
   if (activeConversationExportId) return;
   const sessionId = getCurrentChatSessionId();
@@ -1936,7 +1986,7 @@ async function startCurrentConversationExport(
   showConversationExportToast(contentT('content.export.progress'), 'info');
 
   try {
-    const response = await sendConversationExportRequest(exportId, sessionId, formats);
+    const response = await sendConversationExportRequest(exportId, sessionId, formats, contentScope);
     if (!response?.ok) {
       throw new Error(response?.error ?? contentT('content.export.failed'));
     }
@@ -1981,6 +2031,7 @@ async function sendConversationExportRequest(
   exportId: string,
   sessionId: string,
   formats: ConversationExportArtifact['format'][],
+  contentScope: ConversationExportContentScope = 'full',
 ): Promise<ExportResponse | undefined> {
   if (!hasLiveExtensionContext()) return undefined;
   try {
@@ -1990,6 +2041,7 @@ async function sendConversationExportRequest(
         exportId,
         request: {
           mode: 'sanitized',
+          contentScope,
           formats,
           includeAttachmentMetadata: true,
           includeFileBodies: false,
