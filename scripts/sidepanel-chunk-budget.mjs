@@ -24,9 +24,14 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // initial shell. CI Node-22 measurement: 369698 raw / 111410 gzip (+4022 /
 // +1007 over the previous baseline); local Node-25 zlib measures 111279,
 // within the encoder variance allowance.
+// Refreshed for the #495-#499 batch (head 90ef4ad): settings data subpage
+// log-export entry (#495) plus export-scope / auto-save / copy-output i18n
+// keys (#497-#499) add to the initial shell. Local Node-25 measurement:
+// 372032 raw / 111777 gzip (+2334 / +367 over the previous baseline); the
+// encoder variance allowance covers CI Node-22 gzip drift.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 369_698, gzip: 111_410 },
+  initialShell: { raw: 372_032, gzip: 111_777 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -48,6 +53,13 @@ const WAVE_2_CHAT_BASELINE = Object.freeze({
   ChatPage: { raw: 134_902, gzip: 40_039 },
 });
 
+// firstChatScreen raw cap raised 400500 -> 402500 for the #495-#499 batch
+// (head 90ef4ad): the shared i18n additions for export scope (#499), agent
+// auto-save (#497), copy-full-output (#498), and the settings log-export
+// entry (#495) also flow into the first chat screen graph. Local Node-25
+// measurement: 402288 raw / 121796 gzip (+2199 raw over the #475 refresh);
+// gzip stays within the existing 122000 cap.
+
 // gzip size may vary slightly between supported Node/zlib releases even when
 // the built JavaScript bytes are identical. Keep the raw baseline exact and
 // bound this encoder-only variance to a small fixed allowance.
@@ -58,7 +70,7 @@ const BUDGET = Object.freeze({
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 400_500, gzip: 122_000 },
+  firstChatScreen: { raw: 402_500, gzip: 122_000 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },
