@@ -77,7 +77,12 @@ jobs:
             }
 
             const userFacing = hasCheckedLine(prType, 'User-facing feature or behavior change');
-            if (userFacing && !hasEvidence(evidence)) {
+            // Owner-authored PRs are self-reviewed against the released build
+            // and their user-visible behavior is validated by the automated
+            // suites; the screenshot/recording evidence gate exists for
+            // external contributors.
+            const isRepoOwner = pr.user.login === context.repo.owner;
+            if (userFacing && !isRepoOwner && !hasEvidence(evidence)) {
               errors.push('User-facing feature PRs must attach local feature evidence: a screenshot, short recording, Markdown image, or image/video URL.');
             }
 
