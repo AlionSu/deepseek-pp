@@ -543,6 +543,8 @@ function getContentUxPolishLabels() {
     codeDownloadButton: contentT('content.uxPolish.downloadCode'),
     messageMarkdownButton: contentT('content.uxPolish.downloadMessageMarkdownButton'),
     messageMarkdownTitle: contentT('content.uxPolish.downloadMessageMarkdownTitle'),
+    messageCopyButton: contentT('content.uxPolish.copyMessageButton'),
+    messageCopyTitle: contentT('content.uxPolish.copyMessageTitle'),
   };
 }
 

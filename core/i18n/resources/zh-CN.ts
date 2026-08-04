@@ -991,6 +991,8 @@ export const zhCN = {
       downloadCode: '下载',
       downloadMessageMarkdownButton: 'MD',
       downloadMessageMarkdownTitle: '下载消息为 Markdown',
+      copyMessageButton: '复制',
+      copyMessageTitle: '复制完整对话输出',
     },
     toolBlock: {
       title: '已执行工具（{count}次）',

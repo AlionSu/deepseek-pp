@@ -991,6 +991,8 @@ export const en = {
       downloadCode: 'Download',
       downloadMessageMarkdownButton: 'MD',
       downloadMessageMarkdownTitle: 'Download message as Markdown',
+      copyMessageButton: 'Copy',
+      copyMessageTitle: 'Copy full message output',
     },
     toolBlock: {
       title: 'Executed tools ({count})',

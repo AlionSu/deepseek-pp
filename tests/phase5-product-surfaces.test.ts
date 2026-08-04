@@ -109,6 +109,8 @@ describe('Phase 5 product surface helpers', () => {
       codeDownloadButton: '下载',
       messageMarkdownButton: 'MD',
       messageMarkdownTitle: '下载消息为 Markdown',
+      messageCopyButton: '复制',
+      messageCopyTitle: '复制完整对话输出',
     }));
 
     try {
@@ -123,6 +125,8 @@ describe('Phase 5 product surface helpers', () => {
       expect(document.querySelector<HTMLButtonElement>('.dpp-code-download')?.textContent).toBe('下载');
       expect(document.querySelector('pre')?.querySelector('.dpp-code-download')).toBeNull();
       expect(document.querySelector<HTMLButtonElement>('.dpp-message-download')?.title).toBe('下载消息为 Markdown');
+      expect(document.querySelector<HTMLButtonElement>('.dpp-message-copy')?.title).toBe('复制完整对话输出');
+      expect(document.querySelector<HTMLButtonElement>('.dpp-message-copy')?.textContent).toBe('复制');
     } finally {
       history.stop();
       polish.stop();
@@ -136,6 +140,8 @@ describe('Phase 5 product surface helpers', () => {
       codeDownloadButton: '下载',
       messageMarkdownButton: 'MD',
       messageMarkdownTitle: '下载消息为 Markdown',
+      messageCopyButton: '复制',
+      messageCopyTitle: '复制完整对话输出',
     }));
 
     try {
