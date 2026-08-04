@@ -59,7 +59,7 @@ function createLocalFileReadResult(args) {
     const { content, totalChars, charsRead } = readTextFileWindow(resolvedPath, start, maxChars);
     const nextStart = start + charsRead;
     return {
-      content: [{ type: 'text', text: `Read ${Array.from(content).length} characters from ${resolvedPath}` }],
+      content: [{ type: 'text', text: `Read ${content.length} characters from ${resolvedPath}` }],
       structuredContent: {
         ok: true,
         data: {
@@ -175,7 +175,11 @@ export function readTextFileWindow(filePath, startChar, maxChars) {
     if (charPos < startChar) {
       return { content: '', totalChars: getTotalCharCount(fd, totalBytes, filePath, stat), charsRead: 0 };
     }
-    if (readWindowPosCache.size >= MAX_WINDOW_POS_CACHE) readWindowPosCache.clear();
+    // 达上限时仅淘汰最旧条目（FIFO），避免一次性清空所有热缓存导致频繁全扫。
+    if (readWindowPosCache.size >= MAX_WINDOW_POS_CACHE) {
+      const oldest = readWindowPosCache.keys().next().value;
+      if (oldest !== undefined) readWindowPosCache.delete(oldest);
+    }
     readWindowPosCache.set(filePath, { bytePos, charPos, mtimeMs: stat.mtimeMs, size: stat.size });
 
     // 读取窗口 [startChar, startChar + maxChars)
@@ -270,7 +274,11 @@ function getTotalCharCount(fd, totalBytes, path, stat) {
     for (let j = 0; j < got; j++) if ((buf[j] & 0xC0) !== 0x80) count++;
     bytePos += got;
   }
-  if (fileCharCountCache.size >= MAX_FILE_CHAR_CACHE) fileCharCountCache.clear();
+  // 达上限时仅淘汰最旧条目（FIFO），避免一次性清空所有热缓存导致频繁全扫。
+  if (fileCharCountCache.size >= MAX_FILE_CHAR_CACHE) {
+    const oldest = fileCharCountCache.keys().next().value;
+    if (oldest !== undefined) fileCharCountCache.delete(oldest);
+  }
   fileCharCountCache.set(path, { count, mtimeMs: stat.mtimeMs, size: stat.size });
   return count;
 }

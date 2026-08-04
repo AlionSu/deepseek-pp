@@ -242,7 +242,11 @@ describe('callMcpTool 提供方身份闸门 (LRC#1)', () => {
     const result = await callMcpTool(makeServer(), transport, { call } as never);
     expect(result.ok).toBe(true);
     expect(result.summary).toBe('local_file_read auto 续读完成');
-    expect(autoReadData(result).content).toBe('AAAABBBB');
+    const t4Data = autoReadData(result);
+    expect(t4Data.content).toBe('AAAABBBB');
+    // 契约形状硬断言：data.content 必须为单字符串而非逐窗数组，防止误回退为 contents[]。
+    expect(typeof t4Data.content).toBe('string');
+    expect(Array.isArray(t4Data.content)).toBe(false);
   });
 });
 
