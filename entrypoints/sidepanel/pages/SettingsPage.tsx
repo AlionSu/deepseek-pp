@@ -13,9 +13,10 @@ const VoiceSubPage = lazy(() => import('../components/settings/VoiceSubPage'));
 const AppearanceSubPage = lazy(() => import('../components/settings/AppearanceSubPage'));
 const UsageSubPage = lazy(() => import('../components/settings/UsageSubPage'));
 const DataSubPage = lazy(() => import('../components/settings/DataSubPage'));
+const ProjectFilesSubPage = lazy(() => import('../components/settings/ProjectFilesSubPage'));
 const AboutSubPage = lazy(() => import('../components/settings/AboutSubPage'));
 
-type SubTab = 'general' | 'api' | 'prompt' | 'voice' | 'appearance' | 'usage' | 'data' | 'about';
+type SubTab = 'general' | 'api' | 'prompt' | 'voice' | 'appearance' | 'usage' | 'data' | 'projectFiles' | 'about';
 
 const SUB_TABS: { key: SubTab; labelKey: LocaleMessageKey }[] = [
   { key: 'general', labelKey: 'sidepanel.settings.tabs.general' },
@@ -25,6 +26,7 @@ const SUB_TABS: { key: SubTab; labelKey: LocaleMessageKey }[] = [
   { key: 'appearance', labelKey: 'sidepanel.settings.tabs.appearance' },
   { key: 'usage', labelKey: 'sidepanel.settings.tabs.usage' },
   { key: 'data', labelKey: 'sidepanel.settings.tabs.data' },
+  { key: 'projectFiles', labelKey: 'sidepanel.settings.tabs.projectFiles' },
   { key: 'about', labelKey: 'sidepanel.settings.tabs.about' },
 ];
 
@@ -36,6 +38,7 @@ const SUB_DESCRIPTION_KEY: Record<SubTab, LocaleMessageKey> = {
   appearance: 'sidepanel.settings.appearanceDescription',
   usage: 'sidepanel.settings.usageDescription',
   data: 'sidepanel.settings.dataDescription',
+  projectFiles: 'sidepanel.settings.projectFilesDescription',
   about: 'sidepanel.settings.aboutTagline',
 };
 
@@ -73,6 +76,7 @@ export default function SettingsPage() {
             {sub === 'appearance' && <AppearanceSubPage state={state} />}
             {sub === 'usage' && <UsageSubPage />}
             {sub === 'data' && <DataSubPage state={state} />}
+            {sub === 'projectFiles' && <ProjectFilesSubPage />}
             {sub === 'about' && <AboutSubPage state={state} />}
           </Suspense>
         )}

@@ -19,6 +19,7 @@ import type {
 import { normalizePetConfig } from '../core/pet/config';
 import { pickPetLine, type PetState } from '../core/pet/lines';
 import { createToolInvocationCatalog } from '../core/tool/invocation';
+import { projectToolDescriptorsForNativeSearch } from '../core/tool/native-search-projection';
 import { createLatestSyncGate, type LatestSyncLease } from '../core/tool/latest-sync';
 import { DEFAULT_PROMPT_INJECTION_SETTINGS, normalizePromptInjectionSettings } from '../core/prompt/settings';
 import { normalizeBackgroundConfig } from '../core/background/config';
@@ -70,7 +71,10 @@ import {
   updateStepStreamText,
   updateStepStatus,
   addToolResultToStep,
+  addToolResultDetailsToStep,
   createAgentFooter,
+  createAgentRunningIndicator,
+  updateAgentRunningIndicator,
 } from '../core/inline-agent/renderer';
 import { renderInlineMarkdown } from '../core/inline-agent/markdown';
 import {
@@ -177,6 +181,7 @@ import {
   type ContentMutationHub,
 } from './content/controllers/mutation-hub';
 import { notifyContentAuthStatusChanged } from './content/auth-status-notifier';
+import { createContentPersistenceTracker } from './content/persistence-tracking';
 import { getRestoredMessageMutationAction } from './content/restored-message-targets';
 import { bindNewChatToolCallToBrowserSession } from './content/tool-session-binding';
 
@@ -385,6 +390,8 @@ let currentToolDescriptors: ToolDescriptor[] = [];
 const toolDescriptorSyncGate = createLatestSyncGate();
 let currentRequestMessageCount = 0;
 let activeAgentAbort: AbortController | null = null;
+let agentRunningIndicator: HTMLElement | null = null;
+let agentRunningToolCount = 0;
 const pendingInlineAgentLoopTasks = new Set<Promise<void>>();
 let toolOpenTagRe = buildToolOpenTagRegex(currentToolDescriptors);
 let toolMarkerRe = buildToolMarkerRegex(currentToolDescriptors);
@@ -439,11 +446,46 @@ function getAgentRendererLabels() {
     step: (stepNumber: number) => contentT('content.agent.step', { index: stepNumber }),
     streaming: contentT('content.agent.streaming'),
     stop: contentT('content.agent.stop'),
+    process: contentT('content.agent.process'),
+    tools: contentT('content.agent.tools'),
+    results: contentT('content.agent.results'),
+    running: (stepNumber: number, toolCount: number) =>
+      contentT('content.agent.running', { step: stepNumber + 1, tools: toolCount }),
     footerComplete: (totalSteps: number, totalTools: number) =>
       contentT('content.agent.footerComplete', { steps: totalSteps, tools: totalTools }),
     footerError: (totalSteps: number, totalTools: number) =>
       contentT('content.agent.footerError', { steps: totalSteps, tools: totalTools }),
   };
+}
+
+function ensureAgentRunningIndicator(): HTMLElement {
+  if (agentRunningIndicator?.isConnected) return agentRunningIndicator;
+  agentRunningIndicator = createAgentRunningIndicator(getAgentRendererLabels());
+  agentRunningIndicator.querySelector('.dpp-agent-stop-btn')?.addEventListener('click', () => stopInlineAgent());
+  document.body.appendChild(agentRunningIndicator);
+  return agentRunningIndicator;
+}
+
+function showAgentRunningIndicator(stepNumber: number): void {
+  updateAgentRunningIndicator(
+    ensureAgentRunningIndicator(),
+    { running: true, stepNumber, toolCount: agentRunningToolCount },
+    getAgentRendererLabels(),
+  );
+}
+
+function hideAgentRunningIndicator(): void {
+  if (!agentRunningIndicator) return;
+  updateAgentRunningIndicator(
+    agentRunningIndicator,
+    { running: false, stepNumber: 0, toolCount: 0 },
+    getAgentRendererLabels(),
+  );
+}
+
+function removeAgentRunningIndicator(): void {
+  agentRunningIndicator?.remove();
+  agentRunningIndicator = null;
 }
 
 function getHistoryOrganizerLabels() {
@@ -609,26 +651,13 @@ function reportContentLifecycleError(error: unknown): void {
   console.error('[DeepSeek++] content lifecycle failed', error);
 }
 
-function trackContentPersistence<T>(
-  owner: 'tool' | 'inline-agent',
-  label: string,
-  operation: Promise<T>,
-): Promise<T> {
-  const tracked = operation.catch((error) => {
-    if (isExtensionInvalidatedError(error)) invalidateExtensionContext();
+const contentPersistenceTracker = createContentPersistenceTracker({
+  isExtensionInvalidated: isExtensionInvalidatedError,
+  invalidateExtension: () => invalidateExtensionContext(),
+  reportFailure(label, error) {
     console.error(`[DeepSeek++] ${label} persistence failed`, error);
-    throw error;
-  });
-  const operations = owner === 'tool'
-    ? pendingToolPersistenceOperations
-    : pendingInlineAgentPersistenceOperations;
-  operations.add(tracked);
-  void tracked.then(
-    () => operations.delete(tracked),
-    () => operations.delete(tracked),
-  );
-  return tracked;
-}
+  },
+});
 
 function observeReportedPersistence(operation: Promise<unknown>): void {
   // The persistence boundary logged the rejection; this terminal observer prevents
@@ -773,6 +802,7 @@ async function stopInlineAgentCapability(): Promise<void> {
   pendingRestoredInlineAgentTraceIds.clear();
   restoredInlineAgentRenderAttempts = 0;
   document.querySelectorAll('.dpp-agent-container').forEach((node) => node.remove());
+  removeAgentRunningIndicator();
   removeInlineAgentStyles();
   if (contentToastTimer) {
     clearTimeout(contentToastTimer);
@@ -3578,6 +3608,7 @@ function isInlineAgentRunning(): boolean {
  */
 function teardownInlineAgentPanel(): void {
   flushPendingInlineAgentStreamRender();
+  hideAgentRunningIndicator();
   if (inlineAgentContainer) {
     inlineAgentContainer.remove();
   }
@@ -3590,6 +3621,7 @@ function teardownInlineAgentPanel(): void {
 }
 
 function stopInlineAgent(): void {
+  hideAgentRunningIndicator();
   const container = inlineAgentContainer;
   updateActiveInlineAgentTrace((trace) => ({
     ...trace,
@@ -3625,6 +3657,7 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
   const abort = new AbortController();
   activeAgentAbort = abort;
 
+  agentRunningToolCount = payload.toolExecutions.length;
   const authorizationRequestKey = `agent:${payload.loopId}`;
   const capabilityScopeRequestId = payload.capabilityScopeRequestId ?? authorizationRequestKey;
   let authorization: ToolAuthorizationGrantSummary;
@@ -3685,7 +3718,12 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
   try {
     await runInlineAgentLoop({
       ...payload,
-      toolDescriptors: authorization.descriptors,
+      toolDescriptors: [
+        ...projectToolDescriptorsForNativeSearch(
+          authorization.descriptors,
+          payload.promptOptions.searchEnabled,
+        ),
+      ],
     }, { post, executeTool, signal: abort.signal });
   } finally {
     await closeContentToolAuthorization(authorizationRequestKey);
@@ -3732,6 +3770,7 @@ function handleInlineAgentLoopEvent(type: string, data: unknown): void {
 
 function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): void {
   if (data.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  showAgentRunningIndicator(data.stepIndex);
 
   const stepEl = createAgentStepElement(data.stepIndex, stopInlineAgent, getAgentRendererLabels());
   inlineAgentCurrentStep = stepEl;
@@ -3748,6 +3787,7 @@ function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): vo
 
 function handleAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
+  showAgentRunningIndicator(msg.stepIndex);
   pendingInlineAgentStreamChunk = msg;
   if (inlineAgentStreamRenderFrame !== null) return;
 
@@ -3797,6 +3837,9 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
   for (const exec of msg.toolExecutions) {
     addToolResultToStep(inlineAgentCurrentStep, exec.name, exec.result.ok, exec.result.summary);
   }
+  addToolResultDetailsToStep(inlineAgentCurrentStep, msg.toolExecutions);
+  agentRunningToolCount += msg.toolExecutions.length;
+  showAgentRunningIndicator(msg.stepIndex);
 
   const label = msg.toolExecutions.length > 0
     ? contentT('content.agent.completeWithTools', { count: msg.toolExecutions.length })
@@ -3821,6 +3864,7 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
 
 function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  hideAgentRunningIndicator();
   flushPendingInlineAgentStreamRender();
 
   try {
@@ -3881,6 +3925,7 @@ function appendInlineAgentFinalAnswer(container: HTMLElement, text: string, loop
 
 function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  hideAgentRunningIndicator();
   flushPendingInlineAgentStreamRender();
 
   try {
@@ -4701,8 +4746,8 @@ function scheduleInlineAgentTraceWrite(trace: InlineAgentTraceRecord): void {
 
 async function writeInlineAgentTrace(trace: InlineAgentTraceRecord): Promise<void> {
   const stored = sanitizeInlineAgentTraceForStorage(trace);
-  await trackContentPersistence(
-    'inline-agent',
+  await contentPersistenceTracker.track(
+    pendingInlineAgentPersistenceOperations,
     'inline-agent trace write',
     upsertPersistedInlineAgentTrace(stored),
   );
@@ -4710,8 +4755,8 @@ async function writeInlineAgentTrace(trace: InlineAgentTraceRecord): Promise<voi
 }
 
 async function getPersistedInlineAgentTraces(): Promise<InlineAgentTraceRecord[]> {
-  return trackContentPersistence(
-    'inline-agent',
+  return contentPersistenceTracker.track(
+    pendingInlineAgentPersistenceOperations,
     'inline-agent trace read',
     readPersistedInlineAgentTraces(),
   );
@@ -4780,8 +4825,8 @@ function shouldTryRestoreInlineAgentTrace(trace: InlineAgentTraceRecord, current
 }
 
 async function getPersistedToolBlocks(): Promise<PersistedToolBlock[]> {
-  return trackContentPersistence(
-    'tool',
+  return contentPersistenceTracker.track(
+    pendingToolPersistenceOperations,
     'tool execution block read',
     readPersistedToolExecutionBlocks(),
   );
@@ -4877,8 +4922,8 @@ async function persistToolBlockSession(session: ActiveToolBlockSession, fullText
     },
   };
 
-  await trackContentPersistence(
-    'tool',
+  await contentPersistenceTracker.track(
+    pendingToolPersistenceOperations,
     'tool execution block write',
     upsertPersistedToolExecutionBlock(block),
   );
@@ -6070,6 +6115,7 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
     for (const exec of step.toolExecutions) {
       addToolResultToStep(stepEl, exec.name, exec.result.ok, exec.result.summary);
     }
+    addToolResultDetailsToStep(stepEl, step.toolExecutions);
     updateStepStatus(stepEl, step.status, getInlineAgentStepStatusLabel(step));
     stepEl.setAttribute('data-collapsed', step.collapsed ? 'true' : 'false');
     container.appendChild(stepEl);

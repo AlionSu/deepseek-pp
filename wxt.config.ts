@@ -249,6 +249,16 @@ export default defineConfig({
   },
   vite: () => ({
     plugins: [tailwindcss(), asciiJavaScriptOutputPlugin()],
+    build: {
+      modulePreload: {
+        // Extension pages load every chunk from the local extension file
+        // store; modulepreload links carry no latency benefit and Chromium
+        // logs "cross-world extension resource mismatch" / "preloaded but
+        // not used" noise for them. The module graph still loads normally
+        // through the entry script's static imports.
+        resolveDependencies: () => [],
+      },
+    },
     resolve: {
       alias: {
         '@wxt-dev/browser': safeWxtBrowser,

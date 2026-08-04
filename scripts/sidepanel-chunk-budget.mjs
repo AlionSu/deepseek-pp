@@ -14,9 +14,19 @@ if (requestedBrowsers.some((browser) => !browser)) {
 }
 
 // R6.4 pre-change Chrome baseline, captured from commit 87746a9 with WXT 0.20.26.
+// Refreshed for the agent-harness PR (#490, head 0c0e7c8): main @ 60678ef
+// measured 365345 raw / 110321 gzip under Node 22 (3 bytes below the old
+// budget); the PR adds four content.agent i18n keys (zh/en) for the
+// structured step UI (+331 raw / +82 gzip). Measurements are Node-22 zlib
+// values; keep the GZIP_ENCODER_VARIANCE_BYTES allowance below.
+// Refreshed for #475 (PR #491, head bbd2064): trusted-directory settings
+// subpage + chat @ panel add 29 i18n keys (zh/en) plus their strings to the
+// initial shell. CI Node-22 measurement: 369698 raw / 111410 gzip (+4022 /
+// +1007 over the previous baseline); local Node-25 zlib measures 111279,
+// within the encoder variance allowance.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 366_157, gzip: 110_068 },
+  initialShell: { raw: 369_698, gzip: 111_410 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -29,6 +39,10 @@ const BASELINE = Object.freeze({
 
 // W2.6 pre-change Chrome measurement at 450b5e2. The rich Markdown renderer
 // was part of ChatPage's static graph, leaving less than 1% budget headroom.
+// firstChatScreen raw cap raised 400000 -> 400500 for #475: the @ panel
+// measured 399840 at PR #491 head bbd2064 (160B headroom), and the review
+// fix for extension-classified image MIME normalization added 249B (400089
+// measured locally). gzip stays 122000 (121346 measured).
 const WAVE_2_CHAT_BASELINE = Object.freeze({
   firstChatScreen: { raw: 498_013, gzip: 150_087 },
   ChatPage: { raw: 134_902, gzip: 40_039 },
@@ -44,7 +58,7 @@ const BUDGET = Object.freeze({
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 400_000, gzip: 122_000 },
+  firstChatScreen: { raw: 400_500, gzip: 122_000 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },
