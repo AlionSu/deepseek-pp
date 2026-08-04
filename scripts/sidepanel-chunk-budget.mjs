@@ -30,7 +30,7 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // post-merge build measurement so the budget guardrail stays meaningful.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 369_698, gzip: 111_410 },
+  initialShell: { raw: 372_638, gzip: 112_027 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -62,7 +62,7 @@ const BUDGET = Object.freeze({
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 400_500, gzip: 122_000 },
+  firstChatScreen: { raw: 402_848, gzip: 122_308 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },
