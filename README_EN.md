@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1121-release-highlights">1.12.1 Highlights</a>
+  <a href="#1122-release-highlights">1.12.2 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.12.1 Release Highlights](#1121-release-highlights)
+- [1.12.2 Release Highlights](#1122-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -305,9 +305,23 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.12.1 Release Highlights
+## 1.12.2 Release Highlights
 
-1.12.1 is a polish and hardening release: local large-file reads no longer truncate, Firefox gains a toolbar entry point, side-panel tabs can scroll when overflowing, inline agent steps show a clearer timeline, and MCP transports and the sandbox are hardened.
+1.12.2 makes tool execution transparent and fixes production workflows: tool failures are no longer a black box, diagnostic logs export in one click, long outputs auto-save, full replies copy in one click, and conversation export supports a content scope choice.
+
+| Area | Main changes |
+|------|--------------|
+| Tool execution | Failures such as `shell_exec` now show the actual command and reason; authorization denials show the specific cause (missing/stale grant, session mismatch, disabled tool). Settings → Data adds "Export diagnostic logs" to export tool execution, authorization, and error records in one click. |
+| Inline agent | When the auto-continuation budget pauses a run, the notice now reports the actual completed step count, matching the "send 'continue' to resume" prompt. |
+| Long outputs | Long agent outputs are auto-saved as artifacts with a download entry, with no need to ask for a download tool. |
+| Copy output | A new "Copy full output" button next to message actions copies the complete DeepSeek reply in one click. |
+| Conversation export | Markdown/HTML export supports "inputs + outputs only" or "everything" scope selection, remembering your last choice. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.12.1 - 0.2.0)</summary>
+
+### 1.12.1 Release Highlights
 
 | Area | Main changes |
 |------|--------------|
@@ -318,9 +332,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | Tool execution | The manual confirmation mode is removed; enabled tools run automatically and "disabled" is the only opt-out. |
 | Reliability and security | MCP connections and reads get timeout protection and endpoint validation; tool parsing is linear-time (no jank on extreme inputs); sandboxed HTML pins resource sources and caps result sizes; web fetch allows http(s) URLs only. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.12.0 - 0.2.0)</summary>
 
 ### 1.12.0 Release Highlights
 
