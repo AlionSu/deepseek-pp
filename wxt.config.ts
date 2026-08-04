@@ -109,6 +109,14 @@ export function createManifest(env: ConfigEnv): UserManifest {
       },
     } : {}),
     ...(isFirefox ? {
+      // Firefox has no chrome.sidePanel: the toolbar action button is the
+      // explicit sidebar entry point. It stays visible in the toolbar and
+      // opens the sidebar from the background action-click handler
+      // (entrypoints/background.ts enableSidePanelActionClick). No new
+      // permission is required: `action` needs none in Firefox MV3.
+      action: {
+        default_title: MANIFEST_ACTION_TITLE,
+      },
       browser_specific_settings: {
         gecko: {
           id: 'deepseek-pp@zhu1090093659.github',

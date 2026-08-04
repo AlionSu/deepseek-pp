@@ -639,6 +639,16 @@ type SidePanelApi = {
   setPanelBehavior?: (options: { openPanelOnActionClick: boolean }) => Promise<void>;
 };
 
+type SidebarActionApi = {
+  open: () => Promise<void>;
+};
+
+type FirefoxActionApi = {
+  onClicked?: {
+    addListener: (listener: () => void) => void;
+  };
+};
+
 type ActionApi = {
   setBadgeText?: (details: { text: string }) => Promise<void> | void;
   setBadgeBackgroundColor?: (details: { color: string }) => Promise<void> | void;
@@ -741,13 +751,38 @@ async function ensureAutomationWakeAlarm() {
 }
 
 function enableSidePanelActionClick() {
-  if (import.meta.env.FIREFOX) return;
+  if (import.meta.env.FIREFOX) {
+    registerFirefoxActionClickOpen();
+    return;
+  }
 
   const sidePanel = readOptionalChromeApi(
     () => (chrome as typeof chrome & { sidePanel?: SidePanelApi }).sidePanel,
   );
   sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true })
     .catch((error) => reportBackgroundStartupError('sidepanel_behavior_failed', error));
+}
+
+/**
+ * Firefox entry point for the sidebar: there is no chrome.sidePanel, so the
+ * manifest declares an `action` (wxt.config.ts) and clicking it opens the
+ * sidebar. The click is the user gesture `sidebarAction.open()` requires;
+ * calling it directly from the onClicked listener keeps the gesture valid.
+ * The action badge path (refreshWhatsNewBadge) already runs on every
+ * browser through the shared chrome.action API.
+ */
+function registerFirefoxActionClickOpen() {
+  const action = readOptionalChromeApi(
+    () => (chrome as typeof chrome & { action?: FirefoxActionApi }).action,
+  );
+  const sidebarAction = readOptionalChromeApi(
+    () => (chrome as typeof chrome & { sidebarAction?: SidebarActionApi }).sidebarAction,
+  );
+  if (!action?.onClicked?.addListener || !sidebarAction?.open) return;
+  action.onClicked.addListener(() => {
+    sidebarAction.open()
+      .catch((error) => reportBackgroundStartupError('firefox_sidebar_open_failed', error));
+  });
 }
 
 function registerWhatsNewInstallListener() {
