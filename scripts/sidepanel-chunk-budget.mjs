@@ -34,12 +34,12 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // encoder variance allowance covers CI Node-22 gzip drift.
 // This PR ALSO adds the local-skill management surface (SkillPage / SkillCard /
 // activation / path-rewrite / scoring / cwd-enforcement); the combined footprint
-// was re-measured after merging main (#504) and the initialShell below is set
-// to the actual post-merge build measurement so the budget guardrail stays
-// meaningful.
+// was re-measured after merging main (#504): post-merge Node-25 measurement
+// 375456 raw / 112742 gzip; the initialShell below is set to the actual
+// post-merge build measurement so the budget guardrail stays meaningful.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 372_638, gzip: 112_027 },
+  initialShell: { raw: 375_456, gzip: 112_742 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -78,7 +78,7 @@ const BUDGET = Object.freeze({
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 402_848, gzip: 122_308 },
+  firstChatScreen: { raw: 405_800, gzip: 123_100 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },
