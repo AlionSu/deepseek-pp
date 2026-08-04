@@ -163,13 +163,14 @@ export function readTextFileWindow(filePath, startChar, maxChars) {
       const buf = Buffer.alloc(want);
       const got = readSync(fd, buf, 0, want, bytePos);
       if (got === 0) break;
-      const { bytes: consumed, chars: added } = scanUtf8Chars(buf, startChar - charPos);
+      const atEof = bytePos + got >= totalBytes;
+      // 只扫实际读到的 got 字节：Buffer.alloc 为零填充，短读时尾部 0x00 会被误计为字符。
+      const { bytes: consumed, chars: added } = scanUtf8Chars(buf.subarray(0, got), startChar - charPos, atEof);
+      if (consumed === 0) break; // 纵深防御：字节指针不前进即终止，杜绝死循环
       charPos += added;
-      if (charPos >= startChar) {
-        bytePos += consumed;
-        break;
-      }
-      bytePos += got;
+      // 统一用 consumed 前进：用 got 会跳过被回退的尾部不完整序列，令后续窗口全部错位。
+      bytePos += consumed;
+      if (charPos >= startChar) break;
     }
     if (charPos < startChar) {
       return { content: '', totalChars: getTotalCharCount(fd, totalBytes, filePath, stat), charsRead: 0 };
@@ -186,7 +187,10 @@ export function readTextFileWindow(filePath, startChar, maxChars) {
       const buf = Buffer.alloc(want);
       const got = readSync(fd, buf, 0, want, bytePos);
       if (got === 0) break;
-      const { bytes: consumed, chars: added } = scanUtf8Chars(buf, remaining);
+      const atEof = bytePos + got >= totalBytes;
+      // 同上：仅扫描实际读到的 got 字节，并在非 EOF 时回退尾部不完整多字节序列。
+      const { bytes: consumed, chars: added } = scanUtf8Chars(buf.subarray(0, got), remaining, atEof);
+      if (consumed === 0) break; // 纵深防御：字节指针不前进即终止，杜绝死循环
       parts.push(buf.subarray(0, consumed));
       remaining -= added;
       charsRead += added;
@@ -204,7 +208,13 @@ export function readTextFileWindow(filePath, startChar, maxChars) {
 
 // 扫描 buffer，返回"前 maxChars 个字符所占字节数"与"实际字符数"(可能因 buffer 不足 < maxChars)。
 // 跨 buffer 的字符连续性由 UTF-8 字节前缀规则保证：续字节(0x80-0xBF)不计入字符数。
-function scanUtf8Chars(bytes, maxChars) {
+//
+// atEof=true 表示本 buffer 末尾即文件末尾：尾部不完整序列属损坏数据，原样保留不静默丢弃。
+// atEof=false 时必须回退尾部不完整的多字节序列。否则当某个字符的首字节恰好落在 buffer
+// 最后一个字节时，内层 while 的 i < bytes.length 立即为假、续字节未被纳入，返回的 bytes
+// 含一个孤立首字节，Buffer.concat().toString('utf8') 会将其解码为 U+FFFD；同时 bytePos
+// 停在字符中间，导致后续所有窗口的起始位置错位。
+function scanUtf8Chars(bytes, maxChars, atEof = false) {
   let i = 0;
   let chars = 0;
   while (i < bytes.length && chars < maxChars) {
@@ -218,7 +228,24 @@ function scanUtf8Chars(bytes, maxChars) {
     }
     i++;
   }
-  return { bytes: i, chars };
+  if (atEof) return { bytes: i, chars };
+  const rollback = incompleteTailBytes(bytes, i);
+  return rollback > 0 ? { bytes: i - rollback, chars: chars - 1 } : { bytes: i, chars };
+}
+
+// 返回 bytes[0, end) 末尾"不完整多字节序列"所占字节数；序列完整时返回 0。
+// UTF-8 单字符最长 4 字节，故最多回看 3 个续字节。
+function incompleteTailBytes(bytes, end) {
+  let k = end - 1;
+  let continuation = 0;
+  while (k >= 0 && continuation < 3 && (bytes[k] & 0xC0) === 0x80) {
+    k--;
+    continuation++;
+  }
+  if (k < 0) return 0;
+  const lead = bytes[k];
+  const need = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+  return continuation + 1 < need ? continuation + 1 : 0;
 }
 
 // 顺序续读定位缓存：记录 (path -> 已扫描到的字节/字符偏移)，使 auto 续读每窗只扫新增量。
