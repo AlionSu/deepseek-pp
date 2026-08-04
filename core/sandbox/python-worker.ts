@@ -30,17 +30,17 @@ self.onmessage = async (event: MessageEvent<PythonWorkerRequest>) => {
     pyodide.setStdin({ stdin: () => stdin || null });
     pyodide.setStdout({ batched: (text) => { if (text) stdoutLines.push(String(text)); } });
     pyodide.setStderr({ batched: (text) => { if (text) stderrLines.push(String(text)); } });
-    pyodide.globals.set('input', stdin);
 
     const result = await pyodide.runPythonAsync(code);
     const stdout = limitText(stdoutLines.join('\n'), limit);
     const stderr = limitText(stderrLines.join('\n'), limit);
+    const resultText = limitText(formatPythonValue(result), PYTHON_RESULT_MAX_CHARS);
     postMessage({
       ok: true,
       stdout: stdout.text,
       stderr: stderr.text,
-      result: formatPythonValue(result),
-      truncated: stdout.truncated || stderr.truncated,
+      result: resultText.text,
+      truncated: stdout.truncated || stderr.truncated || resultText.truncated,
     });
     if (result && typeof result === 'object' && 'destroy' in result && typeof result.destroy === 'function') {
       result.destroy();
@@ -89,3 +89,5 @@ function limitText(text: string, limit: number): { text: string; truncated: bool
   if (text.length <= limit) return { text, truncated: false };
   return { text: `${text.slice(0, limit)}\n...[truncated]`, truncated: true };
 }
+
+const PYTHON_RESULT_MAX_CHARS = 512 * 1024;

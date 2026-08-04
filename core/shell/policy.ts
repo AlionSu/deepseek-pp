@@ -52,7 +52,7 @@ export function createShellMcpPresetInput(
     },
     execution: {
       enabled: options.executionEnabled ?? false,
-      mode: 'manual',
+      mode: 'auto',
     },
   };
 }

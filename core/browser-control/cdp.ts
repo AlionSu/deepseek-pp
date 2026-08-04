@@ -3,6 +3,10 @@ import type { BrowserDialogState } from './types';
 type DebuggerApi = typeof chrome.debugger;
 type DebuggerSession = chrome.debugger.DebuggerSession;
 
+// Dialogs are transient: entries older than this are treated as gone so a
+// stale Page.javascriptDialogOpening record cannot be replayed later.
+const BROWSER_DIALOG_MAX_AGE_MS = 30_000;
+
 export class BrowserControlError extends Error {
   readonly code: string;
   readonly retryable: boolean;
@@ -41,7 +45,20 @@ export class BrowserConnection {
   }
 
   getLatestDialog(tabId: number): BrowserDialogState | null {
-    return this.dialogs.get(tabId) ?? null;
+    const dialog = this.dialogs.get(tabId) ?? null;
+    if (!dialog) return null;
+    if (Date.now() - dialog.seenAt > BROWSER_DIALOG_MAX_AGE_MS) {
+      // Dialogs are transient; a stale entry must not be replayed for a
+      // dialog that has long since been dismissed (dialog entry expiry).
+      this.dialogs.delete(tabId);
+      return null;
+    }
+    // The caller is actively using this entry: refresh it so a dialog the
+    // user is still reading does not expire mid-interaction. The authoritative
+    // removal is Page.javascriptDialogClosed; the age window is only a
+    // fallback for missed close events.
+    dialog.seenAt = Date.now();
+    return dialog;
   }
 
   clearDialog(tabId: number): void {
@@ -132,6 +149,12 @@ export class BrowserConnection {
     if (!this.eventListenerRegistered) {
       debuggerApi.onEvent.addListener((source, method, params) => {
         if (!source.tabId) return;
+        if (method === 'Page.javascriptDialogClosed') {
+          // Authoritative removal: the browser reports the dialog is gone, so
+          // the entry must not be replayed by a later handleDialog call.
+          this.dialogs.delete(source.tabId);
+          return;
+        }
         if (method !== 'Page.javascriptDialogOpening') return;
         const payload = params as {
           type?: unknown;

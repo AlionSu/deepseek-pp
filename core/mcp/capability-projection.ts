@@ -127,7 +127,7 @@ export function isMcpDescriptor(descriptor: ToolDescriptor): boolean {
 }
 
 export function isExecutableMcpDescriptor(descriptor: ToolDescriptor): boolean {
-  return isMcpDescriptor(descriptor) && descriptor.execution.enabled && descriptor.execution.mode === 'auto';
+  return isMcpDescriptor(descriptor) && descriptor.execution.enabled && descriptor.execution.mode !== 'disabled';
 }
 
 function selectAdaptiveDescriptors(

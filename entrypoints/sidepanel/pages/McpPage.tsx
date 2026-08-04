@@ -581,7 +581,6 @@ function McpServerForm({
                 className="ds-input w-full rounded-lg px-3 py-2 text-sm"
               >
                 <option value="auto">{t('sidepanel.mcpPage.form.modeAuto')}</option>
-                <option value="manual">{t('sidepanel.mcpPage.form.modeManual')}</option>
                 <option value="disabled">{t('sidepanel.mcpPage.form.modeDisabled')}</option>
               </select>
             </div>
@@ -897,7 +896,6 @@ function ServerDetail({
           className="ds-input w-full rounded-lg px-3 py-2 text-sm"
         >
           <option value="auto">{t('sidepanel.mcpPage.form.modeAuto')}</option>
-          <option value="manual">{t('sidepanel.mcpPage.form.modeManual')}</option>
           <option value="disabled">{t('sidepanel.mcpPage.form.modeDisabled')}</option>
         </select>
       </div>

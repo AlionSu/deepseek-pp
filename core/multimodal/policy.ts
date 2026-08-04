@@ -88,7 +88,7 @@ export function createMultimodalMcpPresetInput(
     },
     execution: {
       enabled: options.executionEnabled ?? false,
-      mode: 'manual',
+      mode: 'auto',
     },
   };
 }

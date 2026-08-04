@@ -16,10 +16,16 @@ export interface ExternalizedToolPayload {
 type ExternalizedToolPayloadEntry = {
   invocationName: string;
   chunks: string[];
+  totalChars: number;
   createdAt: number;
 };
 
 const payloadEntries = new Map<string, ExternalizedToolPayloadEntry>();
+
+// 8 MiB per payload: the streaming parser externalizes bodies above 64K and
+// caps them at ~1 MiB (STREAM_TOOL_BODY_MAX_CHARS), so this budget only trips
+// on a chunk flood.
+const EXTERNALIZED_PAYLOAD_MAX_CHARS = 8 * 1024 * 1024;
 
 export function chainExternalizedPayloadWrite(
   previous: Promise<void>,
@@ -68,6 +74,12 @@ export function appendExternalizedToolPayloadChunk(
     if (existing.invocationName !== invocationName) {
       throw new Error(`Externalized tool payload ${ref} is already bound to another invocation.`);
     }
+    existing.totalChars += chunk.length;
+    // Budget check: streaming externalization caps a single call body well
+    // below this, so an over-budget entry means a flood of chunks (M1).
+    if (existing.totalChars > EXTERNALIZED_PAYLOAD_MAX_CHARS) {
+      throw new Error(`Externalized tool payload ${ref} exceeded ${EXTERNALIZED_PAYLOAD_MAX_CHARS} chars.`);
+    }
     existing.chunks.push(chunk);
     return;
   }
@@ -75,6 +87,7 @@ export function appendExternalizedToolPayloadChunk(
   payloadEntries.set(key, {
     invocationName,
     chunks: [chunk],
+    totalChars: chunk.length,
     createdAt: Date.now(),
   });
 }

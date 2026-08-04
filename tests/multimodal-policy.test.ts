@@ -15,7 +15,7 @@ import {
 import { MULTIMODAL_MCP_NATIVE_HOST, MULTIMODAL_MCP_SERVER_NAME } from '../core/multimodal/contracts';
 
 describe('createMultimodalMcpPresetInput', () => {
-  it('defaults Multimodal MCP to explicit manual opt-in', () => {
+  it('defaults Multimodal MCP to auto execution', () => {
     const preset = createMultimodalMcpPresetInput();
 
     expect(preset.displayName).toBe(MULTIMODAL_MCP_SERVER_NAME);
@@ -30,7 +30,7 @@ describe('createMultimodalMcpPresetInput', () => {
       discoveryMs: MULTIMODAL_MCP_DISCOVERY_TIMEOUT_MS,
     });
     expect(preset.allowlist).toEqual({ mode: 'allow', toolNames: ['vision_status'] });
-    expect(preset.execution).toEqual({ enabled: false, mode: 'manual' });
+    expect(preset.execution).toEqual({ enabled: false, mode: 'auto' });
   });
 });
 
@@ -51,7 +51,7 @@ describe('multimodal MCP availability', () => {
     expect(canUseMultimodalMediaInput(createServer())).toBe(true);
     expect(canUseMultimodalMediaInput(createServer({ enabled: false }))).toBe(false);
     expect(canUseMultimodalMediaInput(createServer({
-      execution: { enabled: false, mode: 'manual' },
+      execution: { enabled: false, mode: 'auto' },
     }))).toBe(false);
     expect(canUseMultimodalMediaInput(createServer({
       execution: { enabled: true, mode: 'disabled' },
@@ -108,7 +108,7 @@ function createServer(
     },
     execution: {
       enabled: true,
-      mode: 'manual',
+      mode: 'auto',
     },
     allowlist: {
       mode: 'allow',

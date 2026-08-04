@@ -53,7 +53,7 @@ describe('MCP execution policy', () => {
       },
       execution: {
         enabled: false,
-        mode: 'manual',
+        mode: 'auto',
       },
     });
 
@@ -511,7 +511,7 @@ describe('MCP execution policy', () => {
     ]);
 
     await updateMcpServer(server.id, {
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
     });
     await expect(getMcpToolDescriptors()).resolves.toEqual([]);
   });

@@ -19,6 +19,8 @@ interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 }
 
 interface NativePortState {
@@ -64,6 +66,9 @@ function getPortState(nativeHost: string): NativePortState {
       const pending = state.pendingRequests.get(rpcId)!;
       state.pendingRequests.delete(rpcId);
       clearTimeout(pending.timer);
+      if (pending.signal && pending.onAbort) {
+        pending.signal.removeEventListener('abort', pending.onAbort);
+      }
       pending.resolve(response);
     }
   });
@@ -76,6 +81,9 @@ function getPortState(nativeHost: string): NativePortState {
     );
     for (const pending of state.pendingRequests.values()) {
       clearTimeout(pending.timer);
+      if (pending.signal && pending.onAbort) {
+        pending.signal.removeEventListener('abort', pending.onAbort);
+      }
       pending.reject(err);
     }
     state.pendingRequests.clear();
@@ -119,7 +127,7 @@ async function sendNativeMessage<TParams extends Record<string, unknown> | undef
   let response: unknown;
   if (expectedRequest) {
     throwIfNativeSignalAborted(signal);
-    response = await sendAndWait(nativeHost, envelope, expectedRequest.id, timeoutMs);
+    response = await sendAndWait(nativeHost, envelope, expectedRequest.id, timeoutMs, signal);
     throwIfNativeSignalAborted(signal);
   } else {
     throwIfNativeSignalAborted(signal);
@@ -142,6 +150,7 @@ function sendAndWait(
   envelope: McpNativeEnvelope,
   requestId: number | string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let state: NativePortState;
@@ -153,15 +162,42 @@ function sendAndWait(
     }
 
     const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
       state.pendingRequests.delete(requestId);
       reject(new McpTransportError('mcp_native_timeout', `Native MCP request exceeded ${timeoutMs} ms.`));
     }, timeoutMs);
 
-    state.pendingRequests.set(requestId, { resolve, reject, timer });
+    const onAbort = () => {
+      clearTimeout(timer);
+      state.pendingRequests.delete(requestId);
+      const reason = signal?.reason;
+      reject(reason instanceof Error
+        ? reason
+        : new DOMException('Native MCP request was aborted.', 'AbortError'));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer);
+        reject(signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException('Native MCP request was aborted.', 'AbortError'));
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    state.pendingRequests.set(requestId, {
+      resolve,
+      reject,
+      timer,
+      signal,
+      onAbort: signal ? onAbort : undefined,
+    });
     try {
       state.port.postMessage(envelope);
     } catch (err) {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       state.pendingRequests.delete(requestId);
       reject(err);
     }

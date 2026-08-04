@@ -286,7 +286,7 @@ function createServer(env: Record<string, string>, nativeHost = MULTIMODAL_MCP_N
     },
     execution: {
       enabled: true,
-      mode: 'manual',
+      mode: 'auto',
     },
     status: 'unknown',
     lastConnectedAt: null,
