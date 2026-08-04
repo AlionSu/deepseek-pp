@@ -68,6 +68,7 @@ import {
   removeInlineAgentStyles,
   createAgentContainer,
   createAgentStepElement,
+  setAgentStepCollapsed,
   updateStepStreamText,
   updateStepStatus,
   addToolResultToStep,
@@ -451,6 +452,8 @@ function getAgentRendererLabels() {
     results: contentT('content.agent.results'),
     running: (stepNumber: number, toolCount: number) =>
       contentT('content.agent.running', { step: stepNumber + 1, tools: toolCount }),
+    toolOk: contentT('content.toolBlock.summaries.executed'),
+    toolError: contentT('content.toolBlock.summaries.failed'),
     footerComplete: (totalSteps: number, totalTools: number) =>
       contentT('content.agent.footerComplete', { steps: totalSteps, tools: totalTools }),
     footerError: (totalSteps: number, totalTools: number) =>
@@ -3835,7 +3838,7 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
   flushPendingInlineAgentStreamRender();
 
   for (const exec of msg.toolExecutions) {
-    addToolResultToStep(inlineAgentCurrentStep, exec.name, exec.result.ok, exec.result.summary);
+    addToolResultToStep(inlineAgentCurrentStep, exec.name, exec.result.ok, exec.result.summary, getAgentRendererLabels());
   }
   addToolResultDetailsToStep(inlineAgentCurrentStep, msg.toolExecutions);
   agentRunningToolCount += msg.toolExecutions.length;
@@ -3856,7 +3859,7 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
 
   const completedStep = inlineAgentCurrentStep;
   inlineAgentCapabilityScope?.setTimeout(() => {
-    completedStep.setAttribute('data-collapsed', 'true');
+    setAgentStepCollapsed(completedStep, true);
   }, 800);
 
   inlineAgentCurrentStep = null;
@@ -6113,11 +6116,11 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
     const stepText = getInlineAgentDisplayFinalText(step.text) || step.text;
     updateStepStreamText(stepEl, clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '');
     for (const exec of step.toolExecutions) {
-      addToolResultToStep(stepEl, exec.name, exec.result.ok, exec.result.summary);
+      addToolResultToStep(stepEl, exec.name, exec.result.ok, exec.result.summary, getAgentRendererLabels());
     }
     addToolResultDetailsToStep(stepEl, step.toolExecutions);
     updateStepStatus(stepEl, step.status, getInlineAgentStepStatusLabel(step));
-    stepEl.setAttribute('data-collapsed', step.collapsed ? 'true' : 'false');
+    setAgentStepCollapsed(stepEl, step.collapsed);
     container.appendChild(stepEl);
   }
 
