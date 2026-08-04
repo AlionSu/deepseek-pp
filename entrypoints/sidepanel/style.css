@@ -1093,11 +1093,100 @@ input[type='range'] {
 }
 
 .ds-chat-composer {
+  position: relative;
   border: 1px solid var(--ds-border);
   border-radius: var(--radius-ctrl);
   background: var(--ds-card);
   box-shadow: var(--ds-shadow-sm);
   padding: 8px;
+}
+
+/* #475 P1: @ file reference panel anchored above the composer. */
+.ds-chat-at-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--ds-card);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-ctrl);
+  box-shadow: var(--ds-shadow-lg);
+  overflow: hidden;
+}
+
+.ds-chat-at-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ds-border);
+}
+
+.ds-chat-at-panel-body {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.ds-chat-at-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.ds-chat-at-row:hover {
+  background: var(--ds-surface);
+}
+
+.ds-chat-at-row-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ds-chat-at-row-disabled:hover {
+  background: transparent;
+}
+
+.ds-chat-at-name {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-chat-at-path {
+  display: block;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-chat-at-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.ds-chat-at-empty {
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .ds-chat-file-input {
@@ -1607,13 +1696,17 @@ input[type='range'] {
 
 .usage-bars {
   display: grid;
-  grid-template-columns: repeat(var(--usage-day-count, 30), minmax(8px, 1fr));
+  /* Columns shrink to the panel width so a 30-day axis never overflows the
+     chart box; overflow is clipped only beyond the chart, never inside it. */
+  grid-template-columns: repeat(var(--usage-day-count, 30), minmax(0, 1fr));
   align-items: end;
-  gap: 4px;
+  gap: var(--usage-bar-gap, 4px);
   min-height: 150px;
+  overflow: hidden;
 }
 
 .usage-bar-column {
+  position: relative;
   display: grid;
   grid-template-rows: 118px 20px;
   min-width: 0;
@@ -1650,12 +1743,31 @@ input[type='range'] {
 }
 
 .usage-bar-label {
+  /* Absolutely anchored instead of text-align: when a label is wider than its
+     day column, Chrome applies safe overflow alignment and silently falls back
+     to start alignment, which pushed the last day's label past the chart edge
+     and clipped it. left/right anchoring has no such fallback. top matches the
+     label row start of the column grid (118px track + 6px gap). */
+  position: absolute;
+  top: 124px;
+  left: 50%;
+  transform: translateX(-50%);
   min-width: 0;
   color: var(--ds-text-tertiary);
   font-size: 9px;
   line-height: 1.1;
-  text-align: center;
   white-space: nowrap;
+}
+
+.usage-bar-label-first {
+  left: 0;
+  transform: none;
+}
+
+.usage-bar-label-last {
+  right: 0;
+  left: auto;
+  transform: none;
 }
 
 .usage-model-layout {

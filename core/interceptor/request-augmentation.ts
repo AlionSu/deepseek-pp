@@ -11,6 +11,7 @@ import { isLocalIndexInstructions, buildLocalExecutionBoundary } from '../skill/
 import { selectImplicitSkill, type LocalSkillIndex } from '../skill/local-skill-scorer';
 import { absolutizeSkillReferences, joinUnderRoot } from '../skill/local-path-rewriter';
 import { DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS, type SkillAutoActivationSettings } from '../skill/auto-activation-settings';
+import { projectToolDescriptorsForNativeSearch } from '../tool';
 import type { Memory, ModelType, Skill, SystemPromptPreset, ToolDescriptor } from '../types';
 import { filterMemoriesByProjectScope } from '../memory/scope';
 
@@ -124,6 +125,11 @@ export function augmentDecodedRequestBody(
     body.model_type = state.modelType;
   }
 
+  const modelFacingToolDescriptors = projectToolDescriptorsForNativeSearch(
+    state.toolDescriptors,
+    body.search_enabled === true,
+  );
+
   const invocation = parseSkillCommand(originalPrompt);
   let resolved: ResolvedSkills | null = null;
   let activeLocalSkillDir: string | undefined;
@@ -172,7 +178,7 @@ export function augmentDecodedRequestBody(
         skillSystemContext: buildLocalSkillSystemContext(resolved, activeLocalSkillDir, locale),
         presetContent,
         projectContext: state.projectContext,
-        toolDescriptors: state.toolDescriptors,
+        toolDescriptors: modelFacingToolDescriptors,
         locale,
         memoryEnabled: promptSettings.memoryEnabled,
         systemPromptEnabled: promptSettings.systemPromptEnabled,
@@ -189,7 +195,7 @@ export function augmentDecodedRequestBody(
         visibleUserPrompt: originalPrompt,
         presetContent,
         projectContext: state.projectContext,
-        toolDescriptors: state.toolDescriptors,
+        toolDescriptors: modelFacingToolDescriptors,
         locale,
         memoryEnabled: promptSettings.memoryEnabled,
         systemPromptEnabled: promptSettings.systemPromptEnabled,
@@ -214,7 +220,7 @@ export function augmentDecodedRequestBody(
     thinkingEnabled,
     presetContent,
     projectContext: state.projectContext,
-    toolDescriptors: state.toolDescriptors,
+    toolDescriptors: modelFacingToolDescriptors,
     locale,
     memoryEnabled: promptSettings.memoryEnabled,
     systemPromptEnabled: promptSettings.systemPromptEnabled,
