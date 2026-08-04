@@ -224,10 +224,15 @@ export async function updateLocalSkillSource(
       deps,
     );
   } catch (error) {
+    // Preserve the original block code for LocalSkillImportBlockedError (matching
+    // relocateLocalSkillSource); other failures fall back to shell_discovery_failed so
+    // the UI's UPDATE branch still enters !response.ok and guides re-selection (T8).
+    const importBlock: LocalSkillImportBlock =
+      error instanceof LocalSkillImportBlockedError ? error.importBlock : { code: 'shell_discovery_failed' };
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
-      importBlock: { code: 'shell_discovery_failed' },
+      importBlock,
     };
   }
 }

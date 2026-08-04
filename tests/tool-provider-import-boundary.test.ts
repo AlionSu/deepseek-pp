@@ -154,7 +154,7 @@ function parseModuleSpecifiers(file: string): string[] {
 function listSourceFiles(root: string): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(root)) {
-    if (entry === 'node_modules' || entry === '.git' || entry === '.output' || entry === 'dist') continue;
+    if (entry === 'node_modules' || entry === '.git' || entry === '.output' || entry === 'dist' || entry === '.workbuddy') continue;
     const path = join(root, entry);
     if (statSync(path).isDirectory()) {
       files.push(...listSourceFiles(path));
