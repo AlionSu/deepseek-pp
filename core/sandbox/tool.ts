@@ -19,6 +19,7 @@ export interface SandboxToolRuntime {
 const DEFAULT_TIMEOUT_MS = 5_000;
 const PYTHON_DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_CODE_BYTES = 30_000;
+const MAX_INPUT_BYTES = 512 * 1024;
 
 export function isSandboxToolName(name: string): name is SandboxToolName {
   return (SANDBOX_TOOL_NAMES as readonly string[]).includes(name);
@@ -119,10 +120,14 @@ export function normalizeSandboxRunRequest(value: unknown): SandboxRunRequest {
   if (new TextEncoder().encode(code).length > MAX_CODE_BYTES) {
     throw new Error(`code is too large; max ${MAX_CODE_BYTES} bytes`);
   }
+  const input = typeof payload.input === 'string' ? payload.input : undefined;
+  if (input !== undefined && new TextEncoder().encode(input).length > MAX_INPUT_BYTES) {
+    throw new Error(`input is too large; max ${MAX_INPUT_BYTES} bytes`);
+  }
   return {
     language,
     code,
-    input: typeof payload.input === 'string' ? payload.input : undefined,
+    input,
     timeoutMs: clampTimeout(payload.timeoutMs, language),
   };
 }

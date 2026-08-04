@@ -26,6 +26,15 @@ const SANDBOX_CSP = [
   "child-src 'self' blob: data:",
   "frame-src 'self' blob: data:",
   "connect-src 'self' blob:",
+  // img-src / style-src are pinned so sandboxed HTML cannot use remote
+  // images or CSS url() as network beacons (M13); media-src / font-src are
+  // pinned for the same reason (video/audio/@font-face are the remaining
+  // fetch-directive beacon vectors without a default-src). Local and inline
+  // content (data:/blob: URLs, inline styles) remains supported.
+  "img-src 'self' blob: data:",
+  "style-src 'self' 'unsafe-inline'",
+  "media-src 'self' blob: data:",
+  "font-src 'self' blob: data:",
   "object-src 'none'",
 ].join('; ');
 const PYODIDE_ASSET_FILES = pyodidePackagePolicy.assets.map(({ file }) => file);
@@ -109,6 +118,14 @@ export function createManifest(env: ConfigEnv): UserManifest {
       },
     } : {}),
     ...(isFirefox ? {
+      // Firefox has no chrome.sidePanel: the toolbar action button is the
+      // explicit sidebar entry point. It stays visible in the toolbar and
+      // opens the sidebar from the background action-click handler
+      // (entrypoints/background.ts enableSidePanelActionClick). No new
+      // permission is required: `action` needs none in Firefox MV3.
+      action: {
+        default_title: MANIFEST_ACTION_TITLE,
+      },
       browser_specific_settings: {
         gecko: {
           id: 'deepseek-pp@zhu1090093659.github',

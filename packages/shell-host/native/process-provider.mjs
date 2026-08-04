@@ -135,7 +135,7 @@ function execCommand(command, { cwd, env, timeoutMs }) {
 
     child.on('error', (err) => {
       clearTimers();
-      reject(new Error(`Failed to spawn command: ${err.message}`));
+      reject(new Error(`Failed to spawn command: $ ${command} (${err.message})`));
     });
 
     child.on('close', (exitCode, signal) => {
@@ -574,7 +574,7 @@ function getPythonLimits() {
 // …) into any command the model runs. Mirror createPythonChildEnv(): start from a
 
 export function formatExecSummary(result) {
-  const parts = [];
+  const parts = [`$ ${result.command}`];
   if (result.timedOut) parts.push('[TIMED OUT]');
   if (result.exitCode !== 0) parts.push(`[exit ${result.exitCode}]`);
   if (result.truncated) parts.push('[output truncated]');

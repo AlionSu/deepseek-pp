@@ -105,6 +105,21 @@ describe('Shell Native Host external contract', () => {
       },
     });
 
+    const failingShell = await callHost(nativeEnvelope('tools/call', {
+      name: 'shell_exec',
+      arguments: { command: 'exit 3' },
+    }, 'failing-shell'));
+    expect(failingShell).toMatchObject({
+      jsonrpc: '2.0',
+      id: 'failing-shell',
+      result: {
+        isError: true,
+        content: [{ type: 'text', text: expect.stringContaining('$ exit 3') }],
+      },
+    });
+    const failingText = failingShell.result.content[0].text;
+    expect(failingText).toContain('[exit 3]');
+
     const unknownTool = await callHost(nativeEnvelope('tools/call', {
       name: 'future_tool',
       arguments: {},

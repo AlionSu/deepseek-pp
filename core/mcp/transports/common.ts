@@ -146,7 +146,7 @@ function throwSignalReason(signal: AbortSignal): never {
 export async function readJsonRpcResponse<TResult>(
   response: Response,
   expectedRequest?: McpJsonRpcRequest<any>,
-  options: { maxBytes?: number } = {},
+  options: { maxBytes?: number; timeoutMs?: number } = {},
 ): Promise<McpJsonRpcResponse<TResult>> {
   if (!response.ok) {
     throw new McpTransportError(
@@ -161,7 +161,7 @@ export async function readJsonRpcResponse<TResult>(
     return readSseJsonRpcResponse(response, expectedRequest, options);
   }
 
-  const raw = await readResponseTextWithLimit(response, options.maxBytes);
+  const raw = await readResponseTextWithLimit(response, options.maxBytes, options.timeoutMs);
   if (!raw.trim()) {
     throw invalidMcpResponse('MCP response body was empty.');
   }
@@ -176,7 +176,7 @@ export async function readJsonRpcResponse<TResult>(
 export async function readSseJsonRpcResponse<TResult>(
   response: Response,
   expectedRequest?: McpJsonRpcRequest<any>,
-  options: { maxBytes?: number } = {},
+  options: { maxBytes?: number; timeoutMs?: number } = {},
 ): Promise<McpJsonRpcResponse<TResult>> {
   if (!response.body) {
     throw new McpTransportError('mcp_sse_empty_body', 'MCP SSE response did not include a body.');
@@ -184,11 +184,15 @@ export async function readSseJsonRpcResponse<TResult>(
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  // The connect fetch cleared its deadline once headers arrived; enforce a
+  // fresh one so a server that never emits the matching event cannot hang
+  // the request forever (M17).
+  const deadline = Date.now() + (options.timeoutMs ?? 30_000);
   let buffer = '';
   let totalBytes = 0;
 
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readChunkWithDeadline(reader, deadline);
     if (done) break;
     totalBytes = assertWithinByteLimit(totalBytes, value.byteLength, options.maxBytes, reader);
     buffer += decoder.decode(value, { stream: true });
@@ -203,16 +207,21 @@ export async function readSseJsonRpcResponse<TResult>(
   throw new McpTransportError('mcp_sse_response_missing', 'MCP SSE stream ended without a matching response.');
 }
 
-export async function readResponseTextWithLimit(response: Response, maxBytes?: number): Promise<string> {
+export async function readResponseTextWithLimit(
+  response: Response,
+  maxBytes?: number,
+  timeoutMs?: number,
+): Promise<string> {
   if (!response.body) return response.text();
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  const deadline = Date.now() + (timeoutMs ?? 30_000);
   let totalBytes = 0;
   let raw = '';
 
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readChunkWithDeadline(reader, deadline);
     if (done) break;
     totalBytes = assertWithinByteLimit(totalBytes, value.byteLength, maxBytes, reader);
     raw += decoder.decode(value, { stream: true });
@@ -220,6 +229,44 @@ export async function readResponseTextWithLimit(response: Response, maxBytes?: n
 
   raw += decoder.decode();
   return raw;
+}
+
+/**
+ * Reads one body chunk with a hard phase deadline. A plain
+ * `while (Date.now() < deadline)` loop only bounds time *between* chunks: a
+ * server that sends headers (or the SSE endpoint event) and then holds the
+ * connection open without delivering any body byte makes `reader.read()`
+ * never resolve, so the deadline is never re-checked and the request hangs
+ * forever. Racing the read against the remaining budget cancels the reader
+ * and surfaces a transport timeout instead (M17).
+ */
+export async function readChunkWithDeadline(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  deadline: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    await reader.cancel().catch(() => undefined);
+    throw new McpTransportError(
+      'mcp_transport_timeout',
+      'MCP response timed out while reading the body.',
+    );
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      void reader.cancel().catch(() => undefined);
+      reject(new McpTransportError(
+        'mcp_transport_timeout',
+        'MCP response timed out while reading the body.',
+      ));
+    }, remaining);
+  });
+  try {
+    return await Promise.race([reader.read(), timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 export function assertWithinByteLimit(

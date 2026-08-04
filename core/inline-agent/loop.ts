@@ -169,7 +169,7 @@ export async function runInlineAgentLoop(
 
         nudgeCount++;
         if (nudgeCount > INLINE_AGENT_MAX_NUDGES) {
-          stopNotice = buildInlineAgentBudgetNotice(locale);
+          stopNotice = buildInlineAgentBudgetNotice(locale, step + 1);
           post('AGENT_STEP_COMPLETE', {
             loopId,
             stepIndex: step,
@@ -249,7 +249,7 @@ export async function runInlineAgentLoop(
 
           const finalCandidate = nudgeVisibleText.trim() ? nudgeVisibleText : visibleText;
           if (shouldNudge(payload.originalPrompt, allExecutions, finalCandidate)) {
-            stopNotice = buildInlineAgentBudgetNotice(locale);
+            stopNotice = buildInlineAgentBudgetNotice(locale, step + 1);
           } else {
             resolvedFinalText = finalCandidate;
           }
@@ -296,7 +296,7 @@ export async function runInlineAgentLoop(
     }
 
     if (!signal.aborted && resolvedFinalText === null && stopNotice === null && totalTools > 0 && totalSteps >= INLINE_AGENT_MAX_STEPS) {
-      stopNotice = buildInlineAgentBudgetNotice(locale);
+      stopNotice = buildInlineAgentBudgetNotice(locale, totalSteps);
     }
 
     let finalText = '';
@@ -533,6 +533,6 @@ async function submitAgentTurn(
   throw new Error('DeepSeek agent step failed without a completed attempt.');
 }
 
-function buildInlineAgentBudgetNotice(locale: SupportedLocale): string {
-  return translate(locale, 'content.agent.budgetReached', { count: INLINE_AGENT_MAX_STEPS });
+function buildInlineAgentBudgetNotice(locale: SupportedLocale, completedSteps: number): string {
+  return translate(locale, 'content.agent.budgetReached', { count: completedSteps });
 }

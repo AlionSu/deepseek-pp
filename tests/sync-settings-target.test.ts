@@ -31,6 +31,13 @@ beforeEach(() => {
   root = null;
   runtimeMessageListener = null;
   sendMessage = vi.fn(defaultRuntimeResponse);
+  // jsdom has no ResizeObserver; SubTabs uses it to recompute overflow
+  // chevrons. Browsers always provide it.
+  vi.stubGlobal('ResizeObserver', class {
+    observe(): void {}
+    disconnect(): void {}
+    unobserve(): void {}
+  });
 
   vi.stubGlobal('chrome', {
     runtime: {

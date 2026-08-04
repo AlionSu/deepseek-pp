@@ -3,6 +3,14 @@ import { injectInjectedThemeStyles } from '../ui/injected-theme';
 import type { ToolExecutionRecord } from '../types';
 
 const AGENT_STEP_STYLE_ID = 'dpp-inline-agent-css';
+const TOOL_SUMMARY_MAX_CHARS = 600;
+
+let agentDomSequence = 0;
+
+function nextAgentDomId(prefix: string): string {
+  agentDomSequence += 1;
+  return `${prefix}-${agentDomSequence}`;
+}
 
 export interface InlineAgentRendererLabels {
   step: (stepNumber: number) => string;
@@ -12,6 +20,8 @@ export interface InlineAgentRendererLabels {
   tools: string;
   results: string;
   running: (stepNumber: number, toolCount: number) => string;
+  toolOk: string;
+  toolError: string;
   footerComplete: (totalSteps: number, totalTools: number) => string;
   footerError: (totalSteps: number, totalTools: number) => string;
 }
@@ -24,58 +34,141 @@ export function injectInlineAgentStyles(): void {
   style.id = AGENT_STEP_STYLE_ID;
   style.textContent = `
     .dpp-agent-container {
+      position: relative;
       margin-top: 12px;
-      padding-left: 12px;
+      padding-left: 16px;
       border-left: 1px solid var(--dpp-ui-border);
     }
     .dpp-agent-container[data-restored="true"] {
       margin-bottom: 12px;
     }
     .dpp-agent-step {
+      position: relative;
       margin-bottom: 8px;
       border: 1px solid var(--dpp-ui-border);
       border-radius: 6px;
-      overflow: hidden;
       background: var(--dpp-ui-surface);
       color: var(--dpp-ui-text);
+    }
+    .dpp-agent-step::before {
+      content: '';
+      position: absolute;
+      left: -20px;
+      top: 11px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--dpp-ui-surface);
+      border: 1px solid var(--dpp-ui-border);
     }
     .dpp-agent-step[data-status="streaming"] {
       border-color: var(--dpp-ui-accent);
     }
+    .dpp-agent-step[data-status="streaming"]::before {
+      border-color: var(--dpp-ui-accent);
+      background: var(--dpp-ui-accent);
+    }
     .dpp-agent-step[data-status="executing_tools"] {
       border-color: var(--dpp-ui-warning);
+    }
+    .dpp-agent-step[data-status="executing_tools"]::before {
+      border-color: var(--dpp-ui-warning);
+      background: var(--dpp-ui-warning);
+    }
+    .dpp-agent-step[data-status="complete"]::before {
+      border-color: var(--dpp-ui-success);
+      background: var(--dpp-ui-success);
     }
     .dpp-agent-step[data-status="error"] {
       border-color: var(--dpp-ui-error);
     }
+    .dpp-agent-step[data-status="error"]::before {
+      border-color: var(--dpp-ui-error);
+      background: var(--dpp-ui-error);
+    }
     .dpp-agent-step-header {
       display: flex;
       align-items: center;
+      gap: 4px;
+      background: var(--dpp-ui-surface-muted);
+      border-radius: 5px 5px 0 0;
+    }
+    .dpp-agent-step-toggle {
+      flex: 1;
+      display: flex;
+      align-items: center;
       gap: 8px;
+      min-width: 0;
       padding: 6px 10px;
+      border: none;
+      background: transparent;
       font-size: 12px;
       color: var(--dpp-ui-text-muted);
-      background: var(--dpp-ui-surface-muted);
       cursor: pointer;
       user-select: none;
+      text-align: left;
     }
-    .dpp-agent-step-header::after {
-      content: '\\25BC';
-      font-size: 9px;
-      margin-left: auto;
-      transition: transform 0.2s ease;
-    }
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-header::after {
-      transform: rotate(-90deg);
+    .dpp-agent-step-toggle:focus-visible {
+      outline: 2px solid var(--dpp-ui-accent);
+      outline-offset: -2px;
+      border-radius: 5px 0 0 0;
     }
     .dpp-agent-step-indicator {
+      flex: none;
       font-weight: 600;
       color: var(--dpp-ui-accent);
     }
+    .dpp-agent-step-dot {
+      flex: none;
+      font-size: 10px;
+      line-height: 1;
+    }
+    .dpp-agent-step-dot::before {
+      content: '\\25CF';
+      color: var(--dpp-ui-text-subtle);
+    }
+    .dpp-agent-step[data-status="streaming"] .dpp-agent-step-dot::before {
+      color: var(--dpp-ui-accent);
+      animation: dpp-agent-step-pulse 1.1s ease-in-out infinite;
+    }
+    .dpp-agent-step[data-status="executing_tools"] .dpp-agent-step-dot::before {
+      content: '\\2699';
+      color: var(--dpp-ui-warning);
+    }
+    .dpp-agent-step[data-status="complete"] .dpp-agent-step-dot::before {
+      content: '\\2713';
+      color: var(--dpp-ui-success);
+    }
+    .dpp-agent-step[data-status="error"] .dpp-agent-step-dot::before {
+      content: '\\2717';
+      color: var(--dpp-ui-error);
+    }
+    @keyframes dpp-agent-step-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .dpp-agent-step[data-status="streaming"] .dpp-agent-step-dot::before {
+        animation: none;
+      }
+    }
     .dpp-agent-step-status {
       flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dpp-agent-step-chevron {
+      flex: none;
+      font-size: 9px;
+      transition: transform 0.2s ease;
+    }
+    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-chevron {
+      transform: rotate(-90deg);
     }
     .dpp-agent-stop-btn {
+      flex: none;
+      margin-right: 8px;
       padding: 2px 8px;
       font-size: 11px;
       border: 1px solid var(--dpp-ui-error);
@@ -87,8 +180,25 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-stop-btn:hover {
       background: var(--dpp-ui-danger-panel);
     }
+    .dpp-agent-stop-btn:focus-visible {
+      outline: 2px solid var(--dpp-ui-error);
+      outline-offset: 1px;
+    }
+    .dpp-agent-step-section-label {
+      padding: 8px 10px 0;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--dpp-ui-text-subtle);
+    }
+    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-section-label {
+      display: none;
+    }
+    .dpp-agent-step-section-label[hidden] {
+      display: none;
+    }
     .dpp-agent-step-body {
-      padding: 8px 10px;
+      padding: 4px 10px 8px;
       font-size: 13px;
       line-height: 1.5;
       color: var(--dpp-ui-text);
@@ -162,89 +272,91 @@ export function injectInlineAgentStyles(): void {
       color: var(--dpp-ui-text-muted);
     }
     .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-body,
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-process,
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-tools,
     .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-results {
       max-height: 0;
       padding: 0 10px;
       opacity: 0;
       overflow: hidden;
     }
-    .dpp-agent-step-process,
     .dpp-agent-step-results {
       transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
     }
     .dpp-agent-step-tools {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
       padding: 4px 10px 8px;
       font-size: 12px;
       color: var(--dpp-ui-text-muted);
-      transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
+    }
+    .dpp-agent-step-tools:empty {
+      display: none;
     }
     .dpp-agent-step-tool-item {
-      padding: 2px 0;
+      border: 1px solid var(--dpp-ui-border-muted);
+      border-radius: 6px;
+      background: var(--dpp-ui-surface-muted);
+      overflow: hidden;
     }
-    .dpp-agent-step-tool-item.ok::before {
-      content: '\\2713 ';
-      color: var(--dpp-ui-success);
-    }
-    .dpp-agent-step-tool-item.err::before {
-      content: '\\2717 ';
-      color: var(--dpp-ui-error);
-    }
-    .dpp-agent-footer {
-      margin-top: 8px;
-      padding: 6px 0;
-      font-size: 12px;
-      color: var(--dpp-ui-text-muted);
-    }
-    .dpp-agent-footer.complete::before {
-      content: '\\25A0 ';
-      color: var(--dpp-ui-success);
-    }
-    .dpp-agent-footer.error::before {
-      content: '\\25A0 ';
-      color: var(--dpp-ui-error);
-    }
-
-    body.dpp-theme-dark .dpp-agent-stop-btn:hover {
-      background: var(--dpp-ui-danger-panel);
-    }
-    [data-dpp-body-text] {
-      font-size: inherit;
-      line-height: 1.7;
-      margin-top: 12px;
-      color: var(--dpp-ui-text);
-      word-break: break-word;
-    }
-    [data-dpp-body-text] * { color: inherit; }
-    [data-dpp-body-text] h3 { font-size: 1.1em; font-weight: 600; margin: 10px 0 4px; }
-    [data-dpp-body-text] p { margin: 3px 0; }
-    [data-dpp-body-text] ul, [data-dpp-body-text] ol { margin: 3px 0 3px 16px; }
-    [data-dpp-body-text] strong { font-weight: 600; }
-    [data-dpp-body-text] a { color: var(--dpp-ui-accent); text-decoration: underline; }
-    [data-dpp-body-text] table {
+    .dpp-agent-tool-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       width: 100%;
-      margin: 10px 0;
-      border-collapse: collapse;
-      font-size: 0.95em;
-    }
-    [data-dpp-body-text] th,
-    [data-dpp-body-text] td {
-      padding: 7px 8px;
-      border-bottom: 1px solid var(--dpp-ui-border);
+      padding: 5px 8px;
+      border: none;
+      background: transparent;
+      font-size: 12px;
+      color: var(--dpp-ui-text);
+      cursor: pointer;
+      user-select: none;
       text-align: left;
-      vertical-align: top;
     }
-    .dpp-agent-step-section-label {
-      margin: 6px 0 4px;
+    .dpp-agent-tool-toggle:focus-visible {
+      outline: 2px solid var(--dpp-ui-accent);
+      outline-offset: -2px;
+    }
+    .dpp-agent-tool-state-icon {
+      flex: none;
       font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      color: var(--dpp-ui-text-muted);
-      text-transform: uppercase;
     }
-    .dpp-agent-step-section-label[hidden] {
-      display: none;
+    .dpp-agent-step-tool-item.ok .dpp-agent-tool-state-icon {
+      color: var(--dpp-ui-success);
+    }
+    .dpp-agent-step-tool-item.err .dpp-agent-tool-state-icon {
+      color: var(--dpp-ui-error);
+    }
+    .dpp-agent-tool-name {
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dpp-agent-tool-state {
+      flex: none;
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--dpp-ui-text-muted);
+    }
+    .dpp-agent-tool-chevron {
+      flex: none;
+      font-size: 9px;
+      color: var(--dpp-ui-text-subtle);
+      transition: transform 0.15s ease;
+    }
+    .dpp-agent-tool-toggle[aria-expanded="true"] .dpp-agent-tool-chevron {
+      transform: rotate(90deg);
+    }
+    .dpp-agent-tool-summary {
+      padding: 6px 8px 8px;
+      border-top: 1px solid var(--dpp-ui-border-muted);
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--dpp-ui-text-muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 160px;
+      overflow-y: auto;
     }
     .dpp-agent-step-tool-result {
       margin: 4px 0;
@@ -304,6 +416,55 @@ export function injectInlineAgentStyles(): void {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.35; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .dpp-agent-running-indicator-text::before {
+        animation: none;
+      }
+    }
+    .dpp-agent-footer {
+      margin-top: 8px;
+      padding: 6px 0;
+      font-size: 12px;
+      color: var(--dpp-ui-text-muted);
+    }
+    .dpp-agent-footer.complete::before {
+      content: '\\25A0 ';
+      color: var(--dpp-ui-success);
+    }
+    .dpp-agent-footer.error::before {
+      content: '\\25A0 ';
+      color: var(--dpp-ui-error);
+    }
+
+    body.dpp-theme-dark .dpp-agent-stop-btn:hover {
+      background: var(--dpp-ui-danger-panel);
+    }
+    [data-dpp-body-text] {
+      font-size: inherit;
+      line-height: 1.7;
+      margin-top: 12px;
+      color: var(--dpp-ui-text);
+      word-break: break-word;
+    }
+    [data-dpp-body-text] * { color: inherit; }
+    [data-dpp-body-text] h3 { font-size: 1.1em; font-weight: 600; margin: 10px 0 4px; }
+    [data-dpp-body-text] p { margin: 3px 0; }
+    [data-dpp-body-text] ul, [data-dpp-body-text] ol { margin: 3px 0 3px 16px; }
+    [data-dpp-body-text] strong { font-weight: 600; }
+    [data-dpp-body-text] a { color: var(--dpp-ui-accent); text-decoration: underline; }
+    [data-dpp-body-text] table {
+      width: 100%;
+      margin: 10px 0;
+      border-collapse: collapse;
+      font-size: 0.95em;
+    }
+    [data-dpp-body-text] th,
+    [data-dpp-body-text] td {
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--dpp-ui-border);
+      text-align: left;
+      vertical-align: top;
+    }
     [data-dpp-body-text] th { font-weight: 600; }
   `;
   document.head.appendChild(style);
@@ -320,6 +481,12 @@ export function createAgentContainer(): HTMLElement {
   return container;
 }
 
+export function setAgentStepCollapsed(step: HTMLElement, collapsed: boolean): void {
+  step.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+  const toggle = step.querySelector('.dpp-agent-step-toggle');
+  toggle?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
 export function createAgentStepElement(
   stepIndex: number,
   onStop?: () => void,
@@ -329,27 +496,51 @@ export function createAgentStepElement(
   step.className = 'dpp-agent-step';
   step.setAttribute('data-step-index', String(stepIndex));
   step.setAttribute('data-status', 'streaming');
+  step.setAttribute('data-collapsed', 'false');
+
+  const bodyId = nextAgentDomId('dpp-agent-step-body');
+  const toolsId = nextAgentDomId('dpp-agent-step-tools');
 
   const header = document.createElement('div');
   header.className = 'dpp-agent-step-header';
-  header.addEventListener('click', () => {
-    const collapsed = step.getAttribute('data-collapsed') === 'true';
-    step.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+  header.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('.dpp-agent-stop-btn')) return;
+    setAgentStepCollapsed(step, step.getAttribute('data-collapsed') !== 'true');
   });
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'dpp-agent-step-toggle';
+  toggle.setAttribute('aria-expanded', 'true');
+  toggle.setAttribute('aria-controls', bodyId);
 
   const indicator = document.createElement('span');
   indicator.className = 'dpp-agent-step-indicator';
   indicator.textContent = labels?.step?.(stepIndex + 1) ?? `Step ${stepIndex + 1}`;
 
+  const dot = document.createElement('span');
+  dot.className = 'dpp-agent-step-dot';
+  dot.setAttribute('aria-hidden', 'true');
+
   const status = document.createElement('span');
   status.className = 'dpp-agent-step-status';
   status.textContent = labels?.streaming ?? 'streaming...';
 
-  header.appendChild(indicator);
-  header.appendChild(status);
+  const chevron = document.createElement('span');
+  chevron.className = 'dpp-agent-step-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+  chevron.textContent = '▼';
+
+  toggle.appendChild(indicator);
+  toggle.appendChild(dot);
+  toggle.appendChild(status);
+  toggle.appendChild(chevron);
+  header.appendChild(toggle);
 
   if (onStop) {
     const stopBtn = document.createElement('button');
+    stopBtn.type = 'button';
     stopBtn.className = 'dpp-agent-stop-btn';
     stopBtn.textContent = labels?.stop ?? 'Stop';
     stopBtn.addEventListener('click', (e) => {
@@ -359,24 +550,18 @@ export function createAgentStepElement(
     header.appendChild(stopBtn);
   }
 
-  const process = document.createElement('div');
-  process.className = 'dpp-agent-step-process';
-
-  const processLabel = document.createElement('div');
-  processLabel.className = 'dpp-agent-step-section-label process';
-  processLabel.textContent = labels?.process ?? 'Process';
-  processLabel.hidden = true;
+  const sectionLabel = document.createElement('div');
+  sectionLabel.className = 'dpp-agent-step-section-label process';
+  sectionLabel.textContent = labels?.process ?? 'Process';
+  sectionLabel.hidden = true;
 
   const body = document.createElement('div');
   body.className = 'dpp-agent-step-body';
+  body.id = bodyId;
 
   const tools = document.createElement('div');
   tools.className = 'dpp-agent-step-tools';
-
-  const toolsLabel = document.createElement('div');
-  toolsLabel.className = 'dpp-agent-step-section-label tools';
-  toolsLabel.textContent = labels?.tools ?? 'Tools';
-  toolsLabel.hidden = true;
+  tools.id = toolsId;
 
   const results = document.createElement('div');
   results.className = 'dpp-agent-step-results';
@@ -387,10 +572,8 @@ export function createAgentStepElement(
   resultsLabel.hidden = true;
 
   step.appendChild(header);
-  process.appendChild(processLabel);
-  process.appendChild(body);
-  step.appendChild(process);
-  tools.appendChild(toolsLabel);
+  step.appendChild(sectionLabel);
+  step.appendChild(body);
   step.appendChild(tools);
   results.appendChild(resultsLabel);
   step.appendChild(results);
@@ -402,10 +585,11 @@ export function updateStepStreamText(step: HTMLElement, visibleText: string): vo
   const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
   if (!body) return;
 
+  const sectionLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.process');
+  if (sectionLabel) sectionLabel.hidden = visibleText.length === 0;
+
   body.setAttribute('data-dpp-raw-text', visibleText);
   body.innerHTML = renderInlineMarkdown(visibleText);
-  const processLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.process');
-  if (processLabel) processLabel.hidden = !visibleText.trim();
   scrollStepBodyToBottom(body);
 }
 
@@ -433,16 +617,60 @@ export function addToolResultToStep(
   toolName: string,
   ok: boolean,
   summary: string,
+  labels?: Partial<InlineAgentRendererLabels>,
 ): void {
   const tools = step.querySelector('.dpp-agent-step-tools');
   if (!tools) return;
 
-  const toolsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.tools');
-  if (toolsLabel) toolsLabel.hidden = false;
-
   const item = document.createElement('div');
   item.className = `dpp-agent-step-tool-item ${ok ? 'ok' : 'err'}`;
-  item.textContent = ok ? toolName : `${toolName}: ${summary.slice(0, 100)}`;
+  item.setAttribute('data-tool-status', ok ? 'ok' : 'err');
+
+  const summaryId = nextAgentDomId('dpp-agent-tool-summary');
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'dpp-agent-tool-toggle';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', summaryId);
+
+  const icon = document.createElement('span');
+  icon.className = 'dpp-agent-tool-state-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = ok ? '✓' : '✗';
+
+  const name = document.createElement('span');
+  name.className = 'dpp-agent-tool-name';
+  name.textContent = toolName;
+
+  const state = document.createElement('span');
+  state.className = 'dpp-agent-tool-state';
+  state.textContent = ok ? labels?.toolOk ?? 'OK' : labels?.toolError ?? 'Error';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'dpp-agent-tool-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+  chevron.textContent = '▸';
+
+  toggle.appendChild(icon);
+  toggle.appendChild(name);
+  toggle.appendChild(state);
+  toggle.appendChild(chevron);
+
+  const detail = document.createElement('div');
+  detail.className = 'dpp-agent-tool-summary';
+  detail.id = summaryId;
+  detail.hidden = true;
+  detail.textContent = summary.slice(0, TOOL_SUMMARY_MAX_CHARS);
+
+  toggle.addEventListener('click', () => {
+    const expanded = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    detail.hidden = expanded;
+  });
+
+  item.appendChild(toggle);
+  item.appendChild(detail);
   tools.appendChild(item);
 }
 

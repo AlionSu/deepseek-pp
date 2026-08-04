@@ -1,4 +1,5 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useI18n } from '../../i18n';
 import { StatusMessage } from './feedback-primitives';
 
 export { StatusMessage, useConfirm } from './feedback-primitives';
@@ -220,6 +221,13 @@ export function StatusBadge({
  * LibraryPage / CapabilitiesPage / SettingsPage. Adds the ARIA tab semantics
  * (`role="tablist"`/`role="tab"`/`aria-selected`) and left/right keyboard
  * navigation that the duplicated markup was missing.
+ *
+ * When the strip overflows its container, chevron buttons appear at the
+ * edges (hidden while there is nothing to scroll in that direction):
+ * clicking scrolls by roughly the visible width, the active tab is kept in
+ * view on selection/keyboard change, and arrow visibility is recomputed on
+ * resize and when the tab set or its labels change. Reduced-motion users
+ * get instant scrolling instead of smooth animation.
  */
 export function SubTabs<T extends string>({
   tabs,
@@ -232,6 +240,54 @@ export function SubTabs<T extends string>({
   onChange: (key: T) => void;
   ariaLabel: string;
 }) {
+  const { t } = useI18n();
+  const listRef = useRef<HTMLElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  // Stable key for the tab set: label changes (e.g. locale switch) or a
+  // different tab count re-run the layout effects without depending on the
+  // identity of the caller-provided array.
+  const tabsKey = tabs.map((tab) => tab.label).join('\u0000');
+
+  const updateArrows = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    updateArrows();
+    const el = listRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(updateArrows);
+    observer.observe(el);
+    el.addEventListener('scroll', updateArrows, { passive: true });
+    return () => {
+      observer.disconnect();
+      el.removeEventListener('scroll', updateArrows);
+    };
+  }, [updateArrows, tabsKey]);
+
+  // Keep the selected tab fully visible when the selection changes or the
+  // tab set is rebuilt (labels/locale), scrolling the strip the minimum
+  // amount needed.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const active = el.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!active) return;
+    const left = active.offsetLeft;
+    const right = left + active.offsetWidth;
+    const behavior = prefersReducedMotion() ? 'auto' : 'smooth';
+    if (left < el.scrollLeft) {
+      el.scrollTo({ left, behavior });
+    } else if (right > el.scrollLeft + el.clientWidth) {
+      el.scrollTo({ left: right - el.clientWidth, behavior });
+    }
+    updateArrows();
+  }, [value, tabsKey, updateArrows]);
+
   const onKeyDown = (e: React.KeyboardEvent, index: number) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
@@ -240,27 +296,66 @@ export function SubTabs<T extends string>({
       : (index - 1 + tabs.length) % tabs.length;
     onChange(tabs[next].key);
   };
+
+  const scrollByPage = (direction: 1 | -1) => {
+    const el = listRef.current;
+    if (!el) return;
+    const amount = Math.max(el.clientWidth * 0.7, 120);
+    el.scrollBy({ left: direction * amount, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  };
+
   return (
-    <nav className="sub-tabs" aria-label={ariaLabel} role="tablist">
-      {tabs.map((tab, index) => {
-        const active = tab.key === value;
-        return (
-          <button
-            key={tab.key}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            tabIndex={active ? 0 : -1}
-            onClick={() => onChange(tab.key)}
-            onKeyDown={(e) => onKeyDown(e, index)}
-            className={`sub-tab${active ? ' sub-tab-active' : ''}`}
-          >
-            {tab.label}
-          </button>
-        );
-      })}
-    </nav>
+    <div className="sub-tabs-shell">
+      <button
+        type="button"
+        className="sub-tabs-arrow sub-tabs-arrow-left"
+        aria-label={t('sidepanel.subTabs.scrollLeft')}
+        disabled={!canScrollLeft}
+        tabIndex={-1}
+        onClick={() => scrollByPage(-1)}
+      >
+        <svg className="sub-tabs-arrow-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+      <nav ref={listRef} className="sub-tabs" aria-label={ariaLabel} role="tablist">
+        {tabs.map((tab, index) => {
+          const active = tab.key === value;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onChange(tab.key)}
+              onKeyDown={(e) => onKeyDown(e, index)}
+              className={`sub-tab${active ? ' sub-tab-active' : ''}`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
+      <button
+        type="button"
+        className="sub-tabs-arrow sub-tabs-arrow-right"
+        aria-label={t('sidepanel.subTabs.scrollRight')}
+        disabled={!canScrollRight}
+        tabIndex={-1}
+        onClick={() => scrollByPage(1)}
+      >
+        <svg className="sub-tabs-arrow-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+    </div>
   );
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 }
 
 /**

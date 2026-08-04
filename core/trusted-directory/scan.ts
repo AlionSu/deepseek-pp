@@ -164,6 +164,7 @@ function isOversized(file: TrustedFileLike): boolean {
 
 export function scanTrustedFiles(files: readonly TrustedFileLike[]): TrustedScanResult {
   const indexed: TrustedFileMeta[] = [];
+  const seenPaths = new Set<string>();
   let skippedCount = 0;
   let truncated = false;
   let totalBytes = 0;
@@ -178,6 +179,12 @@ export function scanTrustedFiles(files: readonly TrustedFileLike[]): TrustedScan
       skippedCount += 1;
       continue;
     }
+    if (seenPaths.has(relativePath)) {
+      // Duplicate path (same file listed twice or two roots colliding):
+      // index once, count the extra occurrence as skipped (byPath dedup).
+      skippedCount += 1;
+      continue;
+    }
     if (
       indexed.length >= MAX_TRUSTED_FILES
       || totalBytes + file.size > MAX_TOTAL_INDEX_BYTES
@@ -185,6 +192,7 @@ export function scanTrustedFiles(files: readonly TrustedFileLike[]): TrustedScan
       truncated = true;
       continue;
     }
+    seenPaths.add(relativePath);
     indexed.push({
       relativePath,
       name: file.name,

@@ -359,11 +359,12 @@ export function createToolAuthorizationResult(
   error: ToolAuthorizationError,
   call?: Pick<ToolCall, 'id' | 'name' | 'descriptorId' | 'provider'>,
   summary: string = 'Tool authorization rejected',
+  hint?: string,
 ): ToolResult {
   return {
     ok: false,
     summary,
-    detail: error.message,
+    detail: hint ? `${error.message}。${hint}` : error.message,
     callId: call?.id,
     name: call?.name,
     descriptorId: call?.descriptorId,
@@ -845,7 +846,13 @@ export function isToolAuthorizationDescriptorSnapshotRecord(
     (TOOL_PROVIDER_KINDS as readonly string[]).includes(snapshot.provider.kind) &&
     isIdentity(snapshot.provider.id) &&
     (TOOL_TRANSPORT_KINDS as readonly string[]).includes(snapshot.provider.transport) &&
-    (TOOL_EXECUTION_MODES as readonly string[]).includes(snapshot.execution.mode) &&
+    // Released 1.12.0 snapshots may persist the removed 'manual' mode (grants
+    // and capability leases copied descriptor.execution verbatim). Accept it
+    // so stored state keeps loading; equivalence checks still compare mode
+    // strictly, so a legacy snapshot fails closed to a re-grant and the next
+    // write normalizes the stored value.
+    ((TOOL_EXECUTION_MODES as readonly string[]).includes(snapshot.execution.mode)
+      || (snapshot.execution.mode as string) === 'manual') &&
     typeof snapshot.execution.enabled === 'boolean' &&
     (TOOL_RISK_LEVELS as readonly string[]).includes(snapshot.execution.risk) &&
     (snapshot.execution.timeoutMs === undefined || isPositiveNumber(snapshot.execution.timeoutMs)) &&

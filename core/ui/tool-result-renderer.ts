@@ -33,6 +33,24 @@ export function registerDefaultToolResultRenderers(): void {
   registerToolResultRenderer(renderMemoryImportPreviewResult);
 }
 
+/**
+ * Result-card actions (save skill / import memories / run code / preview /
+ * download) must only fire from real user gestures: synthetic clicks from the
+ * page world are a persistent-poisoning vector (M2). The guard is a mutable
+ * holder so unit tests can exercise both branches (jsdom cannot synthesize
+ * trusted events); the default implementation is the real `event.isTrusted`
+ * check.
+ */
+export const userClickGuard: { isTrusted(event: Event): boolean } = {
+  isTrusted(event) {
+    return event.isTrusted;
+  },
+};
+
+export function isTrustedUserClick(event: Event): boolean {
+  return userClickGuard.isTrusted(event);
+}
+
 function renderSkillDraftResult(input: ToolResultRendererInput): boolean {
   const draft = getSkillDraftOutput(input.result.output);
   if (!draft) return false;
@@ -47,7 +65,10 @@ function renderSkillDraftResult(input: ToolResultRendererInput): boolean {
   description.className = 'dpp-result-text';
   description.textContent = draft.draft.description;
   const button = createSmallButton(translate(locale, 'tool.skillCreator.result.saveSkill'));
-  button.addEventListener('click', () => {
+  button.addEventListener('click', (event) => {
+    // Synthetic clicks from the page world must not trigger persistence of
+    // model-generated drafts without a real user gesture (M2).
+    if (!isTrustedUserClick(event)) return;
     void saveSkillDraft(draft.draft, input.sendMessage, button, locale);
   });
   wrapper.append(meta, description, button);
@@ -98,7 +119,10 @@ function renderMemoryImportPreviewResult(input: ToolResultRendererInput): boolea
   list.textContent = preview.memories.slice(0, 5).map((memory) => `- ${memory.name}`).join('\n');
   const button = createSmallButton(translate(locale, 'tool.memoryImport.result.importMemories'));
   button.disabled = preview.memories.length === 0;
-  button.addEventListener('click', () => {
+  button.addEventListener('click', (event) => {
+    // Synthetic clicks from the page world must not trigger persistence of
+    // memory drafts without a real user gesture (M2).
+    if (!isTrustedUserClick(event)) return;
     void importMemoryDrafts(preview.memories, input.sendMessage, button, locale);
   });
   wrapper.append(meta, list, button);
@@ -149,7 +173,8 @@ function renderArtifactResult(input: ToolResultRendererInput): boolean {
   button.type = 'button';
   button.className = 'dpp-artifact-download';
   button.textContent = translate(locale, 'tool.artifact.result.download');
-  button.addEventListener('click', () => {
+  button.addEventListener('click', (event) => {
+    if (!isTrustedUserClick(event)) return;
     void downloadArtifact(artifact, input.sendMessage, button, locale);
   });
   actions.appendChild(button);
@@ -163,7 +188,8 @@ function renderArtifactResult(input: ToolResultRendererInput): boolean {
     runButton.type = 'button';
     runButton.className = 'dpp-artifact-run';
     runButton.textContent = translate(locale, 'tool.artifact.result.run');
-    runButton.addEventListener('click', () => {
+    runButton.addEventListener('click', (event) => {
+      if (!isTrustedUserClick(event)) return;
       void runArtifactCode(artifact, input.sendMessage, runButton, output, locale);
     });
     actions.prepend(runButton);
@@ -174,7 +200,8 @@ function renderArtifactResult(input: ToolResultRendererInput): boolean {
     previewButton.type = 'button';
     previewButton.className = 'dpp-artifact-preview';
     previewButton.textContent = translate(locale, 'tool.artifact.result.preview');
-    previewButton.addEventListener('click', () => {
+    previewButton.addEventListener('click', (event) => {
+      if (!isTrustedUserClick(event)) return;
       void openArtifactPreviewPanel(artifact, input.sendMessage, locale);
     });
     actions.prepend(previewButton);

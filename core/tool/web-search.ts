@@ -70,7 +70,10 @@ export function createWebSearchToolDescriptors(
       additionalProperties: false,
     },
     execution: {
-      mode: 'manual',
+      // web_fetch's consent mechanism is the host-permission banner (one-click
+      // grant + retry); the scheme whitelist in performWebFetch bounds what it
+      // can reach.
+      mode: 'auto',
       enabled: true,
       risk: 'medium',
     },
@@ -332,6 +335,24 @@ async function performWebFetch(
       summary: translate(locale, 'tool.web.invalidUrl'),
       detail: translate(locale, 'tool.web.invalidUrlDetail', { url }),
       error: { code: 'invalid_url', message: `Invalid URL: ${url}`, retryable: false },
+    };
+  }
+
+  // Scheme whitelist: only http/https may be fetched. file:, data:, and other
+  // schemes bypass the host-permission/CORS model entirely (H7) and must not
+  // be reachable through web_fetch.
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    return {
+      ok: false,
+      name: call.name,
+      provider: call.provider ?? createWebSearchToolProviderIdentity(locale),
+      summary: translate(locale, 'tool.web.invalidUrl'),
+      detail: translate(locale, 'tool.web.invalidUrlDetail', { url }),
+      error: {
+        code: 'unsupported_url_scheme',
+        message: `Unsupported URL scheme: ${parsedUrl.protocol}`,
+        retryable: false,
+      },
     };
   }
 

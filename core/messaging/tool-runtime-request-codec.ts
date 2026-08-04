@@ -353,7 +353,7 @@ function validateOptionalMcpServerFields(payload: Record<string, unknown>, path:
   }
   if (payload.execution !== undefined) {
     const execution = recordValue(payload.execution, `${path}.execution`);
-    enumValue(execution.mode, ['auto', 'manual', 'disabled'], `${path}.execution.mode`);
+    enumValue(execution.mode, ['auto', 'disabled'], `${path}.execution.mode`);
     booleanValue(execution.enabled, `${path}.execution.enabled`);
   }
 }

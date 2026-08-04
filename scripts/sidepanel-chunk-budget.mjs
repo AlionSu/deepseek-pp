@@ -18,16 +18,25 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // scoring / cwd-enforcement code, and again for the SkillPage / SkillCard
 // update-button loading + busy + acceptFailure feedback added on this PR.
 // Refreshed for the agent-harness PR (#490, head 0c0e7c8): main @ 60678ef
-// measured 365345 raw / 110321 gzip under Node 22; the PR adds four content.agent
-// i18n keys (zh/en) for the structured step UI (+331 raw / +82 gzip).
-// Refreshed for #475 (PR #491, head bbd2064): trusted-directory settings subpage +
-// chat @ panel add 29 i18n keys (zh/en) plus their strings to the initial shell.
-// CI Node-22 measurement: 369698 raw / 111410 gzip (+4022 / +1007 over the prior
-// baseline); local Node-25 zlib measures 111279, within the encoder variance allowance.
+// measured 365345 raw / 110321 gzip under Node 22 (3 bytes below the old
+// budget); the PR adds four content.agent i18n keys (zh/en) for the
+// structured step UI (+331 raw / +82 gzip). Measurements are Node-22 zlib
+// values; keep the GZIP_ENCODER_VARIANCE_BYTES allowance below.
+// Refreshed for #475 (PR #491, head bbd2064): trusted-directory settings
+// subpage + chat @ panel add 29 i18n keys (zh/en) plus their strings to the
+// initial shell. CI Node-22 measurement: 369698 raw / 111410 gzip (+4022 /
+// +1007 over the previous baseline); local Node-25 zlib measures 111279,
+// within the encoder variance allowance.
+// Refreshed for the #495-#499 batch (head 90ef4ad): settings data subpage
+// log-export entry (#495) plus export-scope / auto-save / copy-output i18n
+// keys (#497-#499) add to the initial shell. Local Node-25 measurement:
+// 372032 raw / 111777 gzip (+2334 / +367 over the previous baseline); the
+// encoder variance allowance covers CI Node-22 gzip drift.
 // This PR ALSO adds the local-skill management surface (SkillPage / SkillCard /
 // activation / path-rewrite / scoring / cwd-enforcement); the combined footprint
-// must be re-measured after merge and the initialShell below set to the actual
-// post-merge build measurement so the budget guardrail stays meaningful.
+// was re-measured after merging main (#504) and the initialShell below is set
+// to the actual post-merge build measurement so the budget guardrail stays
+// meaningful.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
   initialShell: { raw: 372_638, gzip: 112_027 },
@@ -51,6 +60,13 @@ const WAVE_2_CHAT_BASELINE = Object.freeze({
   firstChatScreen: { raw: 498_013, gzip: 150_087 },
   ChatPage: { raw: 134_902, gzip: 40_039 },
 });
+
+// firstChatScreen raw cap raised 400500 -> 402500 for the #495-#499 batch
+// (head 90ef4ad): the shared i18n additions for export scope (#499), agent
+// auto-save (#497), copy-full-output (#498), and the settings log-export
+// entry (#495) also flow into the first chat screen graph. Local Node-25
+// measurement: 402288 raw / 121796 gzip (+2199 raw over the #475 refresh);
+// gzip stays within the existing 122000 cap.
 
 // gzip size may vary slightly between supported Node/zlib releases even when
 // the built JavaScript bytes are identical. Keep the raw baseline exact and

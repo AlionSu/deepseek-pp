@@ -297,7 +297,7 @@ export function isMcpToolSelected(server: McpServerConfig, tool: ToolDescriptor)
 }
 
 export function isMcpToolEnabled(server: McpServerConfig, tool: ToolDescriptor): boolean {
-  if (!server.enabled || !server.execution.enabled || server.execution.mode !== 'auto') return false;
+  if (!server.enabled || !server.execution.enabled || server.execution.mode === 'disabled') return false;
   return isMcpToolSelected(server, tool);
 }
 

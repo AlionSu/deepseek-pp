@@ -570,7 +570,7 @@ function createShellServer(toolNames: string[]): McpServerConfig {
     displayName: SHELL_MCP_SERVER_NAME,
     enabled: true,
     transport: { kind: 'native_messaging' as const, nativeHost: SHELL_MCP_NATIVE_HOST },
-    execution: { enabled: true, mode: 'manual' as const },
+    execution: { enabled: true, mode: 'auto' as const },
     allowlist: { mode: 'allow' as const, toolNames },
     timeouts: { connectMs: 1, requestMs: 1, discoveryMs: 1 },
     limits: { maxResultBytes: 128_000, maxToolCount: 8 },
@@ -789,7 +789,7 @@ function createShellDiscovery(
   toolNames: string[],
   enabled = true,
   error: string | null = null,
-  mode: 'auto' | 'manual' = 'manual',
+  mode: 'auto' | 'disabled' = 'auto',
 ): McpToolCacheEntry {
   const now = Date.now();
   return {

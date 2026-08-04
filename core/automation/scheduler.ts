@@ -546,6 +546,11 @@ function createAutomationRuntimePatch(
   }
 
   return {
+    // Persist a session created during a failed run so the retry reuses it
+    // instead of leaking a fresh DeepSeek session per attempt (M15).
+    ...(result.chatSessionId && result.chatSessionId !== automation.deepseek.chatSessionId
+      ? { deepseek: { ...automation.deepseek, chatSessionId: result.chatSessionId } }
+      : {}),
     lastRunAt: completedAt,
     nextRunAt,
     lastError: result.error,

@@ -3,6 +3,7 @@ export const CONVERSATION_EXPORT_SCHEMA_VERSION = 'deepseek-pp.conversation-expo
 export type ConversationExportSchemaVersion = typeof CONVERSATION_EXPORT_SCHEMA_VERSION;
 
 export type ConversationExportMode = 'raw' | 'sanitized';
+export type ConversationExportContentScope = 'full' | 'input-output';
 
 export type ConversationExportFormat = 'markdown' | 'html' | 'pdf' | 'image_manifest';
 
@@ -18,6 +19,7 @@ export type ExportProgressPhase =
 
 export interface ConversationExportRequest {
   mode: ConversationExportMode;
+  contentScope: ConversationExportContentScope;
   formats: ConversationExportFormat[];
   includeAttachmentMetadata: boolean;
   includeFileBodies: boolean;

@@ -51,6 +51,10 @@ const expectedSandboxCsp = [
   "child-src 'self' blob: data:",
   "frame-src 'self' blob: data:",
   "connect-src 'self' blob:",
+  "img-src 'self' blob: data:",
+  "style-src 'self' 'unsafe-inline'",
+  "media-src 'self' blob: data:",
+  "font-src 'self' blob: data:",
   "object-src 'none'",
 ].join('; ');
 const expectedFirefoxId = 'deepseek-pp@zhu1090093659.github';
@@ -79,7 +83,13 @@ for (const target of targets) {
     assert(!manifest.browser_specific_settings, `${target.browser}: browser_specific_settings must be omitted`);
   } else {
     assert(!manifest.side_panel, `${target.browser}: side_panel must be omitted`);
-    assert(!manifest.action, `${target.browser}: action must be omitted`);
+    // Firefox: the toolbar action is the explicit sidebar entry point
+    // (background action-click opens the sidebar; no extra permission).
+    assertEqual(
+      manifest.action?.default_title,
+      expectedLocalizedManifest.actionTitle,
+      `${target.browser}: action.default_title`,
+    );
     assertEqual(
       manifest.browser_specific_settings?.gecko?.id,
       expectedFirefoxId,
@@ -152,6 +162,8 @@ assertIncludes(wxtConfig, "default_locale: 'en'", 'manifest config must declare 
 assertIncludes(wxtConfig, '__MSG_extension_name__', 'manifest config must use localized name');
 assertIncludes(wxtConfig, '__MSG_extension_description__', 'manifest config must use localized description');
 assertIncludes(wxtConfig, '__MSG_extension_action_title__', 'manifest config must use localized action title');
+assertIncludes(background, 'action.onClicked.addListener', 'Firefox action click must open the sidebar');
+assertIncludes(background, 'sidebarAction.open', 'Firefox action click must call sidebarAction.open');
 assertIncludes(wxtConfig, 'copyPyodideAssets', 'manifest build must bundle Pyodide assets for browser Python sandbox');
 assertIncludes(wxtConfig, 'copyBundledSkillAssets', 'manifest build must bundle on-demand Skill resources');
 assertIncludes(wxtConfig, "'build:done'", 'large extension assets must be copied once after WXT entrypoint builds finish');

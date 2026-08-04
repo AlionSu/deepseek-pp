@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1120-release-highlights">1.12.0 Highlights</a>
+  <a href="#1121-release-highlights">1.12.1 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.12.0 Release Highlights](#1120-release-highlights)
+- [1.12.1 Release Highlights](#1121-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -124,6 +124,12 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 <p align="center">
   <img src="assets/yuansheng.jpg" width="300" alt="Tool execution display">
 </p>
+
+### Local File Reading (Automatic Continuation for Large Files)
+
+- **Deterministic auto-continuation** — For files exceeding the per-call read limit, `local_file_read` is continued deterministically by a code loop on the extension side instead of relying on the model to resume reading, eliminating the silent-truncation reliability gap.
+- **Unicode code-point positioning** — Continuation offsets advance by Unicode code points (not UTF-16 units), so files mixing emoji and CJK text are stitched window-by-window without any character loss.
+- **Host-side OOM protection** — The host reads character windows on demand by byte range instead of loading the whole file into memory, so very large files no longer exhaust memory.
 
 ### Conversation Export
 
@@ -299,7 +305,24 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.12.0 Release Highlights
+## 1.12.1 Release Highlights
+
+1.12.1 is a polish and hardening release: local large-file reads no longer truncate, Firefox gains a toolbar entry point, side-panel tabs can scroll when overflowing, inline agent steps show a clearer timeline, and MCP transports and the sandbox are hardened.
+
+| Area | Main changes |
+|------|--------------|
+| Local file reading | `local_file_read` continues deterministically: files beyond the per-call limit are read to the end automatically, mixed CJK and emoji text is no longer truncated, and very large files are read in character windows instead of loading the whole file into memory. |
+| Firefox | A DeepSeek++ toolbar button now opens the side panel, matching Chrome/Edge behavior. |
+| Side panel | Overflowing tab strips in Settings, Capabilities, and Library show left/right arrows so hidden tabs are one click away; keyboard-selected tabs scroll into view. |
+| Inline agent | Step timeline is clearer: process text is separated from the final answer, tool calls are listed per line with success/failure state and independently expandable summaries; completed steps collapse only their process text while tool rows stay scannable. |
+| Tool execution | The manual confirmation mode is removed; enabled tools run automatically and "disabled" is the only opt-out. |
+| Reliability and security | MCP connections and reads get timeout protection and endpoint validation; tool parsing is linear-time (no jank on extreme inputs); sandboxed HTML pins resource sources and caps result sizes; web fetch allows http(s) URLs only. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.12.0 - 0.2.0)</summary>
+
+### 1.12.0 Release Highlights
 
 1.12.0 improves Agent workspace and file-reference experience: inline agent runs are more reliable with visible steps, and you can reference files from a trusted local directory in chat with @.
 
@@ -313,9 +336,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | MCP compatibility | The MCP client advertises protocol-valid capabilities, making connections to capability-checking servers more stable. |
 | Page loading | Extension pages no longer emit modulepreload links, removing browser console noise. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.9 - 0.2.0)</summary>
 
 ### 1.11.9 Release Highlights
 

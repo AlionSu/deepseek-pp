@@ -61,6 +61,10 @@ export const en = {
     en: 'English',
   },
   sidepanel: {
+    subTabs: {
+      scrollLeft: 'Scroll tabs left',
+      scrollRight: 'Scroll tabs right',
+    },
     libraryPage: {
       navLabel: 'Library navigation',
       tabs: {
@@ -494,6 +498,8 @@ export const en = {
       dataSection: 'Data management',
       memoryTotal: 'Total memories',
       exportMemories: 'Export memories',
+      exportLogs: 'Export diagnostic logs',
+      exportLogsHint: 'Exports recent background tool execution and error diagnostics for troubleshooting shell_exec / MCP / authorization issues.',
       importMemories: 'Import memories',
       clearAllMemories: 'Clear all memories',
       usage: {
@@ -942,6 +948,9 @@ export const en = {
       emptyConversation: 'This page has no exportable conversation yet.',
       formatDialogLabel: 'Choose export formats',
       formatTitle: 'Export formats',
+      scopeLabel: 'Content scope',
+      scopeFull: 'Everything (tool calls, continuations, reasoning, injected context)',
+      scopeInputOutput: 'Inputs + final output only',
       formatHtml: 'HTML',
       formatMarkdown: 'Markdown',
       formatPdf: 'PDF',
@@ -995,6 +1004,8 @@ export const en = {
       downloadCode: 'Download',
       downloadMessageMarkdownButton: 'MD',
       downloadMessageMarkdownTitle: 'Download message as Markdown',
+      copyMessageButton: 'Copy',
+      copyMessageTitle: 'Copy full message output',
     },
     toolBlock: {
       title: 'Executed tools ({count})',
@@ -1032,6 +1043,8 @@ export const en = {
       results: 'Results',
       running: 'Agent running · step {step} · {tools} tool calls',
       footerError: 'Agent error ({steps} steps, {tools} tool calls)',
+      autoSaved: 'Long output was auto-saved as an artifact: ',
+      autoSavedDownload: 'Download',
       concurrencyGuard: 'An agent is still running. A duplicate task from this message was skipped. To interrupt, click Stop in the agent panel.',
     },
     permission: {
@@ -1115,6 +1128,12 @@ export const en = {
       invalidFormat: 'Invalid tool format',
       unknownTool: 'Unknown tool',
       authorizationRejected: 'Tool authorization rejected',
+      authorizationMissingHint: 'The authorization is closed or was never confirmed. Re-run the action and allow this tool in the authorization prompt.',
+      authorizationStaleHint: 'The authorization expired. Re-run the action to refresh it.',
+      authorizationSessionMismatchHint: 'The authorization belongs to another chat session. Re-run the action in this conversation.',
+      authorizationDisabledHint: 'This tool is currently disabled. Enable it in tool settings and retry.',
+      authorizationIdentityMissingHint: 'Identity information required for execution is missing. Re-run the action.',
+      authorizationGenericHint: 'To continue, re-run the action and complete the authorization confirmation.',
       sessionBindingUnavailable: 'The new conversation did not receive a browser-owned session route in time. Please wait for the chat URL to update and try again.',
       incomplete: 'The response ended before this tool call completed.',
     },

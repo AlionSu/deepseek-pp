@@ -87,6 +87,23 @@ describe('MCP persisted-config contract', () => {
     expect(raw).toEqual(MCP_STORAGE_V2);
   });
 
+  it('normalizes a released manual execution mode to auto at decode without rewriting storage', () => {
+    const raw = structuredClone(MCP_STORAGE_V2);
+    raw.servers = raw.servers.map((server, index) => (
+      index === 0
+        ? { ...server, execution: { ...server.execution, mode: 'manual' } }
+        : server
+    )) as typeof raw.servers;
+
+    const decoded = decodeMcpStorageState(raw);
+    const decodedFirst = decoded.servers[0];
+    expect(decodedFirst?.execution.mode).toBe('auto');
+    // The stored record keeps the released value; the normalization is
+    // deterministic and idempotent and only materializes on the next save.
+    expect((raw.servers[0] as { execution: { mode: string } }).execution.mode).toBe('manual');
+    expect(decodeMcpStorageState(raw).servers[0]?.execution.mode).toBe('auto');
+  });
+
   it('migrates legal v1 server configuration, preserves additive root fields, and clears its cache', () => {
     const raw = structuredClone(MCP_STORAGE_V1_ADDITIVE_ROOT);
     const original = structuredClone(raw);
@@ -193,20 +210,20 @@ describe('MCP persisted-config contract', () => {
     storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V2);
 
     await updateMcpServer(MCP_SERVER_IDS.shell, {
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
     });
 
     expect(await getMcpToolCache(MCP_SERVER_IDS.shell)).toEqual(MCP_CACHE_ENTRY);
     expect(await getMcpServerById(MCP_SERVER_IDS.shell)).toMatchObject({
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
     });
   });
 
-  it('keeps the discovered list after a manual-mode allowlist selection change', async () => {
+  it('keeps the discovered list after a disabled-mode allowlist selection change', async () => {
     storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V2);
 
     await updateMcpServer(MCP_SERVER_IDS.shell, {
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
       allowlist: { mode: 'deny', toolNames: ['shell_status'] },
     });
 

@@ -24,6 +24,7 @@ import type { BackgroundRuntimeCommandContracts } from './background-runtime-con
 type BackgroundRuntimeCommandType = keyof BackgroundRuntimeCommandContracts;
 
 interface DecodedBackgroundRuntimePayloads {
+  SAVE_AGENT_OUTPUT_ARTIFACT: { loopId?: string; content: string };
   RECORD_USAGE_TURN: UsageTurnRecord;
   GET_USAGE_SUMMARY: { rangeDays: UsageRangeDays };
   SAVE_SYNC_CONFIG: SyncCommandTarget;
@@ -53,6 +54,18 @@ type BackgroundRuntimePayloadDecoderMap = {
 };
 
 export const BACKGROUND_RUNTIME_PAYLOAD_DECODERS: BackgroundRuntimePayloadDecoderMap = {
+  SAVE_AGENT_OUTPUT_ARTIFACT(value) {
+    const payload = isRecord(value) ? value : {};
+    if (typeof payload.content !== 'string' || payload.content.trim().length === 0) {
+      throw new Error('SAVE_AGENT_OUTPUT_ARTIFACT.payload.content must be a non-empty string.');
+    }
+    return {
+      ...(typeof payload.loopId === 'string' && payload.loopId.trim()
+        ? { loopId: payload.loopId.trim() }
+        : {}),
+      content: payload.content,
+    };
+  },
   RECORD_USAGE_TURN: normalizeUsageTurnInput,
   GET_USAGE_SUMMARY(value) {
     const payload = isRecord(value) ? value : {};

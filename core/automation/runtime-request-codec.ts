@@ -75,9 +75,20 @@ export function decodeAutomationUpdateRequest(value: unknown): AutomationUpdateR
   ) {
     throw new Error('Automation nextRunAt must be a finite number or null.');
   }
+  if (
+    patch.nextRunAt !== null
+    && patch.nextRunAt !== undefined
+    && (patch.nextRunAt < 0 || patch.nextRunAt > MAX_NEXT_RUN_AT_MS)
+  ) {
+    throw new Error(`Automation nextRunAt must be within [0, ${MAX_NEXT_RUN_AT_MS}].`);
+  }
   if (patch.nextRunAt !== undefined) decoded.nextRunAt = patch.nextRunAt;
   return { id, patch: decoded };
 }
+
+// Year 2100 — a sane upper bound for scheduling; guards against absurd
+// timestamps that would wedge the scheduler.
+const MAX_NEXT_RUN_AT_MS = 4102444800000;
 
 export function decodeAutomationStatusRequest(value: unknown): AutomationStatusRequest {
   const payload = recordValue(value, 'SET_AUTOMATION_STATUS.payload');

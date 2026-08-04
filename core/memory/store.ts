@@ -78,19 +78,61 @@ export async function importMemoriesAtomically(
   await assertCurrentMemoryDatabaseVersion();
 
   return withSyncLocalStateLock(() => db.transaction('rw', db.memories, async () => {
-    await readValidatedMemoryRecords();
+    const current = await readValidatedMemoryRecords();
     const now = Date.now();
     const ids: number[] = [];
+    // Rows this import already created, keyed by syncId, so a syncId repeated
+    // *within one batch* merges into the same row instead of creating a second
+    // duplicate (duplicate syncIds break sync apply occurrence matching, M10).
+    const batchRows = new Map<string, Memory>();
     for (const memory of validated) {
-      const id = await db.memories.add({
+      // Dedup by caller-supplied syncId: importing a record whose syncId
+      // already exists locally (e.g. re-importing an export) must update the
+      // existing row instead of creating a duplicate.
+      const syncId = memory.syncId ?? crypto.randomUUID();
+      const existing = memory.syncId
+        ? current.find((record) => record.syncId === memory.syncId)
+        : undefined;
+      if (existing?.id !== undefined) {
+        const merged: Memory = {
+          ...existing,
+          ...memory,
+          id: existing.id,
+          syncId,
+          updatedAt: now,
+        };
+        await db.memories.put(merged);
+        ids.push(existing.id);
+        continue;
+      }
+      if (memory.syncId) {
+        const batchRow = batchRows.get(memory.syncId);
+        if (batchRow?.id !== undefined) {
+          const merged: Memory = {
+            ...batchRow,
+            ...memory,
+            id: batchRow.id,
+            syncId,
+            updatedAt: now,
+          };
+          await db.memories.put(merged);
+          batchRows.set(memory.syncId, merged);
+          ids.push(batchRow.id);
+          continue;
+        }
+      }
+      const record: Memory = {
         ...memory,
-        syncId: memory.syncId ?? crypto.randomUUID(),
+        syncId,
         createdAt: now,
         updatedAt: now,
         accessCount: 0,
         lastAccessedAt: now,
-      } as Memory);
-      ids.push(id as number);
+      } as Memory;
+      const id = await db.memories.add(record);
+      const numericId = id as number;
+      if (memory.syncId) batchRows.set(memory.syncId, { ...record, id: numericId });
+      ids.push(numericId);
     }
     return ids;
   }));

@@ -8,6 +8,7 @@ import {
   validateConversationExport,
 } from './schema';
 import { sanitizeConversationExport } from './sanitize';
+import { applyConversationExportContentScope } from './scope';
 import {
   CONVERSATION_EXPORT_SCHEMA_VERSION,
   type ConversationExport,
@@ -175,9 +176,10 @@ async function getSessionSummaries(
 }
 
 export function buildConversationExportArtifacts(exportData: ConversationExport): ConversationExportArtifact[] {
+  const scopedData = applyConversationExportContentScope(exportData, exportData.request.contentScope);
   const artifacts: ConversationExportArtifact[] = [];
-  for (const format of exportData.request.formats) {
-    artifacts.push(createConversationExportArtifact(exportData, format));
+  for (const format of scopedData.request.formats) {
+    artifacts.push(createConversationExportArtifact(scopedData, format));
   }
   return artifacts;
 }
@@ -186,11 +188,12 @@ export async function buildConversationExportArtifactsCancellable(
   exportData: ConversationExport,
   signal?: AbortSignal,
 ): Promise<ConversationExportArtifact[]> {
+  const scopedData = applyConversationExportContentScope(exportData, exportData.request.contentScope);
   const artifacts: ConversationExportArtifact[] = [];
-  for (const format of exportData.request.formats) {
+  for (const format of scopedData.request.formats) {
     await yieldToRuntime();
     assertNotCancelled(signal);
-    artifacts.push(createConversationExportArtifact(exportData, format));
+    artifacts.push(createConversationExportArtifact(scopedData, format));
     await yieldToRuntime();
     assertNotCancelled(signal);
   }

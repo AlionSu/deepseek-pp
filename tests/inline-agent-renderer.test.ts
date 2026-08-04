@@ -1,13 +1,26 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   addToolResultDetailsToStep,
+  addToolResultToStep,
   createAgentRunningIndicator,
   createAgentStepElement,
   injectInlineAgentStyles,
+  setAgentStepCollapsed,
   updateAgentRunningIndicator,
+  updateStepStatus,
   updateStepStreamText,
+  type InlineAgentRendererLabels,
 } from '../core/inline-agent/renderer';
 import type { ToolExecutionRecord } from '../core/types';
+
+const timelineLabels: Partial<InlineAgentRendererLabels> = {
+  step: (stepNumber: number) => `Step ${stepNumber}`,
+  streaming: 'streaming...',
+  stop: 'Stop',
+  process: 'Process',
+  toolOk: 'Executed',
+  toolError: 'Execution failed',
+};
 
 describe('inline agent renderer', () => {
   afterEach(() => {
@@ -43,6 +56,66 @@ describe('inline agent renderer', () => {
     updateStepStreamText(step, 'line 1\nline 2\nline 3');
 
     expect(body?.scrollTop).toBe(480);
+  });
+
+  it('labels the streamed model output as process text separate from the answer', () => {
+    const step = createAgentStepElement(0, undefined, timelineLabels);
+    const sectionLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label');
+
+    expect(sectionLabel?.textContent).toBe('Process');
+    expect(sectionLabel?.hidden).toBe(true);
+
+    updateStepStreamText(step, 'working through the problem');
+
+    expect(sectionLabel?.hidden).toBe(false);
+    const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
+    expect(body?.textContent).toContain('working through the problem');
+    expect(body?.textContent).not.toContain('Process');
+  });
+
+  it('renders each tool execution as an independently collapsible row', () => {
+    const step = createAgentStepElement(0, undefined, timelineLabels);
+
+    addToolResultToStep(step, 'web_search', true, 'found 5 results', timelineLabels);
+    addToolResultToStep(step, 'web_fetch', false, 'request failed: 403', timelineLabels);
+
+    const items = step.querySelectorAll<HTMLElement>('.dpp-agent-step-tool-item');
+    expect(items).toHaveLength(2);
+    expect(items[0].getAttribute('data-tool-status')).toBe('ok');
+    expect(items[1].getAttribute('data-tool-status')).toBe('err');
+    expect(items[0].querySelector('.dpp-agent-tool-name')?.textContent).toBe('web_search');
+    expect(items[1].querySelector('.dpp-agent-tool-name')?.textContent).toBe('web_fetch');
+    expect(items[0].querySelector('.dpp-agent-tool-state')?.textContent).toBe('Executed');
+    expect(items[1].querySelector('.dpp-agent-tool-state')?.textContent).toBe('Execution failed');
+
+    const summaries = step.querySelectorAll<HTMLElement>('.dpp-agent-tool-summary');
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0].hidden).toBe(true);
+    expect(summaries[1].hidden).toBe(true);
+
+    const firstToggle = items[0].querySelector<HTMLButtonElement>('.dpp-agent-tool-toggle');
+    expect(firstToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(firstToggle?.getAttribute('aria-controls')).toBe(summaries[0].id);
+
+    firstToggle?.click();
+    expect(summaries[0].hidden).toBe(false);
+    expect(summaries[0].textContent).toBe('found 5 results');
+    expect(firstToggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(summaries[1].hidden).toBe(true);
+
+    firstToggle?.click();
+    expect(summaries[0].hidden).toBe(true);
+    expect(summaries[1].hidden).toBe(true);
+  });
+
+  it('bounds long tool summaries instead of exposing raw output', () => {
+    const step = createAgentStepElement(0, undefined, timelineLabels);
+    const longSummary = 'x'.repeat(2000);
+
+    addToolResultToStep(step, 'shell_exec', true, longSummary, timelineLabels);
+
+    const summary = step.querySelector<HTMLElement>('.dpp-agent-tool-summary');
+    expect(summary?.textContent?.length).toBe(600);
   });
 
   it('renders collapsible tool result details per execution', () => {
@@ -93,14 +166,89 @@ describe('inline agent renderer', () => {
   it('keeps section labels hidden until their section has content', () => {
     const step = createAgentStepElement(0);
     const processLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.process');
-    const toolsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.tools');
+    const resultsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.results');
 
     expect(processLabel?.hidden).toBe(true);
-    expect(toolsLabel?.hidden).toBe(true);
+    expect(resultsLabel?.hidden).toBe(true);
 
     updateStepStreamText(step, 'Working on it...');
     expect(processLabel?.hidden).toBe(false);
-    expect(toolsLabel?.hidden).toBe(true);
+    expect(resultsLabel?.hidden).toBe(true);
+  });
+
+  it('keeps the stop control clickable without collapsing the step', () => {
+    const onStop = vi.fn();
+    const step = createAgentStepElement(0, onStop, timelineLabels);
+
+    const stopBtn = step.querySelector<HTMLButtonElement>('.dpp-agent-stop-btn');
+    stopBtn?.click();
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(step.getAttribute('data-collapsed')).toBe('false');
+
+    const toggle = step.querySelector<HTMLButtonElement>('.dpp-agent-step-toggle');
+    toggle?.click();
+
+    expect(step.getAttribute('data-collapsed')).toBe('true');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores the same collapsed timeline structure from persisted trace data', () => {
+    const step = createAgentStepElement(1, undefined, timelineLabels);
+    updateStepStreamText(step, 'process text');
+    addToolResultToStep(step, 'web_search', true, 'summary', timelineLabels);
+    updateStepStatus(step, 'complete', 'Complete (1 tools)');
+    setAgentStepCollapsed(step, true);
+
+    expect(step.getAttribute('data-step-index')).toBe('1');
+    expect(step.getAttribute('data-status')).toBe('complete');
+    expect(step.getAttribute('data-collapsed')).toBe('true');
+    expect(step.querySelector('.dpp-agent-step-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    expect(step.querySelector('.dpp-agent-step-dot')).not.toBeNull();
+    expect(step.querySelector('.dpp-agent-step-status')?.textContent).toBe('Complete (1 tools)');
+    expect(step.querySelector<HTMLElement>('.dpp-agent-step-section-label')?.hidden).toBe(false);
+    expect(step.querySelector('.dpp-agent-stop-btn')).toBeNull();
+
+    setAgentStepCollapsed(step, false);
+    expect(step.querySelector('.dpp-agent-step-toggle')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('keeps tool rows visible and independently expandable in a collapsed step', () => {
+    injectInlineAgentStyles();
+
+    const step = createAgentStepElement(0, undefined, timelineLabels);
+    updateStepStreamText(step, 'process text');
+    addToolResultToStep(step, 'web_search', true, 'found 5 results', timelineLabels);
+    addToolResultToStep(step, 'web_fetch', false, 'request failed: 403', timelineLabels);
+    updateStepStatus(step, 'complete', 'Complete (2 tools)');
+
+    setAgentStepCollapsed(step, true);
+    expect(step.getAttribute('data-collapsed')).toBe('true');
+
+    const css = document.getElementById('dpp-inline-agent-css')?.textContent ?? '';
+    expect(css).toContain('.dpp-agent-step[data-collapsed="true"] .dpp-agent-step-body');
+    expect(css).toContain('.dpp-agent-step[data-collapsed="true"] .dpp-agent-step-results');
+    expect(css).not.toContain('.dpp-agent-step[data-collapsed="true"] .dpp-agent-step-tools');
+
+    const items = step.querySelectorAll<HTMLElement>('.dpp-agent-step-tool-item');
+    const toggles = step.querySelectorAll<HTMLButtonElement>('.dpp-agent-tool-toggle');
+    const summaries = step.querySelectorAll<HTMLElement>('.dpp-agent-tool-summary');
+    expect(items).toHaveLength(2);
+    expect(toggles[0]?.getAttribute('aria-expanded')).toBe('false');
+    expect(toggles[1]?.getAttribute('aria-expanded')).toBe('false');
+
+    toggles[0]?.click();
+    expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true');
+    expect(summaries[0]?.hidden).toBe(false);
+    expect(summaries[0]?.textContent).toBe('found 5 results');
+    expect(toggles[1]?.getAttribute('aria-expanded')).toBe('false');
+    expect(summaries[1]?.hidden).toBe(true);
+    expect(step.getAttribute('data-collapsed')).toBe('true');
+
+    setAgentStepCollapsed(step, false);
+    expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true');
+    expect(summaries[0]?.hidden).toBe(false);
   });
 
   it('shows and hides the global running indicator with live counts', () => {
@@ -130,7 +278,20 @@ describe('inline agent renderer', () => {
     expect(agentStyle?.textContent).toContain('color: var(--dpp-ui-text);');
     expect(agentStyle?.textContent).toContain('[data-dpp-body-text]');
     expect(agentStyle?.textContent).toContain('color: var(--dpp-ui-accent);');
-    expect(agentStyle?.textContent).toContain('.dpp-agent-step[data-collapsed="true"] .dpp-agent-step-results');
     expect(agentStyle?.textContent).not.toContain('var(--ds-text');
+  });
+
+  it('keeps timeline and tool hooks in the injected styles', () => {
+    injectInlineAgentStyles();
+
+    const css = document.getElementById('dpp-inline-agent-css')?.textContent ?? '';
+    expect(css).toContain('.dpp-agent-step-toggle');
+    expect(css).toContain('.dpp-agent-step-dot');
+    expect(css).toContain('.dpp-agent-step-section-label');
+    expect(css).toContain('.dpp-agent-tool-summary');
+    expect(css).toContain('.dpp-agent-running-indicator');
+    expect(css).toContain('[data-status="streaming"]');
+    expect(css).toContain('@keyframes dpp-agent-step-pulse');
+    expect(css).toContain('prefers-reduced-motion');
   });
 });

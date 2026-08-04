@@ -122,7 +122,9 @@ export function createBrowserControlToolDescriptors(
     description: translate(locale, COPY_KEYS[name].description),
     inputSchema: schemaForTool(name),
     execution: {
-      mode: riskForTool(name) === 'high' ? 'manual' : 'auto',
+      // Browser control is an explicit user opt-in and all its actions are
+      // visible in the controlled tab, so every tool is auto-executable.
+      mode: 'auto',
       enabled: true,
       risk: riskForTool(name),
       timeoutMs: timeoutForTool(name),

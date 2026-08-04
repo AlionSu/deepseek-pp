@@ -34,7 +34,11 @@ export function createNativeEnvelopeDispatcher({
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.logLine(`Error: ${message}`);
-      await channel.writeMessage(jsonRpcError(null, -32603, message || 'Internal error'));
+      // Reply with the request's own id when available: the extension matches
+      // native responses by id, and an id:null error for a valid request would
+      // otherwise hang until the request timeout instead of failing fast.
+      const requestId = envelope?.message?.id ?? null;
+      await channel.writeMessage(jsonRpcError(requestId, -32603, message || 'Internal error'));
     }
   }
 

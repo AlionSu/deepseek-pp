@@ -16,6 +16,7 @@ import {
   takeExternalizedToolPayloadText,
 } from './externalized-payload';
 import { isToolCallRecord } from '../messaging/tool-record-codec';
+import { diagnosticLogBuffer } from '../diagnostics/log-buffer';
 import {
   authorizeToolExecution,
   completeToolExecutionAuthorization,
@@ -130,11 +131,22 @@ async function executeRuntimeToolCall(
     ? { ...call, id: options.idempotencyKey }
     : call;
   if (!isToolCallRecord(identifiedCall)) {
+    diagnosticLogBuffer.record({
+      level: 'warn',
+      source: 'tool-runtime',
+      message: 'tool call payload rejected',
+      details: String(identifiedCall?.name ?? 'unknown'),
+    });
     return createInvalidToolCallResult(identifiedCall, locale);
   }
   const context = typeof authorization === 'string'
     ? createTrustedExecutionContext(identifiedCall, authorization, options.trustedCapabilityScopeId)
     : authorization;
+  diagnosticLogBuffer.record({
+    level: 'info',
+    source: 'tool-runtime',
+    message: `tool start: ${identifiedCall.name}`,
+  });
   if (identifiedCall.parseError) {
     const result = createParseErrorToolResult(identifiedCall, locale);
     await appendAuthorizedFailureHistory(identifiedCall, result, context);
@@ -158,7 +170,14 @@ async function executeRuntimeToolCall(
         error,
         identifiedCall,
         translate(locale, 'tool.runtime.authorizationRejected'),
+        buildAuthorizationRejectionHint(locale, error),
       );
+    diagnosticLogBuffer.record({
+      level: 'warn',
+      source: 'tool-runtime',
+      message: `tool authorization denied: ${identifiedCall.name}`,
+      details: `${error.code}: ${error.message}`,
+    });
     await appendAuthorizedFailureHistory(identifiedCall, result, context);
     return result;
   }
@@ -218,6 +237,12 @@ async function executeRuntimeToolCall(
     }
     assertRuntimeExecutionActive(options);
   } catch (error) {
+    diagnosticLogBuffer.record({
+      level: 'error',
+      source: 'tool-runtime',
+      message: `tool execution failed: ${resolvedCall.name}`,
+      details: error instanceof Error ? error.message : String(error),
+    });
     await completeAuthorizationAfterProvider(authorized.reservation);
     throw error;
   }
@@ -229,7 +254,19 @@ async function executeRuntimeToolCall(
     throw error;
   }
   assertRuntimeExecutionActive(options);
+  diagnosticLogBuffer.record({
+    level: result.ok ? 'info' : 'warn',
+    source: 'tool-runtime',
+    message: `tool finished: ${result.name ?? resolvedCall.name} (${result.ok ? 'ok' : 'error'})`,
+    details: summarizeToolResult(result),
+  });
   return result;
+}
+
+function summarizeToolResult(result: ToolResult): string {
+  const parts = [result.summary];
+  if (result.detail) parts.push(result.detail.slice(0, 500));
+  return parts.join(' | ').slice(0, 600);
 }
 
 export function createInvalidToolCallResult(
@@ -432,4 +469,37 @@ function createRuntimeCapabilityScope(
     trigger: context.trigger,
     chatSessionId: context.chatSessionId ?? null,
   };
+}
+
+
+type AuthorizationHintKey =
+  | 'tool.runtime.authorizationMissingHint'
+  | 'tool.runtime.authorizationStaleHint'
+  | 'tool.runtime.authorizationSessionMismatchHint'
+  | 'tool.runtime.authorizationDisabledHint'
+  | 'tool.runtime.authorizationIdentityMissingHint'
+  | 'tool.runtime.authorizationGenericHint';
+
+function buildAuthorizationRejectionHint(
+  locale: SupportedLocale,
+  error: ToolAuthorizationError,
+): string {
+  return translate(locale, authorizationHintKey(error.code), {});
+}
+
+function authorizationHintKey(code: string): AuthorizationHintKey {
+  switch (code) {
+    case 'tool_authorization_missing':
+      return 'tool.runtime.authorizationMissingHint';
+    case 'tool_authorization_stale':
+      return 'tool.runtime.authorizationStaleHint';
+    case 'tool_session_mismatch':
+      return 'tool.runtime.authorizationSessionMismatchHint';
+    case 'tool_disabled':
+      return 'tool.runtime.authorizationDisabledHint';
+    case 'tool_identity_missing':
+      return 'tool.runtime.authorizationIdentityMissingHint';
+    default:
+      return 'tool.runtime.authorizationGenericHint';
+  }
 }

@@ -824,6 +824,7 @@ function exportData(exportId: string): ConversationExport {
     generatedBy: { name: 'DeepSeek++', version: '1.10.0' },
     request: {
       mode: 'sanitized',
+      contentScope: 'full',
       formats: ['html'],
       includeAttachmentMetadata: true,
       includeFileBodies: false,

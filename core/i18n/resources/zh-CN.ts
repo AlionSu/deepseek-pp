@@ -61,6 +61,10 @@ export const zhCN = {
     en: 'English',
   },
   sidepanel: {
+    subTabs: {
+      scrollLeft: '向左滚动标签',
+      scrollRight: '向右滚动标签',
+    },
     libraryPage: {
       navLabel: '资料子导航',
       tabs: {
@@ -494,6 +498,8 @@ export const zhCN = {
       dataSection: '数据管理',
       memoryTotal: '记忆总数',
       exportMemories: '导出记忆',
+      exportLogs: '导出诊断日志',
+      exportLogsHint: '导出最近一次会话内后台工具执行与错误诊断信息，用于排查 shell_exec / MCP / 授权问题。',
       importMemories: '导入记忆',
       clearAllMemories: '清除所有记忆',
       usage: {
@@ -942,6 +948,9 @@ export const zhCN = {
       emptyConversation: '当前页面还没有可导出的对话。',
       formatDialogLabel: '选择导出格式',
       formatTitle: '导出格式',
+      scopeLabel: '内容范围',
+      scopeFull: '全部内容（含工具调用、续跑、思考、注入信息）',
+      scopeInputOutput: '仅输入 + 最终产出',
       formatHtml: 'HTML',
       formatMarkdown: 'Markdown',
       formatPdf: 'PDF',
@@ -995,6 +1004,8 @@ export const zhCN = {
       downloadCode: '下载',
       downloadMessageMarkdownButton: 'MD',
       downloadMessageMarkdownTitle: '下载消息为 Markdown',
+      copyMessageButton: '复制',
+      copyMessageTitle: '复制完整对话输出',
     },
     toolBlock: {
       title: '已执行工具（{count}次）',
@@ -1032,6 +1043,8 @@ export const zhCN = {
       results: '执行结果',
       running: 'Agent 运行中 · 第 {step} 步 · 已调用 {tools} 次工具',
       footerError: 'Agent 执行出错（{steps} 步，{tools} 次工具调用）',
+      autoSaved: '长文产出已自动保存为产物：',
+      autoSavedDownload: '下载',
       concurrencyGuard: 'Agent 正在执行中，已忽略此消息触发的重复任务。如需中断，请点击 Agent 面板的「停止」。',
     },
     permission: {
@@ -1115,6 +1128,12 @@ export const zhCN = {
       invalidFormat: '工具格式错误',
       unknownTool: '未知工具',
       authorizationRejected: '工具授权被拒绝',
+      authorizationMissingHint: '授权已关闭或未确认：请重新发起该操作，并在授权确认中允许此工具。',
+      authorizationStaleHint: '授权已过期：请重新发起该操作以刷新授权。',
+      authorizationSessionMismatchHint: '授权会话不匹配：请在当前对话中重新发起该操作。',
+      authorizationDisabledHint: '该工具当前已禁用：请在工具设置中启用后重试。',
+      authorizationIdentityMissingHint: '缺少执行所需的身份信息：请重新发起该操作。',
+      authorizationGenericHint: '如需继续执行，请重新发起该操作并完成授权确认。',
       sessionBindingUnavailable: '新对话未能及时获得浏览器会话路由。请等待聊天地址更新后重试。',
       incomplete: '响应已结束，但该工具调用尚未完成。',
     },

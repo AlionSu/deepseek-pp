@@ -311,7 +311,8 @@ function normalizeServerForMutation(raw: unknown): McpServerConfig {
       toolNames: stringArrayValue(value.allowlist?.toolNames),
     },
     execution: {
-      mode: value.execution?.mode === 'manual' || value.execution?.mode === 'disabled' ? value.execution.mode : 'auto',
+      // 'manual' was removed; any unknown/legacy value normalizes to 'auto'.
+      mode: value.execution?.mode === 'disabled' ? 'disabled' : 'auto',
       enabled: value.execution?.enabled !== false,
     },
     status,

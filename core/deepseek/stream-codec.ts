@@ -240,6 +240,11 @@ export function replaceDeepSeekSseFrameData(
   let replaced = false;
   let output = '';
 
+  // The replacement payload supersedes the WHOLE event, so exactly one
+  // `data:` line is emitted and any further data lines are dropped. Per the
+  // SSE spec, multiple data lines join with '\n' — emitting one copy per
+  // original line would duplicate the payload (`X\nX`) and corrupt the event
+  // for servers that split a payload across data lines.
   for (let index = 0; index < parts.length; index += 2) {
     const line = parts[index] ?? '';
     const lineEnding = parts[index + 1] ?? '';

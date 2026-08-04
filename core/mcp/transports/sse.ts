@@ -14,6 +14,7 @@ import {
   fetchWithTimeout,
   getMcpEndpointUrl,
   parseJsonRpcSseMessage,
+  readChunkWithDeadline,
 } from './common';
 
 export function createMcpSseTransport(server: McpServerConfig): McpProtocolTransport {
@@ -78,6 +79,7 @@ async function sendSseMessage<TParams extends Record<string, unknown> | undefine
       message as McpJsonRpcRequest<TParams>,
       maxResponseBytes,
       signal,
+      timeoutMs,
     );
   } finally {
     reader.cancel().catch(() => undefined);
@@ -96,9 +98,9 @@ async function readSseEndpoint(
   let buffer = '';
   let totalBytes = 0;
 
-  while (Date.now() < deadline) {
+  while (true) {
     throwIfSignalAborted(signal);
-    const { done, value } = await reader.read();
+    const { done, value } = await readChunkWithDeadline(reader, deadline);
     throwIfSignalAborted(signal);
     if (done) break;
     totalBytes = assertWithinByteLimit(totalBytes, value.byteLength, maxResponseBytes, reader);
@@ -107,11 +109,47 @@ async function readSseEndpoint(
     buffer = drained.remainder;
     for (const event of drained.events) {
       if (event.event !== 'endpoint') continue;
-      return new URL(event.data, getMcpEndpointUrl(server));
+      return validateSsePostEndpoint(event.data, server);
     }
   }
 
   throw new McpTransportError('mcp_sse_endpoint_missing', 'MCP SSE stream did not provide a POST endpoint.');
+}
+
+/**
+ * Resolves the SSE `endpoint` event and enforces that the POST target stays
+ * on the configured server origin (scheme + host + port). The extension only
+ * holds host permission for that origin; without this check a malicious or
+ * compromised MCP server could redirect the authenticated POST (Bearer/Basic/
+ * custom headers plus the JSON-RPC payload) to an arbitrary origin (H3).
+ */
+function validateSsePostEndpoint(data: string, server: McpServerConfig): URL {
+  const configured = getMcpEndpointUrl(server);
+  let resolved: URL;
+  try {
+    resolved = new URL(data, configured);
+  } catch {
+    throw new McpTransportError(
+      'mcp_sse_endpoint_invalid',
+      'MCP SSE endpoint event is not a valid URL.',
+      { retryable: false },
+    );
+  }
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+    throw new McpTransportError(
+      'mcp_sse_endpoint_invalid',
+      `MCP SSE endpoint uses an unsupported protocol: ${resolved.protocol}`,
+      { retryable: false },
+    );
+  }
+  if (resolved.origin !== configured.origin) {
+    throw new McpTransportError(
+      'mcp_sse_endpoint_origin_mismatch',
+      `MCP SSE endpoint origin ${resolved.origin} does not match the configured server origin ${configured.origin}.`,
+      { retryable: false },
+    );
+  }
+  return resolved;
 }
 
 async function postSseMessage(
@@ -143,13 +181,18 @@ async function readSseResponseFromReader<TResult>(
   expectedRequest: McpJsonRpcRequest<any>,
   maxResponseBytes: number,
   signal?: AbortSignal,
+  timeoutMs: number = 30_000,
 ): Promise<McpJsonRpcResponse<TResult>> {
+  // Response bodies have no inherent deadline: a server that accepts the POST
+  // but never emits the matching `message` event would hang the request
+  // forever (M17). Enforce the same deadline budget as the connect phase.
+  const deadline = Date.now() + timeoutMs;
   let buffer = '';
   let totalBytes = 0;
 
   while (true) {
     throwIfSignalAborted(signal);
-    const { done, value } = await reader.read();
+    const { done, value } = await readChunkWithDeadline(reader, deadline);
     throwIfSignalAborted(signal);
     if (done) break;
     totalBytes = assertWithinByteLimit(totalBytes, value.byteLength, maxResponseBytes, reader);

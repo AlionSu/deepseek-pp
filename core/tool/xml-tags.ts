@@ -16,18 +16,30 @@ export function findFirstXmlToolTag(
   if (!text || toolNames.size === 0) return null;
 
   let searchFrom = Math.max(0, options.fromIndex ?? 0);
+  // Adversarial input such as a long run of '<' closed by a single '>' would
+  // re-scan the '>' from scratch for every '<' (quadratic). Once a '<' is
+  // found inside the same tag region, the closing '>' cannot move, so carry
+  // it forward instead of searching again.
+  let knownTagEnd = -1;
   while (searchFrom < text.length) {
     const index = text.indexOf('<', searchFrom);
     if (index === -1) return null;
 
-    const tagEnd = text.indexOf('>', index + 1);
+    const tagEnd = knownTagEnd > index ? knownTagEnd : text.indexOf('>', index + 1);
     if (tagEnd === -1) return null;
 
     const parsed = parseCompleteXmlToolTag(text, index, tagEnd, toolNames);
     if (parsed && parsed.closing === options.closing) return parsed;
 
-    const candidate = text.slice(index, tagEnd + 1);
-    searchFrom = candidate.includes('<', 1) ? index + 1 : tagEnd + 1;
+    const nextLt = text.indexOf('<', index + 1);
+    if (nextLt !== -1 && nextLt < tagEnd) {
+      // Another '<' inside the same '<'-run: the closing '>' stays the same.
+      knownTagEnd = tagEnd;
+      searchFrom = nextLt;
+    } else {
+      knownTagEnd = -1;
+      searchFrom = tagEnd + 1;
+    }
   }
 
   return null;

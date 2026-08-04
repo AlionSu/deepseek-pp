@@ -101,10 +101,10 @@ describe('McpPage discovered tool switch states', () => {
     expect(toolSwitch(row).getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('labels a manual-mode selected tool as selected, not auto or enabled', async () => {
+  it('labels a disabled-mode selected tool as selected, not auto or enabled', async () => {
     serversResponse = [{
       ...multimodalServer,
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
     }];
     await renderMcpPage();
 
@@ -118,7 +118,7 @@ describe('McpPage discovered tool switch states', () => {
   it('labels an unselected tool as disabled with the switch off', async () => {
     serversResponse = [{
       ...multimodalServer,
-      execution: { enabled: true, mode: 'manual' },
+      execution: { enabled: true, mode: 'disabled' },
       allowlist: { mode: 'allow', toolNames: [] },
     }];
     await renderMcpPage();

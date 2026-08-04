@@ -910,6 +910,17 @@ export function useSettingsController() {
     URL.revokeObjectURL(url);
   }, []);
 
+  const handleExportLogs = useCallback(async () => {
+    const result = await sidepanelRuntimeClient.request({ type: 'EXPORT_DIAGNOSTIC_LOGS' });
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deepseek-pp-logs-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
   const handleImport = useCallback(
     async (
       labels: { arrayError: string; jsonError: string },
@@ -1037,6 +1048,7 @@ export function useSettingsController() {
     handleAuthorizeSync,
     // data
     handleExport,
+    handleExportLogs,
     handleImport,
     handleClearAllMemories,
   };

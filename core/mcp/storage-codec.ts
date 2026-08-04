@@ -20,7 +20,10 @@ const TRANSPORT_KINDS = new Set([
 ]);
 const SECRET_KINDS = new Set(['bearer', 'basic', 'header']);
 const ALLOWLIST_MODES = new Set(['all', 'allow', 'deny']);
-const EXECUTION_MODES = new Set(['auto', 'manual', 'disabled']);
+const EXECUTION_MODES = new Set(['auto', 'disabled']);
+// Released configs may persist `execution.mode: 'manual'`; decoding accepts
+// it and normalizes to 'auto' (manual no longer exists as a mode).
+const LEGACY_EXECUTION_MODES = new Set(['auto', 'manual', 'disabled']);
 const SERVER_STATUSES = new Set(['unknown', 'ready', 'error', 'disabled']);
 
 export type McpStorageContractErrorCode =
@@ -63,15 +66,23 @@ export function decodeMcpStorageState(raw: unknown): McpServerStorageState {
   const serversById = validateServers(servers);
 
   const cacheServerIds = new Set<string>();
+  const decodedToolCaches: McpToolCacheEntry[] = [];
   toolCaches.forEach((cache, index) => {
     const decoded = validateToolCache(cache, `$.toolCaches[${index}]`, serversById);
     if (cacheServerIds.has(decoded.serverId)) {
       fail(`$.toolCaches[${index}].serverId`, 'Duplicate MCP tool cache.');
     }
     cacheServerIds.add(decoded.serverId);
+    decodedToolCaches.push(decoded);
   });
 
-  return state as unknown as McpServerStorageState;
+  // Serve the validated (and legacy-normalized) records, not the raw stored
+  // objects: decode must never leak a released `manual` mode value.
+  return {
+    ...state,
+    servers: Array.from(serversById.values()),
+    toolCaches: decodedToolCaches,
+  } as unknown as McpServerStorageState;
 }
 
 export function encodeMcpStorageState(state: McpServerStorageState): McpServerStorageState {
@@ -163,7 +174,7 @@ function validateServer(raw: unknown, path: string): McpServerConfig {
   requireStringArray(allowlist.toolNames, `${path}.allowlist.toolNames`);
 
   const execution = requireRecord(server.execution, `${path}.execution`);
-  requireEnum(execution.mode, EXECUTION_MODES, `${path}.execution.mode`);
+  requireEnum(execution.mode, LEGACY_EXECUTION_MODES, `${path}.execution.mode`);
   requireBoolean(execution.enabled, `${path}.execution.enabled`);
 
   requireEnum(server.status, SERVER_STATUSES, `${path}.status`);
@@ -172,6 +183,15 @@ function validateServer(raw: unknown, path: string): McpServerConfig {
   requirePositiveNumber(server.createdAt, `${path}.createdAt`);
   requirePositiveNumber(server.updatedAt, `${path}.updatedAt`);
 
+  // Normalize the released `manual` mode to `auto` (deterministic, idempotent;
+  // storage is only rewritten on the next save).
+  const normalizedMode = execution.mode === 'manual' ? 'auto' : execution.mode;
+  if (normalizedMode !== execution.mode) {
+    return {
+      ...server,
+      execution: { ...execution, mode: normalizedMode },
+    } as unknown as McpServerConfig;
+  }
   return server as unknown as McpServerConfig;
 }
 
@@ -184,10 +204,16 @@ function validateToolCache(
   const serverId = requireNonEmptyString(cache.serverId, `${path}.serverId`);
   const server = serversById.get(serverId);
   if (!server) fail(`${path}.serverId`, 'MCP tool cache references an unknown server.');
-  requireArray(cache.descriptors, `${path}.descriptors`).forEach((descriptor, index) => {
+  const descriptors = requireArray(cache.descriptors, `${path}.descriptors`).map((descriptor, index) => {
     const descriptorPath = `${path}.descriptors[${index}]`;
-    if (!isToolDescriptorRecord(descriptor)) fail(descriptorPath, 'Invalid MCP tool descriptor.');
-    const provider = descriptor.provider as Record<string, unknown>;
+    // Released v2 caches may persist descriptors with the removed 'manual'
+    // execution mode (1.12.0 wrote server.execution.mode verbatim). Normalize
+    // those to 'auto' before validating so a stored cache keeps decoding
+    // instead of failing the entire storage state; mirrors the server-record
+    // normalization above and materializes on the next save.
+    const normalized = normalizeLegacyDescriptorExecutionMode(descriptor);
+    if (!isToolDescriptorRecord(normalized)) fail(descriptorPath, 'Invalid MCP tool descriptor.');
+    const provider = normalized.provider as Record<string, unknown>;
     if (
       provider.kind !== 'mcp'
       || provider.id !== serverId
@@ -195,20 +221,21 @@ function validateToolCache(
     ) {
       fail(`${descriptorPath}.provider`, 'MCP tool descriptor belongs to a different server.');
     }
-    const name = descriptor.name as string;
-    if (descriptor.id !== createMcpDescriptorId(serverId, name)) {
+    const name = normalized.name as string;
+    if (normalized.id !== createMcpDescriptorId(serverId, name)) {
       fail(`${descriptorPath}.id`, 'MCP tool descriptor id does not match its server and tool name.');
     }
-    if (descriptor.invocationName !== createMcpInvocationName(serverId, name)) {
+    if (normalized.invocationName !== createMcpInvocationName(serverId, name)) {
       fail(`${descriptorPath}.invocationName`, 'MCP invocation name does not match its server and tool name.');
     }
-    const annotations = descriptor.annotations as Record<string, unknown> | undefined;
+    const annotations = normalized.annotations as Record<string, unknown> | undefined;
     if (annotations?.mcpServerId !== undefined && annotations.mcpServerId !== serverId) {
       fail(`${descriptorPath}.annotations.mcpServerId`, 'MCP annotation belongs to a different server.');
     }
     if (annotations?.mcpToolName !== undefined && annotations.mcpToolName !== name) {
       fail(`${descriptorPath}.annotations.mcpToolName`, 'MCP annotation names a different tool.');
     }
+    return normalized;
   });
   requirePositiveNumber(cache.refreshedAt, `${path}.refreshedAt`);
   requirePositiveNumber(cache.expiresAt, `${path}.expiresAt`);
@@ -223,7 +250,25 @@ function validateToolCache(
   requireNonNegativeInteger(health.toolCount, `${path}.health.toolCount`);
   requireNullableString(health.error, `${path}.health.error`);
 
-  return cache as unknown as McpToolCacheEntry;
+  return { ...cache, descriptors } as unknown as McpToolCacheEntry;
+}
+
+/**
+ * Clones a raw cache descriptor with the removed 'manual' execution mode
+ * normalized to 'auto'; any other value passes through unchanged. The clone
+ * is validated in place of the original so released caches never fail the
+ * descriptor contract on the legacy value alone.
+ */
+function normalizeLegacyDescriptorExecutionMode(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const descriptor = raw as Record<string, unknown>;
+  const execution = descriptor.execution;
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)) return raw;
+  if ((execution as Record<string, unknown>).mode !== 'manual') return raw;
+  return {
+    ...descriptor,
+    execution: { ...(execution as Record<string, unknown>), mode: 'auto' },
+  };
 }
 
 function validateServers(servers: unknown[]): Map<string, McpServerConfig> {

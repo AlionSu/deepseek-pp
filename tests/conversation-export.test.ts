@@ -18,6 +18,7 @@ import {
   normalizeConversationExportRequest,
 } from '../core/export/schema';
 import { normalizeDeepSeekHistory } from '../core/export/normalize';
+import type { ConversationExport } from '../core/export/types';
 
 const fixtureDir = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/deepseek-export');
 
@@ -25,11 +26,21 @@ describe('conversation export request schema', () => {
   it('defaults to sanitized HTML with attachment metadata', () => {
     expect(normalizeConversationExportRequest({})).toMatchObject({
       mode: 'sanitized',
+      contentScope: 'full',
       formats: ['html'],
       includeAttachmentMetadata: true,
       includeFileBodies: false,
       pageSize: 50,
     });
+  });
+
+  it('normalizes and validates content scope', () => {
+    expect(normalizeConversationExportRequest({ contentScope: 'input-output' }).contentScope)
+      .toBe('input-output');
+    expect(normalizeConversationExportRequest({ contentScope: '' }).contentScope)
+      .toBe('full');
+    expect(() => normalizeConversationExportRequest({ contentScope: 'summary' }))
+      .toThrow(ConversationExportValidationError);
   });
 
   it('rejects file body export until official download behavior is verified', () => {
@@ -408,3 +419,59 @@ function createClock(values: string[]) {
   let index = 0;
   return () => new Date(values[Math.min(index++, values.length - 1)]);
 }
+
+
+describe('conversation export content scope projection', () => {
+  function buildExportData() {
+    const base: ConversationExport = {
+      schemaVersion: 'deepseek-pp.conversation-export.v1',
+      exportId: 'scope-test',
+      createdAt: '2026-08-04T00:00:00.000Z',
+      source: { provider: 'deepseek-official-web', baseUrl: 'https://chat.deepseek.com', endpointVerification: 'static-bundle-and-browser-session', fileBodies: 'unsupported-unverified' },
+      generatedBy: { name: 'DeepSeek++', version: '0.0.0-test' },
+      request: { mode: 'sanitized', contentScope: 'full', formats: ['markdown'], includeAttachmentMetadata: true, includeFileBodies: false, pageSize: 50, sessionIds: ['s1'] },
+      stats: { sessionCount: 1, messageCount: 5, attachmentCount: 0, failedSessionCount: 0, startedAt: '2026-08-04T00:00:00.000Z', completedAt: '2026-08-04T00:00:00.000Z' },
+      sessions: [{
+        id: 's1',
+        title: '测试会话',
+        pinned: false,
+        titleType: null,
+        modelType: null,
+        createdAt: null,
+        updatedAt: null,
+        messages: [
+          { id: 'm1', parentId: null, role: 'user', content: '输入一', contentFragments: [{ kind: 'text', text: '输入一' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+          { id: 'm2', parentId: 'm1', role: 'assistant', content: '思考中工具调用', contentFragments: [{ kind: 'reasoning', text: '思考' }, { kind: 'tool', text: '<shell_exec>…' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+          { id: 'm3', parentId: 'm2', role: 'tool', content: '工具结果', contentFragments: [{ kind: 'tool', text: '工具结果' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+          { id: 'm4', parentId: 'm3', role: 'assistant', content: '最终产出A（含思考）', contentFragments: [{ kind: 'reasoning', text: '不该出现' }, { kind: 'text', text: '最终产出A' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+          { id: 'm5', parentId: 'm4', role: 'assistant', content: '最终产出B', contentFragments: [{ kind: 'text', text: '最终产出B' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+        ],
+        failures: [],
+      }],
+      attachments: [],
+      failures: [],
+    };
+    return base;
+  }
+
+  it('keeps everything for the full scope', async () => {
+    const artifacts = await buildConversationExportArtifactsCancellable(buildExportData());
+    const markdown = artifacts.find((artifact) => artifact.format === 'markdown');
+    expect(markdown?.content).toContain('输入一');
+    expect(markdown?.content).toContain('工具结果');
+    expect(markdown?.content).toContain('最终产出B');
+  });
+
+  it('projects input-output scope to user inputs plus the final assistant text output', async () => {
+    const data = { ...buildExportData(), request: { ...buildExportData().request, contentScope: 'input-output' as const } };
+    const artifacts = await buildConversationExportArtifactsCancellable(data);
+    const markdown = artifacts.find((artifact) => artifact.format === 'markdown');
+    expect(markdown?.content).toContain('输入一');
+    expect(markdown?.content).toContain('最终产出B');
+    expect(markdown?.content).not.toContain('工具结果');
+    expect(markdown?.content).not.toContain('不该出现');
+    expect(markdown?.content).not.toContain('最终产出A');
+    expect(markdown?.content).not.toContain('<shell_exec>');
+    expect(markdown?.content).toContain('Messages: 2');
+  });
+});
