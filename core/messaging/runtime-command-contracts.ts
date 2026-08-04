@@ -137,6 +137,7 @@ export const RUNTIME_COMMAND_CONTRACTS = {
   GET_CONFIG: typedCommand('none', 'value'),
   WHATS_NEW_DISMISSED: typedCommand('none', 'ack', 'background-error', 'live-only'),
   EXPORT_DIAGNOSTIC_LOGS: typedCommand('none', 'value'),
+  SAVE_AGENT_OUTPUT_ARTIFACT: typedCommand('payload-decoded', 'status-or-domain-error'),
   GET_DEEPSEEK_API_KEY_STATUS: typedCommand('none', 'status', 'background-error', 'live-only'),
   SAVE_DEEPSEEK_API_KEY: typedCommand('payload-decoded', 'status', 'background-error', 'live-only'),
   CLEAR_DEEPSEEK_API_KEY: typedCommand('none', 'status', 'background-error', 'live-only'),

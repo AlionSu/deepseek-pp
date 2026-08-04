@@ -1028,6 +1028,8 @@ export const en = {
       results: 'Results',
       running: 'Agent running · step {step} · {tools} tool calls',
       footerError: 'Agent error ({steps} steps, {tools} tool calls)',
+      autoSaved: 'Long output was auto-saved as an artifact: ',
+      autoSavedDownload: 'Download',
       concurrencyGuard: 'An agent is still running. A duplicate task from this message was skipped. To interrupt, click Stop in the agent panel.',
     },
     permission: {

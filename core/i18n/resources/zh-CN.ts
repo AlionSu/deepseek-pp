@@ -1028,6 +1028,8 @@ export const zhCN = {
       results: '执行结果',
       running: 'Agent 运行中 · 第 {step} 步 · 已调用 {tools} 次工具',
       footerError: 'Agent 执行出错（{steps} 步，{tools} 次工具调用）',
+      autoSaved: '长文产出已自动保存为产物：',
+      autoSavedDownload: '下载',
       concurrencyGuard: 'Agent 正在执行中，已忽略此消息触发的重复任务。如需中断，请点击 Agent 面板的「停止」。',
     },
     permission: {
