@@ -2,7 +2,7 @@
  * Deterministic auto-save policy for long inline-agent outputs (#497).
  *
  * A final agent answer is auto-saved as an artifact only when it is long
- * enough to be a real "产出物" and the loop did not already persist output
+ * enough to be a real long-form output and the loop did not already persist output
  * through an explicit save/write tool.
  */
 
