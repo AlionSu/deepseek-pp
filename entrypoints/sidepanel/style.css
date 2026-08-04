@@ -1500,6 +1500,53 @@ input[type='range'] {
   background: var(--ds-blue);
 }
 
+/* Sub-tabs overflow chevrons: absolute overlays at the strip edges. A
+   button is shown only while that direction actually has hidden content
+   (disabled = display:none), fades the covered tabs with a card-colored
+   gradient, and uses the existing tab strip colors — no extra assets. */
+.sub-tabs-shell {
+  position: relative;
+}
+
+.sub-tabs-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  padding: 0;
+  border: 0;
+  color: var(--ds-text-secondary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.sub-tabs-arrow:disabled {
+  display: none;
+}
+
+.sub-tabs-arrow-left {
+  left: 0;
+  background: linear-gradient(to right, var(--ds-card) 55%, transparent);
+}
+
+.sub-tabs-arrow-right {
+  right: 0;
+  background: linear-gradient(to left, var(--ds-card) 55%, transparent);
+}
+
+.sub-tabs-arrow:hover .sub-tabs-arrow-icon {
+  color: var(--ds-text);
+}
+
+.sub-tabs-arrow-icon {
+  width: 14px;
+  height: 14px;
+}
+
 .ds-switch-thumb {
   background: var(--ds-switch-thumb);
   box-shadow: var(--ds-shadow-sm);

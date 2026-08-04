@@ -61,6 +61,10 @@ export const zhCN = {
     en: 'English',
   },
   sidepanel: {
+    subTabs: {
+      scrollLeft: '向左滚动标签',
+      scrollRight: '向右滚动标签',
+    },
     libraryPage: {
       navLabel: '资料子导航',
       tabs: {
