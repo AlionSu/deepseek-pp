@@ -23,12 +23,14 @@
 
 | Task | Issue | Delivery Batch | PR | Status |
 |:-----|:------|:---------------|:---|:-------|
-| B2-T1..T7 | #B2（待创建） | P1-B2 / P2-B2 / P3-B2 | 待创建 | Planning |
+| B2-T1..T2 | [#530](https://github.com/zhu1090093659/deepseek-pp/issues/530) | P1-B2 | [#531](https://github.com/zhu1090093659/deepseek-pp/pull/531) | **Merged** |
+| B2-T3..T4 | [#530](https://github.com/zhu1090093659/deepseek-pp/issues/530) | P2-B2 | [#532](https://github.com/zhu1090093659/deepseek-pp/pull/532) | **Merged** |
+| B2-T5..T7 | [#530](https://github.com/zhu1090093659/deepseek-pp/issues/530) | P3-B2 | [#533](https://github.com/zhu1090093659/deepseek-pp/pull/533) | PR 评审中 |
 
 ## Current Status
 
-**Active Phase**: Planning（Phase 1 分析完成：官方 API 现状、聊天双后端模式、链差异）
-**Active Task**: B2-T1（官方 API StreamFn 端口定义）
+**Active Phase**: Phase 3（P3-B2 接线完成，PR #533 评审中）
+**Active Task**: B2-T7（ci:quality 收尾 + Issue 关闭）
 **Blockers**: 无
 
 ## Session Log
