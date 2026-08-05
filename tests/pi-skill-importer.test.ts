@@ -19,7 +19,21 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../core/mcp/store', () => ({
+  getAllMcpServers: vi.fn(),
+  getMcpToolCache: vi.fn(),
+  updateMcpServer: vi.fn(),
+}));
+
+vi.mock('../core/mcp/discovery', () => ({
+  executeMcpToolCall: vi.fn(),
+  getMcpToolDescriptors: vi.fn(),
+  refreshMcpServerDiscovery: vi.fn(),
+}));
+
+import type { ToolCall, ToolResult } from '../core/types';
 import { parseSkillDoc } from '../core/skill/local-importer';
 import { parsePiSkillMarkdown, readPiSkillFrontmatter } from '../core/skill/pi-importer';
 
@@ -194,5 +208,153 @@ describe('pi-importer bridge (B3-T3)', () => {
     expect(source).not.toMatch(/import[^;]*loadSkills/);
     expect(source).not.toMatch(/import[^;]*formatSkillsForSystemPrompt/);
     expect(source).not.toMatch(/import[^;]*formatSkillInvocation/);
+  });
+});
+
+describe('pi-ecosystem SKILL.md end-to-end import compatibility (B3-T5)', () => {
+  // A community pi-ecosystem skill directory (agentskills.io layout) must
+  // flow through the released local-import pipeline unchanged. The pipeline
+  // is exercised with the same MCP mock seam as local-skill-importer tests.
+  it('imports a pi-ecosystem SKILL.md directory with extra frontmatter fields', async () => {
+    const { executeMcpToolCall, getMcpToolDescriptors, refreshMcpServerDiscovery } = await import('../core/mcp/discovery');
+    const { getAllMcpServers, getMcpToolCache, updateMcpServer } = await import('../core/mcp/store');
+    const { importLocalSkillSource } = await import('../core/skill/local-importer');
+    const { SHELL_MCP_NATIVE_HOST, SHELL_MCP_SERVER_NAME } = await import('../core/shell');
+    vi.mocked(getAllMcpServers).mockResolvedValue([]);
+
+    const storage: Record<string, unknown> = {};
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: vi.fn(async (key: string | string[] | null | undefined) => {
+            if (typeof key === 'string') return { [key]: storage[key] };
+            if (Array.isArray(key)) return Object.fromEntries(key.map((item) => [item, storage[item]]));
+            return { ...storage };
+          }),
+          set: vi.fn(async (values: Record<string, unknown>) => {
+            Object.assign(storage, values);
+          }),
+        },
+      },
+    });
+
+    const content = [
+      '---',
+      'name: pi-community-tool',
+      'description: A community skill from the pi ecosystem.',
+      'license: MIT',
+      'agent: coding',
+      'disable-model-invocation: true',
+      '---',
+      '# Pi Community Tool',
+      '',
+      'Do the thing per the pi ecosystem convention.',
+    ].join('\n');
+
+    const shellServer = {
+      id: 'shell-local',
+      displayName: SHELL_MCP_SERVER_NAME,
+      enabled: true,
+      transport: { kind: 'native_messaging' as const, nativeHost: SHELL_MCP_NATIVE_HOST },
+      execution: { enabled: true, mode: 'auto' as const },
+      allowlist: { mode: 'allow' as const, toolNames: ['local_skill_preview', 'local_folder_pick'] },
+      timeouts: { connectMs: 1, requestMs: 1, discoveryMs: 1 },
+      limits: { maxResultBytes: 128_000, maxToolCount: 8 },
+      headers: [],
+      secrets: [],
+      version: 1 as const,
+      status: 'ready' as const,
+      lastConnectedAt: 1,
+      lastError: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    vi.mocked(getAllMcpServers).mockResolvedValue([shellServer as never]);
+    vi.mocked(updateMcpServer).mockImplementation(async (_id, patch) => ({
+      ...shellServer,
+      ...(patch as object),
+      allowlist: (patch as { allowlist?: unknown }).allowlist ?? shellServer.allowlist,
+    }) as never);
+    vi.mocked(refreshMcpServerDiscovery).mockResolvedValue({} as never);
+    const now = Date.now();
+    vi.mocked(getMcpToolCache).mockResolvedValue({
+      serverId: 'shell-local',
+      descriptors: ['local_skill_preview', 'local_folder_pick'].map((name) => ({
+        id: `mcp:shell-local:${name}`,
+        provider: {
+          kind: 'mcp' as const,
+          id: 'shell-local',
+          displayName: SHELL_MCP_SERVER_NAME,
+          transport: 'native_messaging' as const,
+        },
+        name,
+        invocationName: name,
+        title: name,
+        description: name,
+        inputSchema: {},
+        enabled: true,
+        checkedAt: now,
+      })),
+      raw: { tools: [] },
+      checkedAt: now,
+      version: 1 as const,
+    } as never);
+    vi.mocked(getMcpToolDescriptors).mockResolvedValue([]);
+    vi.mocked(executeMcpToolCall).mockResolvedValue({
+      ok: true,
+      summary: 'MCP tool executed',
+      output: {
+        ok: true,
+        data: {
+          rootPath: '/pi/skills/pi-community-tool',
+          displayName: 'pi-community-tool',
+          directoryName: 'pi-community-tool',
+          warnings: [],
+          truncated: false,
+          skills: [
+            {
+              path: 'SKILL.md',
+              directory: '',
+              directoryPath: '/pi/skills/pi-community-tool',
+              content,
+              bodyBytes: content.length,
+              includedFiles: [],
+              omittedFiles: [],
+              scriptFiles: [],
+              warnings: [],
+            },
+          ],
+        },
+      },
+    } as never);
+
+    const result = await importLocalSkillSource({
+      rootPath: '/pi/skills/pi-community-tool',
+      selectedPaths: ['SKILL.md'],
+    }, {
+      executeToolCall: (call: ToolCall) => (
+        executeMcpToolCall as unknown as (value: ToolCall) => Promise<ToolResult>
+      )(call),
+      runLocalStateMutation: async (stage) => (await stage())(),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.imported).toHaveLength(1);
+    expect(result.imported[0].name).toBe('pi-community-tool');
+    expect(result.imported[0].description).toBe('A community skill from the pi ecosystem.');
+    // The released local-import pipeline registers an index card (pointer to
+    // the on-disk SKILL.md, activated via local file tools) rather than
+    // inlining the body — the pi-ecosystem skill lands through the same path.
+    expect(result.imported[0].instructions).toContain('# Local Skill: pi-community-tool');
+    expect(result.imported[0].instructions).toContain('Index form: true');
+    // The returned import entry is the parsed record (name/description/
+    // instructions); persistence of the local source lands under the
+    // released skill key, asserted below.
+    // No new persistence keys: the import lands under the released skill key.
+    expect(Object.keys(storage).some((key) => key.startsWith('deepseek_pp_skills'))).toBe(true);
+
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 });
