@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1122-release-highlights">1.12.2 Highlights</a>
+  <a href="#1130-release-highlights">1.13.0 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.12.2 Release Highlights](#1122-release-highlights)
+- [1.13.0 Release Highlights](#1130-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -305,7 +305,23 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.12.2 Release Highlights
+## 1.13.0 Release Highlights
+
+1.13.0 upgrades the inline agent engine and local Skill management: the inline agent runs on a more stable engine with an official API backend option, local folder-imported Skills move to an index-based flow with re-association and auto-activation, and background performance and conversation export are more reliable.
+
+| Area | Main changes |
+|------|--------------|
+| Inline agent | Runs on an upgraded engine with more stable tool execution and authorization; when an official DeepSeek API key is configured, it automatically uses the official API backend (with reasoning), otherwise it keeps using the page session. |
+| Local Skills | Folder imports now use an index-based flow (index card only, content read on demand), with re-association after folder relocation and implicit auto-activation; shell working directories in Skill sessions are confined to the Skill folder. |
+| Skills ecosystem | SKILL.md skill packs from the pi/agentskills.io ecosystem can be imported through the existing local import pipeline. |
+| Performance | The background script is structurally slimmed down with partitioned i18n resources; storage uses the browser-native IndexedDB, making startup and responses faster with lower memory use. |
+| Conversation export | Export fails visibly when session history is empty, and copy failures now show the specific reason. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.12.2 - 0.2.0)</summary>
+
+### 1.12.2 Release Highlights
 
 1.12.2 makes tool execution transparent and fixes production workflows: tool failures are no longer a black box, diagnostic logs export in one click, long outputs auto-save, full replies copy in one click, and conversation export supports a content scope choice.
 
@@ -318,8 +334,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | Conversation export | Markdown/HTML export supports "inputs + outputs only" or "everything" scope selection, remembering your last choice. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
 
-<details>
-<summary>Show historical release highlights (1.12.1 - 0.2.0)</summary>
 
 ### 1.12.1 Release Highlights
 

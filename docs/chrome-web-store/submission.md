@@ -1,6 +1,6 @@
 # Chrome Web Store Submission Runbook
 
-Last updated: 2026-08-03
+Last updated: 2026-08-05
 
 This runbook covers the parts that can be prepared from the repository and the parts that must be confirmed in the Chrome Web Store Developer Dashboard.
 
@@ -14,7 +14,7 @@ Official references:
 
 ## Current Status
 
-- Chrome MV3 package exists at `dist/deepseek-plus-plus-1.12.2-chrome.zip`.
+- Chrome MV3 package exists at `dist/deepseek-plus-plus-1.13.0-chrome.zip`.
 - Package root contains `manifest.json`.
 - Package size is below the Chrome Web Store package limit.
 - Required icon exists at `assets/chrome-web-store-icon-128.png`.
@@ -48,7 +48,7 @@ npm run zip:chrome
 Upload:
 
 ```text
-dist/deepseek-plus-plus-1.12.2-chrome.zip
+dist/deepseek-plus-plus-1.13.0-chrome.zip
 ```
 
 ## Store Listing Fields
