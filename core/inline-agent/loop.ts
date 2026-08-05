@@ -22,9 +22,6 @@ import {
 import {
   INLINE_AGENT_MAX_NUDGES,
   INLINE_AGENT_MAX_STEPS,
-  INLINE_AGENT_REQUEST_DELAY_MAX_MS,
-  INLINE_AGENT_REQUEST_DELAY_MIN_MS,
-  INLINE_AGENT_STEP_TIMEOUT_MS,
   type InlineAgentLoopCompleteMsg,
   type InlineAgentLoopErrorMsg,
   type InlineAgentStartPayload,
@@ -32,6 +29,7 @@ import {
   type InlineAgentStreamChunkMsg,
   type InlineAgentToolDetectedMsg,
 } from './types';
+import { createStepSignal, waitBetweenDeepSeekRequests } from './step-control';
 
 type PostFn = (type: string, data: unknown) => void;
 type ExecuteToolFn = (call: ToolCall) => Promise<ToolExecutionRecord>;
@@ -442,51 +440,6 @@ function clampStreamEventText(value: string): string {
   return value.length > INLINE_AGENT_STREAM_EVENT_MAX_CHARS
     ? `${value.slice(0, INLINE_AGENT_STREAM_EVENT_MAX_CHARS)}${TRUNCATION_SUFFIX}`
     : value;
-}
-
-function waitBetweenDeepSeekRequests(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  const delay = randomInt(INLINE_AGENT_REQUEST_DELAY_MIN_MS, INLINE_AGENT_REQUEST_DELAY_MAX_MS);
-  return new Promise((resolve) => {
-    const timeout = setTimeout(cleanup, delay);
-    const onAbort = () => cleanup();
-
-    function cleanup() {
-      clearTimeout(timeout);
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }
-
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-function randomInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function createStepSignal(parentSignal: AbortSignal): {
-  signal: AbortSignal;
-  clear: () => void;
-  timedOut: () => boolean;
-} {
-  const controller = new AbortController();
-  let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort(new DOMException('Agent step timed out.', 'TimeoutError'));
-  }, INLINE_AGENT_STEP_TIMEOUT_MS);
-  const onParentAbort = () => controller.abort();
-  if (parentSignal.aborted) {
-    onParentAbort();
-  } else {
-    parentSignal.addEventListener('abort', onParentAbort, { once: true });
-  }
-  const clear = () => {
-    clearTimeout(timeout);
-    parentSignal.removeEventListener('abort', onParentAbort);
-  };
-  return { signal: controller.signal, clear, timedOut: () => timedOut };
 }
 
 /**

@@ -14,27 +14,34 @@
 //     "./node" entry). The "." entry graph is therefore browser-clean by
 //     construction.
 //
-//  3. Pi narrow-entry probe: a probe bundle importing the A3 usage surface
-//     ({ agentLoop, setDefaultStreamFn } from the "." entry) is built with
-//     the same pipeline as the extension (vite build, i.e. rolldown + esbuild
-//     minify, WXT 0.20.26 / vite 8.0.10) and must stay under the calibrated
-//     pi increment budget and contain no `node:` builtin imports and no
-//     provider-SDK markers (AWS/Anthropic/Google/Mistral/OpenAI clients must
-//     not enter the bundle).
+//  3. Narrow-entry probes: probe bundles importing the A3 usage surface are
+//     built with the same pipeline as the extension (vite build, i.e.
+//     rolldown + esbuild minify, WXT 0.20.26 / vite 8.0.10) and must stay
+//     under their calibrated budgets and contain no `node:` builtin imports
+//     and no provider-SDK markers (AWS/Anthropic/Google/Mistral/OpenAI
+//     clients must not enter the bundle). Two probes (Issue A1-T3):
+//       - pi-only: { agentLoop, setDefaultStreamFn } from the "." entry.
+//       - adapter: additionally imports the real DS-web adapter
+//         (createDeepSeekStreamFn + createDeepSeekTurnSubmitter), whose graph
+//         includes the DS++ core modules (stream codec, streaming tool
+//         parsers) that the extension content bundle already ships.
 //
 // Budget calibration (measured on 2026-08-05, Node v25.8.1, this lockfile):
-//   - rolldown probe (minified):  173,657 raw / 52,525 gzip
-//   - esbuild probe (minified):   213,749 raw / 59,616 gzip (more
+//   - rolldown pi-only probe (minified): 173,657 raw / 52,525 gzip
+//   - rolldown adapter probe (minified): 305,638 raw / 96,539 gzip (includes
+//     DS++ core modules already present in the content bundle; the probe
+//     double-counts them and is therefore conservative)
+//   - esbuild pi-only probe (minified): 213,749 raw / 59,616 gzip (more
 //     conservative retention; kept for reference)
-//   - The budgets below allow ~32% raw / ~37% gzip headroom over the rolldown
-//     measurement for bundler/engine drift and the small extra runtime surface
-//     A3 is expected to import (runAgentLoopContinue etc.). A wide-entry
-//     regression (index.js `export *` pulling pi-ai's provider catalog and the
-//     heavy SDK tree) measures ~950,000 raw / ~260,000+ gzip and blows these
-//     budgets by a wide margin.
+//   - Budgets allow ~32-40% raw / ~37-45% gzip headroom for bundler/engine
+//     drift and the extra runtime surface A3 is expected to import
+//     (runAgentLoopContinue etc.). A wide-entry regression (index.js
+//     `export *` pulling pi-ai's provider catalog and the heavy SDK tree)
+//     measures ~950,000 raw / ~260,000+ gzip and blows these budgets by a
+//     wide margin.
 //
-// The real background today (720,903 raw / 208,719 gzip) plus the pi probe
-// increment (173,657 / 52,525) would exceed the red lines (~894,560 /
+// The real background today (720,903 raw / 208,719 gzip) plus the pi-only
+// probe increment (173,657 / 52,525) would exceed the red lines (~894,560 /
 // ~261,244), so the A3 integration must plan bundle mitigation (dynamic chunk
 // for the loop engine or background slimming); this script is the guardrail
 // that keeps both sides honest meanwhile.
@@ -57,9 +64,11 @@ const policy = JSON.parse(readFileSync(
 const RED_LINE_RAW = policy.budget.backgroundRawBytesMax;
 const RED_LINE_GZIP = policy.budget.backgroundGzipBytesMax;
 
-// Calibrated pi increment budget (see header comment).
+// Calibrated probe budgets (see header comment).
 const PI_PROBE_RAW_MAX = 230_000;
 const PI_PROBE_GZIP_MAX = 72_000;
+const ADAPTER_PROBE_RAW_MAX = 340_000;
+const ADAPTER_PROBE_GZIP_MAX = 110_000;
 
 const PI_CORE_DIR = resolve(rootDir, 'node_modules/@earendil-works/pi-agent-core');
 
@@ -80,9 +89,11 @@ const report = {
   browser: requestedBrowser,
   redLine: { raw: RED_LINE_RAW, gzip: RED_LINE_GZIP },
   piProbeBudget: { raw: PI_PROBE_RAW_MAX, gzip: PI_PROBE_GZIP_MAX },
+  adapterProbeBudget: { raw: ADAPTER_PROBE_RAW_MAX, gzip: ADAPTER_PROBE_GZIP_MAX },
   bundles: {},
   piDistNodeGate: null,
   piProbe: null,
+  adapterProbe: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -153,31 +164,61 @@ if (!existsSync(PI_CORE_DIR)) {
 }
 
 // ---------------------------------------------------------------------------
-// Gate 3: pi narrow-entry probe (same pipeline as the extension build).
+// Gate 3: narrow-entry probes (same pipeline as the extension build).
 // ---------------------------------------------------------------------------
 if (failures.length === 0) {
-  try {
-    const probe = await runPiProbe();
-    report.piProbe = {
-      raw: probe.raw,
-      gzip: probe.gzip,
-      nodeImports: probe.nodeImports,
-      sdkMarkers: probe.sdkMarkers,
-    };
-    if (probe.raw > PI_PROBE_RAW_MAX || probe.gzip > PI_PROBE_GZIP_MAX) {
-      failures.push(
-        `pi probe exceeds budget: raw ${probe.raw}/${PI_PROBE_RAW_MAX}, `
-        + `gzip ${probe.gzip}/${PI_PROBE_GZIP_MAX}`,
-      );
+  const probes = [
+    {
+      key: 'piProbe',
+      label: 'pi probe',
+      rawMax: PI_PROBE_RAW_MAX,
+      gzipMax: PI_PROBE_GZIP_MAX,
+      entry: [
+        "import { agentLoop, setDefaultStreamFn } from '@earendil-works/pi-agent-core';",
+        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn);",
+        '',
+      ].join('\n'),
+    },
+    {
+      key: 'adapterProbe',
+      label: 'adapter probe',
+      rawMax: ADAPTER_PROBE_RAW_MAX,
+      gzipMax: ADAPTER_PROBE_GZIP_MAX,
+      entry: [
+        "import { agentLoop, setDefaultStreamFn } from '@earendil-works/pi-agent-core';",
+        "import { createDeepSeekStreamFn, createDeepSeekTurnSubmitter } from '../../core/inline-agent/pi/deepseek-stream-fn';",
+        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter);",
+        '',
+      ].join('\n'),
+    },
+  ];
+
+  for (const probeSpec of probes) {
+    try {
+      const probe = await runPiProbe(probeSpec.entry);
+      report[probeSpec.key] = {
+        raw: probe.raw,
+        gzip: probe.gzip,
+        nodeImports: probe.nodeImports,
+        sdkMarkers: probe.sdkMarkers,
+      };
+      if (probe.raw > probeSpec.rawMax || probe.gzip > probeSpec.gzipMax) {
+        failures.push(
+          `${probeSpec.label} exceeds budget: raw ${probe.raw}/${probeSpec.rawMax}, `
+          + `gzip ${probe.gzip}/${probeSpec.gzipMax}`,
+        );
+      }
+      if (probe.nodeImports > 0) {
+        failures.push(`${probeSpec.label} output contains ${probe.nodeImports} node: builtin import(s)`);
+      }
+      if (probe.sdkMarkers > 0) {
+        failures.push(
+          `${probeSpec.label} output contains ${probe.sdkMarkers} provider-SDK marker(s); heavy SDK tree leaked in`,
+        );
+      }
+    } catch (error) {
+      failures.push(`${probeSpec.label} build failed: ${error.message}`);
     }
-    if (probe.nodeImports > 0) {
-      failures.push(`pi probe output contains ${probe.nodeImports} node: builtin import(s)`);
-    }
-    if (probe.sdkMarkers > 0) {
-      failures.push(`pi probe output contains ${probe.sdkMarkers} provider-SDK marker(s); heavy SDK tree leaked in`);
-    }
-  } catch (error) {
-    failures.push(`pi probe build failed: ${error.message}`);
   }
 }
 
@@ -209,18 +250,14 @@ function relativeTo(baseDir, file) {
   return file.slice(baseDir.length + 1).replaceAll('\\', '/');
 }
 
-async function runPiProbe() {
+async function runPiProbe(entrySource) {
   // The probe entry lives under dist/ (gitignored). It uses a side-effect
   // form (console.log) because rolldown tree-shakes a pure function export
   // out of the entry chunk, which would otherwise under-report the graph.
   const probeDir = join(rootDir, 'dist', '.pi-budget-probe');
   mkdirSync(probeDir, { recursive: true });
   const entryPath = join(probeDir, 'entry.mjs');
-  writeFileSync(entryPath, [
-    "import { agentLoop, setDefaultStreamFn } from '@earendil-works/pi-agent-core';",
-    "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn);",
-    '',
-  ].join('\n'));
+  writeFileSync(entryPath, entrySource);
 
   const { build } = await import('vite');
   const result = await build({
