@@ -490,6 +490,51 @@ describe('conversation export coordinator', () => {
     await first;
   });
 
+  it('fails visibly when an explicit current-session export returns zero messages', async () => {
+    const dependencies = createExportDependencies();
+    const handlers = createConversationExportRuntimeHandlers(dependencies);
+
+    const result = await dispatch(handlers, {
+      type: 'EXPORT_DEEPSEEK_CONVERSATIONS',
+      payload: { exportId: 'empty-history', request: { sessionIds: ['session-1'] } },
+    });
+
+    expect(result).toEqual({ ok: false, exportId: 'empty-history', error: 'Empty history' });
+    expect(dependencies.buildArtifacts).not.toHaveBeenCalled();
+    expect(dependencies.emptyHistoryMessage).toHaveBeenCalledOnce();
+    expect(vi.mocked(dependencies.broadcastProgress).mock.calls
+      .some(([progress]) => progress.phase === 'failed' && progress.message === 'Empty history')).toBe(true);
+  });
+
+  it('completes explicit-session exports when messages are present', async () => {
+    const dependencies = createExportDependencies();
+    vi.mocked(dependencies.runExport).mockImplementation(async (input) => {
+      const data = exportData(input.exportId);
+      data.stats.messageCount = 4;
+      data.stats.sessionCount = 1;
+      return data;
+    });
+    const handlers = createConversationExportRuntimeHandlers(dependencies);
+
+    await expect(dispatch(handlers, {
+      type: 'EXPORT_DEEPSEEK_CONVERSATIONS',
+      payload: { exportId: 'non-empty-history', request: { sessionIds: ['session-1'] } },
+    })).resolves.toMatchObject({ ok: true, exportId: 'non-empty-history' });
+    expect(dependencies.buildArtifacts).toHaveBeenCalledOnce();
+  });
+
+  it('keeps bulk exports with zero-message results legal', async () => {
+    const dependencies = createExportDependencies();
+    const handlers = createConversationExportRuntimeHandlers(dependencies);
+
+    await expect(dispatch(handlers, {
+      type: 'EXPORT_DEEPSEEK_CONVERSATIONS',
+      payload: { exportId: 'bulk-empty', request: {} },
+    })).resolves.toMatchObject({ ok: true, exportId: 'bulk-empty' });
+    expect(dependencies.buildArtifacts).toHaveBeenCalledOnce();
+    expect(dependencies.emptyHistoryMessage).not.toHaveBeenCalled();
+  });
+
   it('binds cancellation to the sender owner and publishes cancelled exactly once', async () => {
     const dependencies = createExportDependencies();
     let runSignal: AbortSignal | undefined;
@@ -733,6 +778,7 @@ function createExportDependencies(): ConversationExportRuntimeHandlerDependencie
     missingAuthMessage: vi.fn(() => 'Missing DeepSeek auth'),
     generatingMessage: vi.fn(() => 'Generating'),
     cancelledMessage: vi.fn(() => 'Export cancelled'),
+    emptyHistoryMessage: vi.fn(() => 'Empty history'),
   };
 }
 

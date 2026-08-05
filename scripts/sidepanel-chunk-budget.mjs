@@ -46,9 +46,14 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // measurement: 375672 raw / 114387 gzip; CI Node-22 zlib measures 114659 gzip
 // (+272 encoder variance); the baseline below uses the CI measurement so the
 // guardrail stays green on both runtimes.
+// Refreshed for #528 (issue-528 empty-history export guard + copy failure
+// visibility): four i18n strings (background.export.emptyHistory and
+// content.uxPolish.copyMessageFailed in zh-CN/en) were added to the shared
+// resource tree that now lives in the entry chunk. Local Node-25 measurement:
+// 376072 raw (+400) / 114511 gzip (still under the CI-derived gzip baseline).
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 375_672, gzip: 114_659 },
+  initialShell: { raw: 376_072, gzip: 114_659 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -86,12 +91,15 @@ const WAVE_2_CHAT_BASELINE = Object.freeze({
 // bound this encoder-only variance to a small fixed allowance.
 const GZIP_ENCODER_VARIANCE_BYTES = 256;
 
+// firstChatScreen raw cap raised 406000 -> 406328 for #528: the same four
+// i18n strings also land in the first-chat-screen module graph (+328 raw,
+// gzip 124534 stays within the 125000 cap).
 const BUDGET = Object.freeze({
   initialShell: {
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 406_000, gzip: 125_000 },
+  firstChatScreen: { raw: 406_328, gzip: 125_000 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },

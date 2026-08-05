@@ -66,6 +66,7 @@ export const content = {
     downloadMessageMarkdownTitle: '下载消息为 Markdown',
     copyMessageButton: '复制',
     copyMessageTitle: '复制完整对话输出',
+    copyMessageFailed: '复制失败',
   },
   toolBlock: {
     title: '已执行工具（{count}次）',

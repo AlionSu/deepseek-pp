@@ -8,6 +8,7 @@ export const background = {
   export: {
     generating: '生成导出文件',
     cancelled: '导出已取消',
+    emptyHistory: '未能读取到当前会话的消息（服务器返回了空历史），请稍后重试。',
   },
   sync: {
     missingWebDav: '未配置 WebDAV',

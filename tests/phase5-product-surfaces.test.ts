@@ -111,6 +111,7 @@ describe('Phase 5 product surface helpers', () => {
       messageMarkdownTitle: '下载消息为 Markdown',
       messageCopyButton: '复制',
       messageCopyTitle: '复制完整对话输出',
+      messageCopyFailed: '复制失败',
     }));
 
     try {
@@ -142,6 +143,7 @@ describe('Phase 5 product surface helpers', () => {
       messageMarkdownTitle: '下载消息为 Markdown',
       messageCopyButton: '复制',
       messageCopyTitle: '复制完整对话输出',
+      messageCopyFailed: '复制失败',
     }));
 
     try {
@@ -172,6 +174,108 @@ describe('Phase 5 product surface helpers', () => {
     } finally {
       polish.stop();
     }
+  });
+
+  it('copies full message output with clipboard fallback and visible failure state', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `
+      <div data-message-id="message-1" data-message-role="assistant">完整回复内容</div>
+    `;
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      writable: true,
+      value: { writeText },
+    });
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      writable: true,
+      value: execCommand,
+    });
+
+    const polish = startContentUxPolish(() => ({
+      codeDownloadButton: '下载',
+      messageMarkdownButton: 'MD',
+      messageMarkdownTitle: '下载消息为 Markdown',
+      messageCopyButton: '复制',
+      messageCopyTitle: '复制完整对话输出',
+      messageCopyFailed: '复制失败',
+    }));
+
+    try {
+      const button = document.querySelector<HTMLButtonElement>('.dpp-message-copy')!;
+
+      button.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(writeText).toHaveBeenCalledWith('完整回复内容');
+      expect(execCommand).not.toHaveBeenCalled();
+      expect(button.textContent).toBe('复制');
+
+      // A writeText rejection (permission denied / unfocused document) falls
+      // back to the legacy path instead of failing silently.
+      writeText.mockRejectedValueOnce(new Error('denied'));
+      button.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(execCommand).toHaveBeenCalledTimes(1);
+      expect(button.textContent).toBe('复制');
+
+      // When both paths fail the button shows a visible failure state that
+      // restores itself instead of leaving the failure in the console only.
+      writeText.mockRejectedValueOnce(new Error('denied'));
+      execCommand.mockReturnValueOnce(false);
+      button.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(button.dataset.status).toBe('failed');
+      expect(button.textContent).toBe('复制失败');
+
+      vi.advanceTimersByTime(1600);
+      expect(button.dataset.status).toBeUndefined();
+      expect(button.textContent).toBe('复制');
+    } finally {
+      polish.stop();
+      delete (navigator as { clipboard?: unknown }).clipboard;
+      delete (document as { execCommand?: unknown }).execCommand;
+    }
+  });
+
+  it('clears pending copy feedback timers on stop', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `
+      <div data-message-id="message-1" data-message-role="assistant">完整回复内容</div>
+    `;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      writable: true,
+      value: { writeText: vi.fn(async () => { throw new Error('denied'); }) },
+    });
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => false),
+    });
+
+    const polish = startContentUxPolish(() => ({
+      codeDownloadButton: '下载',
+      messageMarkdownButton: 'MD',
+      messageMarkdownTitle: '下载消息为 Markdown',
+      messageCopyButton: '复制',
+      messageCopyTitle: '复制完整对话输出',
+      messageCopyFailed: '复制失败',
+    }));
+
+    const button = document.querySelector<HTMLButtonElement>('.dpp-message-copy')!;
+    button.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(button.dataset.status).toBe('failed');
+
+    polish.stop();
+    vi.advanceTimersByTime(1600);
+    expect(button.dataset.status).toBe('failed');
+    expect(button.textContent).toBe('复制失败');
+
+    delete (navigator as { clipboard?: unknown }).clipboard;
+    delete (document as { execCommand?: unknown }).execCommand;
   });
 
   it('filters official search results by DeepSeek++ history tags', async () => {

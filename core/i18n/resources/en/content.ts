@@ -66,6 +66,7 @@ export const content = {
     downloadMessageMarkdownTitle: 'Download message as Markdown',
     copyMessageButton: 'Copy',
     copyMessageTitle: 'Copy full message output',
+    copyMessageFailed: 'Copy failed',
   },
   toolBlock: {
     title: 'Executed tools ({count})',

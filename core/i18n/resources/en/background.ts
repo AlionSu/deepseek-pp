@@ -8,6 +8,7 @@ export const background = {
   export: {
     generating: 'Generating export files',
     cancelled: 'Export cancelled',
+    emptyHistory: 'No messages were returned for the current conversation. The server returned an empty history; please try again.',
   },
   sync: {
     missingWebDav: 'WebDAV is not configured',

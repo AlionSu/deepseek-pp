@@ -629,6 +629,7 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         missingAuthMessage: () => backgroundT('background.auth.missingDeepSeek'),
         generatingMessage: () => backgroundT('background.export.generating'),
         cancelledMessage: () => backgroundT('background.export.cancelled'),
+        emptyHistoryMessage: () => backgroundT('background.export.emptyHistory'),
       },
     }),
     ...createBackgroundRuntimeHandlers({
