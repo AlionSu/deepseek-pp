@@ -118,3 +118,14 @@
 - Archived progress: [MASTER.md](mcp-capability-plane/progress/MASTER.md)
 - GitHub repository: `zhu1090093659/deepseek-pp`
 - GitHub issue: #407
+
+### pi-agent-core-integration
+
+- Description: Step A of embedding @earendil-works/pi-agent-core as the inline agent loop engine: AGENT_* event protocol golden, DS-web StreamFn adapter, tool bridge with real authorization integration, pi runAgentLoop swap (L3-reviewed), budgets/guardrails, validation closure and governance sync.
+- Date range: 2026-07-31 - 2026-08-05
+- Tracking mode: GITHUB_STANDARD
+- Archived progress: [MASTER.md](pi-agent-core-integration/progress/MASTER.md)
+- GitHub repository: `zhu1090093659/deepseek-pp`
+- GitHub milestones: #51-#52
+- GitHub issues: #511-#515
+- Batch PRs: #516-#520
