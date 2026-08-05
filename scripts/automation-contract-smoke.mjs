@@ -83,7 +83,7 @@ assertContains('entrypoints/content/controllers/main-world-bridge-controller.ts'
 assertNotContains('entrypoints/main-world.content.ts', 'EXECUTE_TOOL_CALL');
 assertContains('core/messaging/schema.ts', "request: 'DPP_BRIDGE_REQUEST'");
 assertContains('core/messaging/schema.ts', "init: 'DPP_BRIDGE_INIT'");
-assertContains('core/inline-agent/loop.ts', 'INLINE_AGENT_MAX_STEPS');
+assertContains('core/inline-agent/pi/loop-adapter.ts', 'INLINE_AGENT_MAX_STEPS');
 assertContains('core/inline-agent/prompt.ts', 'buildContinuationPrompt');
 assertContains('core/inline-agent/renderer.ts', 'createAgentStepElement');
 assertContains('core/deepseek/active-client.ts', 'BYPASS_HOOK_HEADER');
