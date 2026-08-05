@@ -34,6 +34,14 @@
 //   - rolldown full-A3 probe (minified): 380,350 raw / 126,700 gzip (adapter
 //     + loop adapter + runAgentLoop surface; calibrated 2026-08-05 after the
 //     A3 loop swap)
+//   - rolldown provider probe (minified): 383,593 raw / 128,037 gzip
+//     (full-A3 + createDeepSeekWebProvider; the createProvider/models.js
+//     dependency surface adds only ~2.7K raw / ~1.2K gzip — no heavy SDK
+//     tree enters; calibrated 2026-08-05, B1-T4)
+//   - rolldown provider probe (minified): 383,593 raw / 128,037 gzip
+//     (full-A3 + createDeepSeekWebProvider; the createProvider/models.js
+//     dependency surface adds only ~2.7K raw / ~1.2K gzip — no heavy SDK
+//     tree enters; calibrated 2026-08-05, B1-T4)
 //   - esbuild pi-only probe (minified): 213,749 raw / 59,616 gzip (more
 //     conservative retention; kept for reference)
 //   - Budgets allow ~13-32% raw / ~14-37% gzip headroom over the measured
@@ -72,6 +80,8 @@ const PI_PROBE_RAW_MAX = 230_000;
 const PI_PROBE_GZIP_MAX = 72_000;
 const ADAPTER_PROBE_RAW_MAX = 430_000;
 const ADAPTER_PROBE_GZIP_MAX = 145_000;
+const PROVIDER_PROBE_RAW_MAX = 450_000;
+const PROVIDER_PROBE_GZIP_MAX = 152_000;
 
 const PI_CORE_DIR = resolve(rootDir, 'node_modules/@earendil-works/pi-agent-core');
 
@@ -93,10 +103,12 @@ const report = {
   redLine: { raw: RED_LINE_RAW, gzip: RED_LINE_GZIP },
   piProbeBudget: { raw: PI_PROBE_RAW_MAX, gzip: PI_PROBE_GZIP_MAX },
   adapterProbeBudget: { raw: ADAPTER_PROBE_RAW_MAX, gzip: ADAPTER_PROBE_GZIP_MAX },
+  providerProbeBudget: { raw: PROVIDER_PROBE_RAW_MAX, gzip: PROVIDER_PROBE_GZIP_MAX },
   bundles: {},
   piDistNodeGate: null,
   piProbe: null,
   adapterProbe: null,
+  providerProbe: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -192,6 +204,20 @@ if (failures.length === 0) {
         "import { createDeepSeekStreamFn, createDeepSeekTurnSubmitter } from '../../core/inline-agent/pi/deepseek-stream-fn';",
         "import { runPiInlineAgentLoop } from '../../core/inline-agent/pi/loop-adapter';",
         "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter, typeof runPiInlineAgentLoop);",
+        '',
+      ].join('\n'),
+    },
+    {
+      key: 'providerProbe',
+      label: 'provider probe',
+      rawMax: PROVIDER_PROBE_RAW_MAX,
+      gzipMax: PROVIDER_PROBE_GZIP_MAX,
+      entry: [
+        "import { agentLoop, setDefaultStreamFn } from '@earendil-works/pi-agent-core';",
+        "import { createDeepSeekStreamFn, createDeepSeekTurnSubmitter } from '../../core/inline-agent/pi/deepseek-stream-fn';",
+        "import { runPiInlineAgentLoop } from '../../core/inline-agent/pi/loop-adapter';",
+        "import { createDeepSeekWebProvider, createDeepSeekWebModels } from '../../core/inline-agent/pi/deepseek-web-provider';",
+        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter, typeof runPiInlineAgentLoop, typeof createDeepSeekWebProvider, typeof createDeepSeekWebModels);",
         '',
       ].join('\n'),
     },

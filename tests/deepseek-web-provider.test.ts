@@ -1,5 +1,5 @@
 /**
- * deepseek-web provider contract tests (Issue B1-T1/T2).
+ * deepseek-web provider contract tests (Issue B1-T1/T2/T3).
  *
  * 1. Compile-time assignability: the provider factory return type must
  *    remain a valid pi-ai `Provider<'deepseek-web'>` and its deps must stay
@@ -16,7 +16,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Provider, ProviderStreams } from '@earendil-works/pi-ai';
 import {
   DEEPSEEK_WEB_API,
@@ -25,6 +25,24 @@ import {
   type DeepSeekWebProviderDeps,
   type DeepSeekWebProviderFactory,
 } from '../core/inline-agent/pi/provider-port';
+
+const adapterMocks = vi.hoisted(() => ({
+  createPowHeaders: vi.fn(),
+  submitPromptStreaming: vi.fn(),
+}));
+
+vi.mock('../core/deepseek/adapter', () => ({
+  createClientHeaders: () => ({ Authorization: 'Bearer test-token' }),
+  createPowHeaders: adapterMocks.createPowHeaders,
+  submitPromptStreaming: adapterMocks.submitPromptStreaming,
+}));
+
+const { createDeepSeekWebProvider, createDeepSeekWebModels } = await import(
+  '../core/inline-agent/pi/deepseek-web-provider'
+);
+const { createDeepSeekTurnSubmitter } = await import(
+  '../core/inline-agent/pi/deepseek-stream-fn'
+);
 
 // --- Compile-time assignability (drift guard) -------------------------------
 
@@ -107,5 +125,109 @@ describe('deepseek-web provider port hygiene', () => {
       const match = line.match(/^import\s+(?!type\b)(.*)\s+from\s+['"]\.\//);
       expect(match).toBeNull();
     }
+  });
+});
+
+// --- Registration shape (real implementation, B1-T3) ------------------------
+
+function createSession() {
+  const state = { chatSessionId: 'chat-1', parentMessageId: 100 as number | null };
+  return {
+    ...state,
+    setParentMessageId(id: number | null) {
+      state.parentMessageId = id;
+    },
+  };
+}
+
+function createProviderDeps(
+  overrides: Partial<DeepSeekWebProviderDeps> = {},
+): DeepSeekWebProviderDeps {
+  return {
+    submitTurn: createDeepSeekTurnSubmitter({}),
+    session: createSession(),
+    serializePrompt: () => 'serialized',
+    mapToolCall: (call, index) => ({
+      type: 'toolCall',
+      id: `xml:${index}`,
+      name: call.invocationName,
+      arguments: call.payload,
+    }),
+    toolDescriptors: [],
+    turnDefaults: { modelType: null, refFileIds: [], thinkingEnabled: false, searchEnabled: false },
+    resolveAuthHeaders: () => ({ Authorization: 'Bearer page-token' }),
+    ...overrides,
+  };
+}
+
+describe('createDeepSeekWebProvider registration', () => {
+  beforeEach(() => {
+    adapterMocks.createPowHeaders.mockResolvedValue({ 'X-DS-PoW-Response': 'pow' });
+    adapterMocks.submitPromptStreaming.mockImplementation(async (_input, handlers) => {
+      handlers.onTextChunk('Hello from the web backend.');
+      return {
+        assistantText: 'Hello from the web backend.',
+        responseMessageId: 101,
+        requestMessageId: 100,
+        finished: true,
+      };
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('registers with the deepseek-web id and custom api models', () => {
+    const provider = createDeepSeekWebProvider(createProviderDeps());
+    expect(provider.id).toBe(DEEPSEEK_WEB_PROVIDER);
+    expect(provider.name).toBe('DeepSeek Web');
+    expect(provider.getModels()).toHaveLength(2);
+    for (const model of provider.getModels()) {
+      expect(model.api).toBe(DEEPSEEK_WEB_API);
+      expect(model.provider).toBe(DEEPSEEK_WEB_PROVIDER);
+    }
+    expect(provider.getModels().map((m) => m.id)).toEqual([...DEEPSEEK_WEB_MODEL_IDS]);
+  });
+
+  it('resolves auth headers from the injected resolver when configured', async () => {
+    const provider = createDeepSeekWebProvider(createProviderDeps());
+    const apiKeyAuth = provider.auth.apiKey;
+    expect(apiKeyAuth).toBeDefined();
+    const result = await apiKeyAuth!.resolve({ ctx: {} as never, credential: undefined });
+    expect(result?.auth.headers).toEqual({ Authorization: 'Bearer page-token' });
+    expect(result?.source).toBe('DeepSeek Web session');
+  });
+
+  it('resolves undefined (not configured) when the session resolver returns nothing', async () => {
+    const provider = createDeepSeekWebProvider(
+      createProviderDeps({ resolveAuthHeaders: () => undefined }),
+    );
+    const result = await provider.auth.apiKey!.resolve({ ctx: {} as never, credential: undefined });
+    expect(result).toBeUndefined();
+  });
+
+  it('delegates stream/streamSimple to the same StreamFn body', async () => {
+    const provider = createDeepSeekWebProvider(createProviderDeps());
+    const model = provider.getModels()[0];
+    const context = {
+      systemPrompt: '',
+      messages: [{ role: 'user' as const, content: 'hi', timestamp: 1 }],
+    };
+    const stream = provider.stream(model, context, {});
+    const result = await stream.result();
+    expect(result.stopReason).toBe('stop');
+    expect(result.content.some((block) => block.type === 'text')).toBe(true);
+
+    const simpleStream = provider.streamSimple(model, context, {});
+    const simpleResult = await simpleStream.result();
+    expect(simpleResult.stopReason).toBe('stop');
+  });
+
+  it('exposes a static catalog factory with the custom api', () => {
+    const models = createDeepSeekWebModels();
+    expect(models).toHaveLength(2);
+    expect(models.every((m) => m.api === DEEPSEEK_WEB_API)).toBe(true);
+    expect(models.find((m) => m.id === 'deepseek-reasoner')?.reasoning).toBe(true);
   });
 });
