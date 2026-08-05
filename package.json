@@ -50,6 +50,7 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.83.0",
     "dexie": "^4.4.2",
     "pyodide": "^314.0.0",
     "react": "^19.2.4",
@@ -74,6 +75,7 @@
   },
   "overrides": {
     "tmp": "^0.2.7",
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "@earendil-works/pi-ai": "0.83.0"
   }
 }
