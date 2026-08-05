@@ -1,0 +1,478 @@
+/**
+ * pi-agent-core loop adapter (Issue A3-T1).
+ *
+ * Drives the pi `runAgentLoop` over the DS-web StreamFn and tool bridge,
+ * translating pi AgentEvents into the released AGENT_* page protocol
+ * (locked by `tests/inline-agent-event-protocol-golden.test.ts`):
+ *
+ *  - one DS request = one pi turn; a "step" = a request plus at most one
+ *    nudge request (the released nudge semantics);
+ *  - text deltas → AGENT_STREAM_CHUNK (12k clamp), tool execution start →
+ *    AGENT_TOOL_DETECTED, step end → AGENT_STEP_COMPLETE, run end →
+ *    AGENT_LOOP_COMPLETE / AGENT_LOOP_ERROR, abort → silent complete;
+ *  - the DS conversation chain stays the authority: `parentMessageId` lives
+ *    in session state, tool calls without a continuable chain are blocked
+ *    (beforeToolCall) and surfaced as an error, matching the original loop.
+ *
+ * The original self-built loop is replaced by this adapter (A3-T2); the
+ * released wire prompt contract (`<original_task>`/`<tool_results>`/
+ * `<task_complete>`/nudge prompts) is preserved via `buildContinuationPrompt`
+ * / `buildNudgePrompt` — pi's own prompt templates are never used.
+ */
+import type { Api, AssistantMessage, Model, Message } from '@earendil-works/pi-ai';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import type { StreamFn, AgentEvent, AgentLoopConfig } from '@earendil-works/pi-agent-core';
+import { runAgentLoop } from '@earendil-works/pi-agent-core';
+import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../../i18n';
+import type { ToolCall, ToolDescriptor, ToolExecutionRecord, ToolProviderIdentity } from '../../types';
+import { createDeepSeekStreamFn, createDeepSeekTurnSubmitter } from './deepseek-stream-fn';
+import type { DeepSeekSessionState, DeepSeekStreamFnDeps } from './stream-fn-port';
+import { createPiAgentTools } from './tool-bridge';
+import {
+  buildContinuationPrompt,
+  buildNudgePrompt,
+  extractTaskCompleteSignal,
+  shouldNudge,
+} from '../prompt';
+import type {
+  InlineAgentStartPayload,
+  InlineAgentStepCompleteMsg,
+  InlineAgentStreamChunkMsg,
+  InlineAgentToolDetectedMsg,
+} from '../types';
+import { INLINE_AGENT_MAX_STEPS } from '../types';
+import { waitBetweenDeepSeekRequests } from '../step-control';
+
+export type PostFn = (type: string, data: unknown) => void;
+export type ExecuteToolFn = (call: ToolCall) => Promise<ToolExecutionRecord>;
+
+const INLINE_AGENT_STREAM_EVENT_MAX_CHARS = 12000;
+const TRUNCATION_SUFFIX = '\n...[truncated]';
+
+export interface PiLoopAdapterDeps {
+  payload: InlineAgentStartPayload;
+  post: PostFn;
+  executeTool: ExecuteToolFn;
+  signal: AbortSignal;
+}
+
+/** Runs the pi engine with the released inline-agent semantics. */
+export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<void> {
+  const { payload, post, executeTool, signal } = deps;
+  const { loopId, chatSessionId, toolDescriptors, promptOptions } = payload;
+  const { powWasmUrl } = payload;
+  const locale = payload.locale ?? DEFAULT_LOCALE;
+
+  // ------------------------------------------------------------------ state
+  const session: DeepSeekSessionState = {
+    chatSessionId,
+    parentMessageId: payload.parentMessageId,
+    setParentMessageId: (id) => {
+      session.parentMessageId = id;
+    },
+  };
+  const collectedExecutions: ToolExecutionRecord[] = [...payload.toolExecutions];
+  const executedInStep: ToolExecutionRecord[] = [];
+  const descriptorByName = new Map<string, ToolDescriptor>(toolDescriptors.map((d) => [d.invocationName, d]));
+  const nudge = {
+    active: false, // serializer should build a nudge prompt for the current turn
+    pendingTurn: false, // prepareNextTurn queued a nudge; the next turn is a nudge turn
+    currentTurnIsNudge: false, // the turn now streaming is a nudge turn
+    nudgedInStep: false, // this step already consumed its single nudge
+    count: 0, // total nudges issued (token-speed request ids)
+    lastAssistantText: '',
+  };
+
+  let stepIndex = 0; // completed steps (0-based index of the current step)
+  let lastStepCompleted = false; // whether the current step already posted STEP_COMPLETE
+  let stepText = ''; // current turn's visible text
+  let lastPostedText = '';
+  let finalizeDone = false;
+  let resolvedFinalText: string | null = null;
+  let stopNotice: string | null = null;
+  let lastTurnWasError = false;
+  let lastErrorMessage = '';
+  let lastTurnText = '';
+  let lastTurnHasTools = false;
+  let turnsElapsed = 0;
+
+  const clampStreamEventText = (value: string): string =>
+    value.length > INLINE_AGENT_STREAM_EVENT_MAX_CHARS
+      ? `${value.slice(0, INLINE_AGENT_STREAM_EVENT_MAX_CHARS)}${TRUNCATION_SUFFIX}`
+      : value;
+
+  const postStreamChunk = (nextText: string) => {
+    const fullText = clampStreamEventText(nextText);
+    if (fullText === lastPostedText) return;
+    lastPostedText = fullText;
+    post('AGENT_STREAM_CHUNK', {
+      loopId,
+      stepIndex,
+      text: '',
+      fullText,
+    } satisfies InlineAgentStreamChunkMsg);
+  };
+
+  const postStepComplete = () => {
+    post('AGENT_STEP_COMPLETE', {
+      loopId,
+      stepIndex,
+      responseMessageId: session.parentMessageId,
+      toolExecutions: [...executedInStep],
+    } satisfies InlineAgentStepCompleteMsg);
+  };
+
+  const postToolDetected = (toolCallId: string, toolName: string, args: unknown) => {
+    const descriptor = descriptorByName.get(toolName);
+    post('AGENT_TOOL_DETECTED', {
+      loopId,
+      stepIndex,
+      call: {
+        id: toolCallId,
+        name: descriptor?.name ?? toolName,
+        invocationName: toolName,
+        payload: (args ?? {}) as Record<string, unknown>,
+        raw: '',
+      },
+    } satisfies InlineAgentToolDetectedMsg);
+  };
+
+  const providerFor = (toolName: string): ToolProviderIdentity =>
+    descriptorByName.get(toolName)?.provider ?? {
+      kind: 'local',
+      id: 'unknown',
+      displayName: 'Unknown',
+      transport: 'in_process',
+    };
+
+  // ------------------------------------------------------------- DS backend
+  const submitter = createDeepSeekTurnSubmitter({ powWasmUrl });
+  const streamFn: StreamFn = createDeepSeekStreamFn({
+    submitTurn: submitter,
+    session,
+    serializePrompt: () => {
+      if (nudge.active) {
+        nudge.active = false;
+        nudge.currentTurnIsNudge = true;
+        return buildNudgePrompt(payload.originalPrompt, nudge.lastAssistantText, collectedExecutions, nudge.count, locale);
+      }
+      return buildContinuationPrompt(payload.originalPrompt, collectedExecutions, locale);
+    },
+    mapToolCall: (call, index) => ({
+      type: 'toolCall',
+      id: `xml:${index}`,
+      name: call.invocationName,
+      arguments: call.payload,
+    }),
+    toolDescriptors,
+    turnDefaults: {
+      modelType: promptOptions.modelType,
+      refFileIds: promptOptions.refFileIds,
+      thinkingEnabled: promptOptions.thinkingEnabled,
+      searchEnabled: promptOptions.searchEnabled,
+    },
+    onTokenSpeed: (progress) => {
+      post('AGENT_TOKEN_SPEED', {
+        ...progress,
+        requestId: `agent:${loopId}:step:${stepIndex}${nudge.currentTurnIsNudge ? `:nudge:${nudge.count}` : ''}`,
+        chatSessionId,
+        modelType: progress.modelType ?? promptOptions.modelType,
+      });
+    },
+  } satisfies DeepSeekStreamFnDeps);
+
+  // One 2.5–6.5s throttle delay before every DS request except the first
+  // (released request pacing).
+  let requestCount = 0;
+  const pacedStreamFn: StreamFn = async (model, context, options) => {
+    if (requestCount > 0) {
+      await waitBetweenDeepSeekRequests(signal);
+    }
+    requestCount += 1;
+    return streamFn(model, context, options);
+  };
+
+  const model: Model<Api> = {
+    id: 'deepseek-chat',
+    name: 'DeepSeek Chat',
+    api: 'openai-completions',
+    provider: 'deepseek',
+    baseUrl: '',
+    reasoning: false,
+    input: [],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 0,
+    maxTokens: 0,
+  };
+
+  const piTools = createPiAgentTools({
+    descriptors: toolDescriptors,
+    executeTool,
+    callSource: {
+      requestId: payload.capabilityScopeRequestId ?? `agent:${loopId}`,
+      chatSessionId,
+    },
+  });
+
+  const config: AgentLoopConfig = {
+    model,
+    toolExecution: 'sequential',
+    convertToLlm: (messages: AgentMessage[]): Message[] =>
+      messages.filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult'),
+    shouldStopAfterTurn: ({ message }) => {
+      lastTurnText = extractText(message);
+      lastTurnHasTools = message.content.some((block) => block.type === 'toolCall');
+      if (stepIndex >= INLINE_AGENT_MAX_STEPS) {
+        if (stopNotice === null && collectedExecutions.length > 0) {
+          stopNotice = buildInlineAgentBudgetNotice(locale, stepIndex);
+        }
+        return true;
+      }
+      const text = lastTurnText;
+      const hasTools = lastTurnHasTools;
+
+      if (session.parentMessageId === null) {
+        if (hasTools) {
+          throw new Error(chainErrorText(nudge.currentTurnIsNudge));
+        }
+        if (!text.trim()) {
+          throw new Error('DeepSeek returned an empty agent continuation without a continuable response message.');
+        }
+        resolvedFinalText = text;
+        return true;
+      }
+      if (hasTools) return false;
+
+      if (extractTaskCompleteSignal(text)) {
+        resolvedFinalText = text;
+        return true;
+      }
+      const nudging = shouldNudge(payload.originalPrompt, collectedExecutions, text);
+      if (nudge.currentTurnIsNudge) {
+        if (nudging) {
+          stopNotice = buildInlineAgentBudgetNotice(locale, stepIndex + 1);
+        } else {
+          resolvedFinalText = text;
+        }
+        return true;
+      }
+      if (nudging) return false; // getSteeringMessages issues the single-step nudge
+      resolvedFinalText = text;
+      return true;
+    },
+    // The pi inner loop only continues with another LLM call when tools were
+    // executed or steering messages are pending. The released nudge semantics
+    // (one no-tool correction request per step) are implemented as steering:
+    // after a no-tool turn that still needs nudging, shouldStopAfterTurn
+    // returns false and getSteeringMessages returns the nudge prompt message.
+    getSteeringMessages: async () => {
+      // The pi loop polls steering before the first turn too; the released
+      // nudge semantics only apply after a real turn has run.
+      if (turnsElapsed === 0) return [];
+      if (!lastTurnHasTools && !nudge.nudgedInStep && session.parentMessageId !== null
+        && !extractTaskCompleteSignal(lastTurnText)
+        && shouldNudge(payload.originalPrompt, collectedExecutions, lastTurnText)) {
+        nudge.count += 1;
+        nudge.nudgedInStep = true;
+        nudge.pendingTurn = true;
+        nudge.active = true;
+        nudge.lastAssistantText = lastTurnText;
+        return [{
+          role: 'user',
+          content: buildNudgePrompt(payload.originalPrompt, lastTurnText, collectedExecutions, nudge.count, locale),
+          timestamp: Date.now(),
+        }];
+      }
+      return [];
+    },
+    beforeToolCall: async () => {
+      if (session.parentMessageId === null) {
+        return { block: true, reason: chainErrorText(nudge.currentTurnIsNudge) };
+      }
+      return undefined;
+    },
+  };
+
+  // --------------------------------------------------------------- event sink
+  const handleEvent = async (event: AgentEvent): Promise<void> => {
+    switch (event.type) {
+      case 'turn_start':
+        nudge.currentTurnIsNudge = false;
+        // Released semantics: each request's visible text replaces the
+        // previous one within a step (nudge text is not concatenated).
+        stepText = '';
+        lastPostedText = '';
+        if (nudge.pendingTurn) {
+          nudge.pendingTurn = false;
+        } else {
+          lastStepCompleted = false;
+          post('AGENT_STEP_STARTED', { loopId, stepIndex });
+        }
+        break;
+      case 'message_update': {
+        const delta = event.assistantMessageEvent.type === 'text_delta'
+          ? event.assistantMessageEvent.delta
+          : '';
+        if (delta) {
+          stepText += delta;
+          postStreamChunk(stepText);
+        }
+        break;
+      }
+      case 'tool_execution_start':
+        postToolDetected(event.toolCallId, event.toolName, event.args);
+        break;
+      case 'tool_execution_end': {
+        const descriptor = descriptorByName.get(event.toolName);
+        executedInStep.push({
+          name: descriptor?.name ?? event.toolName,
+          provider: providerFor(event.toolName),
+          result: normalizeToolResult(event),
+        });
+        break;
+      }
+      case 'turn_end': {
+        turnsElapsed += 1;
+        const turnMessage = event.message as AssistantMessage;
+        if (turnMessage.stopReason === 'error' || turnMessage.stopReason === 'aborted') {
+          lastTurnWasError = true;
+          lastErrorMessage = turnMessage.errorMessage ?? 'DeepSeek agent turn failed.';
+          stepText = '';
+          lastPostedText = '';
+          return;
+        }
+        const hasTools = turnMessage.content.some((block) => block.type === 'toolCall');
+        if (hasTools) {
+          // Fail-closed: tools without a continuable chain were blocked in
+          // beforeToolCall; surface the refusal as the released error.
+          if (session.parentMessageId === null) {
+            throw new Error(chainErrorText(nudge.currentTurnIsNudge));
+          }
+          collectedExecutions.push(...executedInStep);
+          postStepComplete();
+          stepIndex += 1;
+          lastStepCompleted = true;
+          stepText = '';
+          lastPostedText = '';
+          executedInStep.length = 0;
+          nudge.nudgedInStep = false;
+        } else {
+          stepText = extractText(turnMessage);
+          postStreamChunk(stepText);
+        }
+        break;
+      }
+      case 'agent_end':
+        finalize();
+        break;
+      default:
+        break;
+    }
+  };
+
+  const finalize = () => {
+    if (finalizeDone) return;
+    finalizeDone = true;
+
+    if (signal.aborted || lastTurnWasError && signal.aborted) {
+      post('AGENT_LOOP_COMPLETE', {
+        loopId,
+        totalSteps: stepIndex,
+        totalTools: collectedExecutions.length,
+        finalText: '',
+      });
+      return;
+    }
+    if (lastTurnWasError) {
+      post('AGENT_LOOP_ERROR', {
+        loopId,
+        stepIndex,
+        totalTools: collectedExecutions.length,
+        error: lastErrorMessage,
+      });
+      return;
+    }
+    if (stopNotice === null && resolvedFinalText === null && collectedExecutions.length > 0
+      && stepIndex >= INLINE_AGENT_MAX_STEPS) {
+      stopNotice = buildInlineAgentBudgetNotice(locale, stepIndex);
+    }
+    if (!lastStepCompleted) {
+      postStepComplete();
+    }
+    let finalText = '';
+    if (resolvedFinalText !== null) {
+      finalText = resolvedFinalText;
+    } else if (!signal.aborted && stopNotice !== null) {
+      finalText = stopNotice;
+    }
+    post('AGENT_LOOP_COMPLETE', {
+      loopId,
+      totalSteps: lastStepCompleted ? stepIndex : stepIndex + 1,
+      totalTools: collectedExecutions.length,
+      finalText,
+    });
+  };
+
+  // ------------------------------------------------------------------- run
+  try {
+    const initialMessage: Message = {
+      role: 'user',
+      content: payload.originalPrompt,
+      timestamp: Date.now(),
+    };
+    await runAgentLoop(
+      [initialMessage],
+      { systemPrompt: '', messages: [], tools: piTools },
+      config,
+      handleEvent,
+      signal,
+      pacedStreamFn,
+    );
+  } catch (err) {
+    if (finalizeDone) return;
+    finalizeDone = true;
+    if (signal.aborted) {
+      post('AGENT_LOOP_COMPLETE', {
+        loopId,
+        totalSteps: stepIndex,
+        totalTools: collectedExecutions.length,
+        finalText: '',
+      });
+      return;
+    }
+    post('AGENT_LOOP_ERROR', {
+      loopId,
+      stepIndex,
+      totalTools: collectedExecutions.length,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function extractText(message: { content: Array<{ type: string; text?: string }> }): string {
+  return message.content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+}
+
+function chainErrorText(nudgeTurn: boolean): string {
+  return nudgeTurn
+    ? 'DeepSeek returned nudge tool calls without a continuable response message; refusing to execute tools outside the conversation chain.'
+    : 'DeepSeek returned agent tool calls without a continuable response message; refusing to execute tools outside the conversation chain.';
+}
+
+function normalizeToolResult(event: { result: unknown; isError: boolean }): { ok: boolean; summary: string } {
+  const details = (event.result as { details?: { ok?: boolean; summary?: string } } | undefined)?.details;
+  if (details && typeof details === 'object' && 'ok' in details) {
+    return {
+      ok: details.ok ?? !event.isError,
+      summary: details.summary ?? '',
+    };
+  }
+  return { ok: !event.isError, summary: '' };
+}
+
+function buildInlineAgentBudgetNotice(locale: SupportedLocale, completedSteps: number): string {
+  return translate(locale, 'content.agent.budgetReached', { count: completedSteps });
+}

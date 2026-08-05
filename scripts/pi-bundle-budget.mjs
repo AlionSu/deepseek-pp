@@ -31,6 +31,9 @@
 //   - rolldown adapter probe (minified): 305,638 raw / 96,539 gzip (includes
 //     DS++ core modules already present in the content bundle; the probe
 //     double-counts them and is therefore conservative)
+//   - rolldown full-A3 probe (minified): 380,350 raw / 126,700 gzip (adapter
+//     + loop adapter + runAgentLoop surface; calibrated 2026-08-05 after the
+//     A3 loop swap)
 //   - esbuild pi-only probe (minified): 213,749 raw / 59,616 gzip (more
 //     conservative retention; kept for reference)
 //   - Budgets allow ~32-40% raw / ~37-45% gzip headroom for bundler/engine
@@ -67,8 +70,8 @@ const RED_LINE_GZIP = policy.budget.backgroundGzipBytesMax;
 // Calibrated probe budgets (see header comment).
 const PI_PROBE_RAW_MAX = 230_000;
 const PI_PROBE_GZIP_MAX = 72_000;
-const ADAPTER_PROBE_RAW_MAX = 340_000;
-const ADAPTER_PROBE_GZIP_MAX = 110_000;
+const ADAPTER_PROBE_RAW_MAX = 430_000;
+const ADAPTER_PROBE_GZIP_MAX = 145_000;
 
 const PI_CORE_DIR = resolve(rootDir, 'node_modules/@earendil-works/pi-agent-core');
 
@@ -187,7 +190,8 @@ if (failures.length === 0) {
       entry: [
         "import { agentLoop, setDefaultStreamFn } from '@earendil-works/pi-agent-core';",
         "import { createDeepSeekStreamFn, createDeepSeekTurnSubmitter } from '../../core/inline-agent/pi/deepseek-stream-fn';",
-        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter);",
+        "import { runPiInlineAgentLoop } from '../../core/inline-agent/pi/loop-adapter';",
+        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter, typeof runPiInlineAgentLoop);",
         '',
       ].join('\n'),
     },
