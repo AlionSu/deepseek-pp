@@ -42,6 +42,11 @@
 //     129,808 gzip (B1 provider surface + createDeepSeekApiProvider; the
 //     official-api client adds only ~5.9K raw / ~1.7K gzip — no OpenAI SDK
 //     tree enters; calibrated 2026-08-05, B2-T4)
+//   - rolldown provider probe + pi-importer (minified): 422,082 raw /
+//     144,652 gzip (B2 surface + parsePiSkillMarkdown/readPiSkillFrontmatter;
+//     the SKILL.md parser is co-located in the 968-line local-importer
+//     module, hence the ~32.6K raw increment — no pi harness/FileSystem/Shell
+//     dependency enters; calibrated 2026-08-05, B3-T4)
 //   - esbuild pi-only probe (minified): 213,749 raw / 59,616 gzip (more
 //     conservative retention; kept for reference)
 //   - Budgets allow ~13-32% raw / ~14-37% gzip headroom over the measured
@@ -218,7 +223,8 @@ if (failures.length === 0) {
         "import { runPiInlineAgentLoop } from '../../core/inline-agent/pi/loop-adapter';",
         "import { createDeepSeekWebProvider, createDeepSeekWebModels } from '../../core/inline-agent/pi/deepseek-web-provider';",
         "import { createDeepSeekApiProvider } from '../../core/inline-agent/pi/official-api-provider';",
-        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter, typeof runPiInlineAgentLoop, typeof createDeepSeekWebProvider, typeof createDeepSeekWebModels, typeof createDeepSeekApiProvider);",
+        "import { parsePiSkillMarkdown, readPiSkillFrontmatter } from '../../core/skill/pi-importer';",
+        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter, typeof runPiInlineAgentLoop, typeof createDeepSeekWebProvider, typeof createDeepSeekWebModels, typeof createDeepSeekApiProvider, typeof parsePiSkillMarkdown, typeof readPiSkillFrontmatter);",
         '',
       ].join('\n'),
     },
