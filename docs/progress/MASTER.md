@@ -27,8 +27,8 @@
 
 | Task | Issue | Delivery Batch | PR | Status |
 |:-----|:------|:---------------|:---|:-------|
-| A0（A0-T1 + A0-T2） | [#511](https://github.com/zhu1090093659/deepseek-pp/issues/511) | P1-B1 | [#516](https://github.com/zhu1090093659/deepseek-pp/pull/516) | In review |
-| A1（A1-T1..3） | [#512](https://github.com/zhu1090093659/deepseek-pp/issues/512) | P2-B1 | — | Open |
+| A0（A0-T1 + A0-T2） | [#511](https://github.com/zhu1090093659/deepseek-pp/issues/511) | P1-B1 | [#516](https://github.com/zhu1090093659/deepseek-pp/pull/516) | **Merged（#511 closed）** |
+| A1（A1-T1..3） | [#512](https://github.com/zhu1090093659/deepseek-pp/issues/512) | P2-B1 | — | 完成待 PR |
 | A2（A2-T1..3） | [#513](https://github.com/zhu1090093659/deepseek-pp/issues/513) | P3-B1 | — | Open |
 | A3（A3-T1..3） | [#514](https://github.com/zhu1090093659/deepseek-pp/issues/514) | P4-B1 | — | Open |
 | A4（A4-T1..2） | [#515](https://github.com/zhu1090093659/deepseek-pp/issues/515) | P5-B1 | — | Open |
