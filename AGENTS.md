@@ -61,6 +61,7 @@ When prose and executable behavior disagree, verify the code and tests, then upd
 - **pi-agent-core 锁版策略**：`@earendil-works/pi-agent-core` 与 `@earendil-works/pi-ai` 必须精确锁版（无 `^`/`~`），`overrides` 钉住传递依赖；升级必须走独立 PR 并按完整验证链重跑（定向测试 → compile → prompt:freeze → build:all → verify → ci:quality），由专门 Issue 授权。
 - **pi 上下文不落持久化**：pi loop 的 context/messages 仅作当前回合工作内存；IndexedDB / localStorage / sync 的记忆与状态存储保持单一权威，pi 集成不得新增任何持久化键（`tests/pi-storage-boundary.test.ts` 守护）。
 - **StreamFn 复用 stream-codec**：DS 网页协议（SSE 分帧/事件解析/PoW/认证）的唯一权威是 `core/deepseek/stream-codec.ts` 与 `active-client.ts`；任何新的模型后端适配（StreamFn）不得复制协议逻辑，只能薄封装现有客户端。
+- **模型后端注册为 pi-ai provider（B1 起）**：deepseek-web 是 pi-ai 正式 provider（`core/inline-agent/pi/deepseek-web-provider.ts` 的 `createDeepSeekWebProvider`，`Provider<'deepseek-web'>`，自定义 `Api` 扩展点）；loop 经 `provider.stream` 消费，禁止退回自定义 StreamFn 独有路径；provider 是注册 + 委托对象，不持有页面/会话/授权状态（会话链 authority 仍在 loop-adapter 注入的 `DeepSeekSessionState`）；provider 注册形状受 `tests/deepseek-web-provider.test.ts` 契约测试保护；新增第二模型后端必须复用现有端口（如 `DeepSeekAutomationClient`）并单独 Issue 授权。
 - **工具执行单一路径**：pi 桥接工具（`core/inline-agent/pi/tool-bridge.ts`）只通过注入的授权执行路径（background grant）向下调用；调用 source 必须携带与 grant 绑定的 requestId/chatSessionId；不得发明第二条执行路径。
 - **AGENT_* 事件协议受契约测试保护**：`tests/inline-agent-event-protocol-golden.test.ts` 是 inline agent 页面协议的逐字节基线（含全量工具记录载荷）；任何 loop 引擎变更必须保持该测试全绿。
 ## Security Baseline
