@@ -21,7 +21,7 @@ describe('tool provider import boundary', () => {
     ]);
     expect(relativeImports('core/tool/runtime.ts').sort()).toEqual([
       '../diagnostics/log-buffer',
-      '../i18n',
+      '../i18n/background',
       '../messaging/tool-record-codec',
       './authorization',
       './execution-error',

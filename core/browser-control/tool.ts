@@ -1,4 +1,4 @@
-import { translate, type LocaleMessageKey, type SupportedLocale } from '../i18n';
+import { translate, type LocaleMessageKey, type SupportedLocale } from '../i18n/background';
 import type { ToolCall, ToolDescriptor, ToolProviderIdentity, ToolResult } from '../tool/types';
 import { getCurrentPlatformEnvironment, isCapabilitySupported } from '../platform';
 import { getBrowserControlSettings } from './settings';

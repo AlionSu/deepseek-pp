@@ -1,5 +1,5 @@
 import type { GitHubSkillSource, LocalSkillSource, Skill, SkillImportSource } from '../types';
-import { DEFAULT_LOCALE, type SupportedLocale } from '../i18n';
+import { DEFAULT_LOCALE, type SupportedLocale } from '../i18n/background';
 import { withSyncLocalStateLock } from '../persistence/local-state-lock';
 import {
   createChromeStorageSlot,

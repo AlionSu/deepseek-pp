@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, type SupportedLocale } from '../i18n';
+import { DEFAULT_LOCALE, type SupportedLocale } from '../i18n/background';
 import { SHELL_MCP_NATIVE_HOST, SHELL_TOOL_NAMES } from '../shell';
 import { createMemoryToolDescriptors } from '../tool/memory';
 import type { Skill } from '../types';

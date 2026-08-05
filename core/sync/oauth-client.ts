@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, translate, type LocaleMessageKey, type MessageParams } from '../i18n';
+import { DEFAULT_LOCALE, translate, type LocaleMessageKey, type MessageParams } from '../i18n/background';
 import {
   getCurrentSyncIdentityPort,
   type SyncIdentityPort,

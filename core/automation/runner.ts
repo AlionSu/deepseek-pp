@@ -10,7 +10,7 @@ import {
   DeepSeekSessionError,
 } from '../deepseek/errors';
 import { extractToolCalls } from '../interceptor/tool-parser';
-import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
+import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n/background';
 import { MCP_CAPABILITY_TOOL_PROVIDER_ID } from '../mcp/capability-contract';
 import { buildPromptAugmentation } from '../prompt';
 import { DEFAULT_TOOL_DESCRIPTORS } from '../tool';

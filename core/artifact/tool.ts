@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
+import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n/background';
 import type { JsonValue, ToolCall, ToolDescriptor, ToolProviderIdentity, ToolResult } from '../tool/types';
 import { saveArtifact } from './store';
 import type { ArtifactFile, ArtifactOutput, ArtifactPreviewMode, ArtifactRuntimeLanguage, ArtifactView } from './types';

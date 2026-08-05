@@ -5,7 +5,7 @@ import {
   resolveLocalePreference,
   type LocalePreference,
   type ResolvedLocaleState,
-} from './index';
+} from './runtime';
 
 export const LOCALE_PREFERENCE_STORAGE_KEY = 'deepseek_pp_locale_preference';
 

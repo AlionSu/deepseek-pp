@@ -269,7 +269,7 @@ import {
   type LocaleMessageKey,
   type MessageParams,
   type SupportedLocale,
-} from '../core/i18n';
+} from '../core/i18n/background';
 import {
   getResolvedLocaleState,
   watchLocalePreference,
