@@ -83,7 +83,8 @@ interface LoadedLocalSource {
   skills: LoadedLocalSkill[];
 }
 
-interface ParsedSkillDoc {
+/** Parsed SKILL.md document shape (B3: exported with the parser). */
+export interface ParsedSkillDoc {
   name: string;
   description: string;
   body: string;
@@ -797,7 +798,12 @@ function relativeToSkillDirectory(path: string, directory: string): string {
   return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : normalizedPath;
 }
 
-function parseSkillDoc(raw: string, path: string): ParsedSkillDoc {
+/**
+ * Parses a SKILL.md document (agentskills.io / pi-ecosystem format) into the
+ * local-import record shape. Exported (B3) so the pi-ecosystem bridge and
+ * its contract tests share the same parser truth; behavior unchanged.
+ */
+export function parseSkillDoc(raw: string, path: string): ParsedSkillDoc {
   // Strip a leading UTF-8/UTF-16 BOM so the `^---` frontmatter fence still
   // matches. Editors on Windows (notably Notepad/VS Code with BOM presets)
   // commonly save SKILL.md with a BOM, which previously made the frontmatter
