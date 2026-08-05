@@ -16,6 +16,7 @@ import type {
   ToolDescriptor,
   ToolExecutionRecord,
 } from '../core/types';
+import { getDeepSeekApiKey } from '../core/chat/api-key';
 import { normalizePetConfig } from '../core/pet/config';
 import { pickPetLine, type PetState } from '../core/pet/lines';
 import { createToolInvocationCatalog } from '../core/tool/invocation';
@@ -3731,6 +3732,13 @@ function stopInlineAgent(): void {
 }
 
 async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<void> {
+  // B2: the caller may pre-select a model backend; otherwise auto-select the
+  // official API when an official API key is configured (same semantics as
+  // the sidepanel chat). No key → the released web backend.
+  if (!payload.modelBackend) {
+    payload.modelBackend = (await getDeepSeekApiKey()) ? 'official-api' : 'web';
+  }
+
   // Abort any previously running loop AND tear down its panel synchronously
   // before mounting the new one. Previously the old panel stayed in the DOM
   // until the aborted stream settled, so two agent panels briefly raced

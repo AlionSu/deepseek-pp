@@ -1,23 +1,30 @@
 /**
- * pi-agent-core loop adapter (Issue A3-T1).
+ * pi-agent-core loop adapter (Issue A3-T1, B2-T5 dual backend).
  *
- * Drives the pi `runAgentLoop` over the DS-web StreamFn and tool bridge,
- * translating pi AgentEvents into the released AGENT_* page protocol
- * (locked by `tests/inline-agent-event-protocol-golden.test.ts`):
+ * Drives the pi `runAgentLoop` over the selected model backend's StreamFn
+ * and tool bridge, translating pi AgentEvents into the released AGENT_*
+ * page protocol (locked by `tests/inline-agent-event-protocol-golden.test.ts`):
  *
- *  - one DS request = one pi turn; a "step" = a request plus at most one
+ *  - one model request = one pi turn; a "step" = a request plus at most one
  *    nudge request (the released nudge semantics);
  *  - text deltas → AGENT_STREAM_CHUNK (12k clamp), tool execution start →
  *    AGENT_TOOL_DETECTED, step end → AGENT_STEP_COMPLETE, run end →
  *    AGENT_LOOP_COMPLETE / AGENT_LOOP_ERROR, abort → silent complete;
- *  - the DS conversation chain stays the authority: `parentMessageId` lives
- *    in session state, tool calls without a continuable chain are blocked
- *    (beforeToolCall) and surfaced as an error, matching the original loop.
+ *  - chain authority depends on the backend (B2):
+ *      * `web` (default, released): the DS page conversation chain —
+ *        `parentMessageId` lives in session state, tool calls without a
+ *        continuable chain are blocked (beforeToolCall) and surfaced as an
+ *        error, matching the original loop;
+ *      * `official-api`: no page chain exists — the pi Context transcript
+ *        IS the chain, so fail-closed checks verify the Context carries a
+ *        valid assistant message before tools run.
  *
- * The original self-built loop is replaced by this adapter (A3-T2); the
- * released wire prompt contract (`<original_task>`/`<tool_results>`/
- * `<task_complete>`/nudge prompts) is preserved via `buildContinuationPrompt`
- * / `buildNudgePrompt` — pi's own prompt templates are never used.
+ * The released wire prompt contract (`<original_task>`/`<tool_results>`/
+ * `<task_complete>`/nudge prompts) is preserved on the web path via
+ * `buildContinuationPrompt` / `buildNudgePrompt` — pi's own prompt templates
+ * are never used. The official-API path sends the pi Context as
+ * OpenAI-compatible messages (mapMessages), which is the backend's native
+ * shape; no page-injection template is involved either way.
  */
 import type { Api, AssistantMessage, Model, Message, ToolResultMessage } from '@earendil-works/pi-ai';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
@@ -26,8 +33,11 @@ import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../../i18n';
 import type { ToolCall, ToolDescriptor, ToolExecutionRecord, ToolProviderIdentity } from '../../types';
 import { createClientHeaders } from '../../deepseek/adapter';
+import { getDeepSeekApiKey } from '../../chat/api-key';
+import { getOfficialApiChatConfig } from '../../chat/official-api-config';
 import { createDeepSeekTurnSubmitter } from './deepseek-stream-fn';
 import { createDeepSeekWebProvider, deepSeekWebProviderToStreamFn } from './deepseek-web-provider';
+import { createDeepSeekApiProvider, createDeepSeekApiMessageMapper, deepSeekApiProviderToStreamFn } from './official-api-provider';
 import type { DeepSeekSessionState, DeepSeekStreamFnDeps } from './stream-fn-port';
 import {
   createPiAgentTools,
@@ -77,6 +87,19 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
       session.parentMessageId = id;
     },
   };
+
+  // Chain authority by backend (B2): the web path uses the DS page session
+  // chain (`parentMessageId`); the official-API path has no page chain — the
+  // pi Context transcript IS the chain, so `hasContinuableChain` is
+  // trivially true there and fail-closed checks verify the Context carries a
+  // valid assistant message instead (beforeToolCall).
+  const backend = payload.modelBackend ?? 'web';
+  const hasContinuableChain = (): boolean => {
+    if (backend === 'official-api') return true;
+    return session.parentMessageId !== null;
+  };
+  const chainResponseMessageId = (): number | null =>
+    backend === 'official-api' ? null : session.parentMessageId;
   const collectedExecutions: ToolExecutionRecord[] = [...payload.toolExecutions];
   const executedInStep: ToolExecutionRecord[] = [];
   const descriptorByName = new Map<string, ToolDescriptor>(toolDescriptors.map((d) => [d.invocationName, d]));
@@ -123,7 +146,7 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
     post('AGENT_STEP_COMPLETE', {
       loopId,
       stepIndex,
-      responseMessageId: session.parentMessageId,
+      responseMessageId: chainResponseMessageId(),
       toolExecutions: [...executedInStep],
     } satisfies InlineAgentStepCompleteMsg);
   };
@@ -152,64 +175,87 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
     };
 
   // ------------------------------------------------------------- DS backend
-  const submitter = createDeepSeekTurnSubmitter({ powWasmUrl });
-  const streamFnDeps = {
-    submitTurn: submitter,
-    session,
-    serializePrompt: () => {
-      if (nudge.active) {
-        nudge.active = false;
-        nudge.currentTurnIsNudge = true;
-        return buildNudgePrompt(payload.originalPrompt, nudge.lastAssistantText, collectedExecutions, nudge.count, locale);
-      }
-      return buildContinuationPrompt(payload.originalPrompt, collectedExecutions, locale);
-    },
-    mapToolCall: (call, index) => ({
-      type: 'toolCall',
-      id: `xml:${index}`,
-      name: call.invocationName,
-      arguments: call.payload,
-    }),
-    toolDescriptors,
-    turnDefaults: {
-      modelType: promptOptions.modelType,
-      refFileIds: promptOptions.refFileIds,
-      thinkingEnabled: promptOptions.thinkingEnabled,
-      searchEnabled: promptOptions.searchEnabled,
-    },
-    onTokenSpeed: (progress) => {
-      post('AGENT_TOKEN_SPEED', {
-        ...progress,
-        requestId: `agent:${loopId}:step:${stepIndex}${nudge.currentTurnIsNudge ? `:nudge:${nudge.count}` : ''}`,
-        chatSessionId,
-        modelType: progress.modelType ?? promptOptions.modelType,
-      });
-    },
-  } satisfies DeepSeekStreamFnDeps;
-
-  // The deepseek-web backend is registered as a first-class pi-ai provider
-  // (B1): the loop consumes the released `runAgentLoop` seam through
-  // `provider.stream` instead of a hand-built StreamFn. The provider owns no
-  // session state (the injected `session` is the chain authority) and its
-  // auth surface is ambient: `createClientHeaders` resolves the page session
-  // headers or throws when the login token is missing — provider auth
-  // resolution reports that as "not configured".
-  const provider = createDeepSeekWebProvider({
-    ...streamFnDeps,
-    resolveAuthHeaders: () => {
-      try {
-        return createClientHeaders();
-      } catch {
-        return undefined;
-      }
-    },
+  // Shared per-run stream wiring: model selection + pacing wrapper. The web
+  // path keeps the released semantics byte-for-byte (golden); the
+  // official-api path is a peer backend over the same pi loop.
+  const mapToolCall = (call: { name: string; invocationName: string; payload: Record<string, unknown> }, index: number) => ({
+    type: 'toolCall' as const,
+    id: `xml:${index}`,
+    name: call.invocationName,
+    arguments: call.payload,
   });
-  const providerModel: Model<Api> = provider.getModels()[0];
+
+  let streamFn: StreamFn;
+  let model: Model<Api>;
+  if (backend === 'official-api') {
+    // B2: official API backend. No page chain: the pi Context transcript is
+    // the chain (fail-closed checks in beforeToolCall/shouldStopAfterTurn
+    // use the Context, see below).
+    const provider = createDeepSeekApiProvider({
+      getApiKey: () => getDeepSeekApiKey(),
+      getConfig: () => getOfficialApiChatConfig(),
+      mapMessages: createDeepSeekApiMessageMapper(),
+    }, {
+      toolDescriptors,
+      mapToolCall,
+    });
+    model = provider.getModels()[0];
+    streamFn = deepSeekApiProviderToStreamFn(provider);
+  } else {
+    const submitter = createDeepSeekTurnSubmitter({ powWasmUrl });
+    const streamFnDeps = {
+      submitTurn: submitter,
+      session,
+      serializePrompt: () => {
+        if (nudge.active) {
+          nudge.active = false;
+          nudge.currentTurnIsNudge = true;
+          return buildNudgePrompt(payload.originalPrompt, nudge.lastAssistantText, collectedExecutions, nudge.count, locale);
+        }
+        return buildContinuationPrompt(payload.originalPrompt, collectedExecutions, locale);
+      },
+      mapToolCall,
+      toolDescriptors,
+      turnDefaults: {
+        modelType: promptOptions.modelType,
+        refFileIds: promptOptions.refFileIds,
+        thinkingEnabled: promptOptions.thinkingEnabled,
+        searchEnabled: promptOptions.searchEnabled,
+      },
+      onTokenSpeed: (progress) => {
+        post('AGENT_TOKEN_SPEED', {
+          ...progress,
+          requestId: `agent:${loopId}:step:${stepIndex}${nudge.currentTurnIsNudge ? `:nudge:${nudge.count}` : ''}`,
+          chatSessionId,
+          modelType: progress.modelType ?? promptOptions.modelType,
+        });
+      },
+    } satisfies DeepSeekStreamFnDeps;
+
+    // The deepseek-web backend is registered as a first-class pi-ai provider
+    // (B1): the loop consumes the released `runAgentLoop` seam through
+    // `provider.stream` instead of a hand-built StreamFn. The provider owns no
+    // session state (the injected `session` is the chain authority) and its
+    // auth surface is ambient: `createClientHeaders` resolves the page session
+    // headers or throws when the login token is missing — provider auth
+    // resolution reports that as "not configured".
+    const provider = createDeepSeekWebProvider({
+      ...streamFnDeps,
+      resolveAuthHeaders: () => {
+        try {
+          return createClientHeaders();
+        } catch {
+          return undefined;
+        }
+      },
+    });
+    model = provider.getModels()[0];
+    streamFn = deepSeekWebProviderToStreamFn(provider);
+  }
 
   // One 2.5–6.5s throttle delay before every DS request except the first
   // (released request pacing).
   let requestCount = 0;
-  const streamFn: StreamFn = deepSeekWebProviderToStreamFn(provider);
   const pacedStreamFn: StreamFn = async (model, context, options) => {
     if (requestCount > 0) {
       await waitBetweenDeepSeekRequests(signal);
@@ -217,8 +263,6 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
     requestCount += 1;
     return streamFn(model, context, options);
   };
-
-  const model: Model<Api> = providerModel;
 
   const piTools = createPiAgentTools({
     descriptors: toolDescriptors,
@@ -247,7 +291,7 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
       const text = lastTurnText;
       const hasTools = lastTurnHasTools;
 
-      if (session.parentMessageId === null) {
+      if (!hasContinuableChain()) {
         if (hasTools) {
           throw new Error(chainErrorText(nudge.currentTurnIsNudge));
         }
@@ -285,7 +329,7 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
       // The pi loop polls steering before the first turn too; the released
       // nudge semantics only apply after a real turn has run.
       if (turnsElapsed === 0) return [];
-      if (!lastTurnHasTools && !nudge.nudgedInStep && session.parentMessageId !== null
+      if (!lastTurnHasTools && !nudge.nudgedInStep && hasContinuableChain()
         && !extractTaskCompleteSignal(lastTurnText)
         && shouldNudge(payload.originalPrompt, collectedExecutions, lastTurnText)) {
         nudge.count += 1;
@@ -301,8 +345,14 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
       }
       return [];
     },
-    beforeToolCall: async () => {
-      if (session.parentMessageId === null) {
+    beforeToolCall: async ({ context }) => {
+      if (!hasContinuableChain()) {
+        return { block: true, reason: chainErrorText(nudge.currentTurnIsNudge) };
+      }
+      // Official-API backend: the pi Context transcript IS the chain, so
+      // also fail closed unless the Context carries a valid assistant
+      // message (the model actually produced a turn before tools run).
+      if (backend === 'official-api' && !contextHasAssistantMessage(context)) {
         return { block: true, reason: chainErrorText(nudge.currentTurnIsNudge) };
       }
       return undefined;
@@ -373,7 +423,7 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
         if (hasTools) {
           // Fail-closed: tools without a continuable chain were blocked in
           // beforeToolCall; surface the refusal as the released error.
-          if (session.parentMessageId === null) {
+          if (!hasContinuableChain()) {
             throw new Error(chainErrorText(nudge.currentTurnIsNudge));
           }
           collectedExecutions.push(...executedInStep);
@@ -497,6 +547,15 @@ function chainErrorText(nudgeTurn: boolean): string {
   return nudgeTurn
     ? 'DeepSeek returned nudge tool calls without a continuable response message; refusing to execute tools outside the conversation chain.'
     : 'DeepSeek returned agent tool calls without a continuable response message; refusing to execute tools outside the conversation chain.';
+}
+
+/**
+ * Official-API fail-closed check: the pi Context transcript is the chain, so
+ * tools may only run after the model actually produced an assistant message
+ * in this loop (a valid turn), not on an empty/seed Context.
+ */
+function contextHasAssistantMessage(context: { messages: ReadonlyArray<{ role: string }> }): boolean {
+  return context.messages.some((message) => message.role === 'assistant');
 }
 
 function buildInlineAgentBudgetNotice(locale: SupportedLocale, completedSteps: number): string {

@@ -39,8 +39,13 @@ export const DEEPSEEK_API_PROVIDER = 'deepseek-api' as const;
 
 /**
  * Maps pi `Message[]` (the loop Context transcript) to the official-API wire
- * messages. Rules (mirroring the released chat official-API loop):
+ * messages. Rules (mirroring the released chat official-API loop, which
+ * stores the raw streamed text including XML tool calls):
  *  - user/assistant text blocks → `content` (joined text);
+ *  - assistant toolCall blocks → re-serialized XML (`<name>{json}</name>`)
+ *    appended to `content`: the official API has no native function calling,
+ *    so the model must see the full assistant turn it produced (matching the
+ *    chat official-API loop, which keeps the raw streamed text);
  *  - assistant thinking blocks → `reasoningContent` (OpenAI-compatible);
  *  - toolResult messages → a `user` message whose content serializes the
  *    tool result (XML `<name_result>` protocol), keeping the model informed
