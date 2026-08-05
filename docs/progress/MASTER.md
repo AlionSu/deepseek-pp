@@ -54,8 +54,8 @@ gh api repos/zhu1090093659/deepseek-pp/milestones --jq '.[] | select(.number==51
 
 ## Current Status
 
-**Active Phase**: 准备阶段（Phase 1-4 完成，Phase 5a 待用户确认开工）
-**Active Task**: 无（执行未开始）
+**Active Phase**: Phase 1（P1-B1）执行中
+**Active Task**: A0-T1 完成（`da0ad1a`，golden 9/9 + compile + 回归 25/25）；A0-T2 进行中（lane worktree `a0-t2-dep-probe`）
 **Blockers**: 无
 
 ## Governance Status
