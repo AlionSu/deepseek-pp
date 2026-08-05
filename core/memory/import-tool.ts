@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
+import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n/background';
 import { getAllMemories } from './store';
 import type { JsonValue, MemoryType, ToolCall, ToolDescriptor, ToolProviderIdentity, ToolResult } from '../types';
 import { previewMemoryImport } from './importer';

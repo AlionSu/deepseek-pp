@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, type SupportedLocale } from '../i18n';
+import { DEFAULT_LOCALE, type SupportedLocale } from '../i18n/background';
 import { createMemoryToolDescriptors } from './memory';
 import { createWebSearchToolDescriptors } from './web-search';
 import type { ToolCall, ToolDescriptor, ToolError, ToolPayload } from './types';

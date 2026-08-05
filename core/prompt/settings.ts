@@ -1,5 +1,5 @@
 import { PRESET_REINJECTION_INTERVAL } from '../constants';
-import { isSupportedLocale, type SupportedLocale } from '../i18n';
+import { isSupportedLocale, type SupportedLocale } from '../i18n/background';
 
 export type PromptPresetCadence = 'default' | 'first_message' | 'every_message' | 'off';
 export type ForcedResponseLanguage = 'auto' | SupportedLocale;

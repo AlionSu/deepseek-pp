@@ -1,4 +1,4 @@
-import { isSupportedLocale } from '../i18n';
+import { isSupportedLocale } from '../i18n/background';
 import {
   decodeImportedMemory,
   decodePersistedMemoryRecord,

@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
+import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n/background';
 import type { JsonValue, Skill, ToolCall, ToolDescriptor, ToolProviderIdentity, ToolResult } from '../types';
 
 export interface SkillDraftOutput {
