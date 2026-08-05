@@ -11,6 +11,7 @@ export interface ContentUxPolishLabels {
   messageMarkdownTitle: string;
   messageCopyButton: string;
   messageCopyTitle: string;
+  messageCopyFailed: string;
 }
 
 const STYLE_ID = 'dpp-content-ux-polish-css';
@@ -20,17 +21,19 @@ const MESSAGE_COPY_CLASS = 'dpp-message-copy';
 const MESSAGE_SELECTOR = '[data-message-id][data-message-role], [data-message-author-role]';
 const POLISH_MOUNT_DELAY_MS = 50;
 const CODE_BUTTON_OFFSET_PX = 6;
+const MESSAGE_COPY_STATUS_MS = 1600;
 
 export function startContentUxPolish(
   getLabels: () => ContentUxPolishLabels,
 ): ContentUxPolishController {
   injectStyles();
   const codeButtons = new Map<HTMLElement, HTMLButtonElement>();
+  const copyFeedbackTimers = new Set<ReturnType<typeof setTimeout>>();
   const syncCodeButtons = () => syncCodeButtonPositions(codeButtons);
-  const mount = () => mountPolish(document, getLabels(), codeButtons);
+  const mount = () => mountPolish(document, getLabels(), codeButtons, copyFeedbackTimers);
   const refreshLabels = () => applyPolishLabels(document, getLabels());
   mount();
-  const candidateMountScheduler = createCandidateMountScheduler(getLabels);
+  const candidateMountScheduler = createCandidateMountScheduler(getLabels, copyFeedbackTimers);
   const observer = new MutationObserver((mutations) => {
     for (const root of collectPolishCandidateRoots(mutations)) {
       candidateMountScheduler.schedule(root, codeButtons);
@@ -47,6 +50,8 @@ export function startContentUxPolish(
     stop() {
       observer.disconnect();
       candidateMountScheduler.cancel();
+      copyFeedbackTimers.forEach((timer) => clearTimeout(timer));
+      copyFeedbackTimers.clear();
       window.removeEventListener('dpp:navigation', mount);
       window.removeEventListener('scroll', syncCodeButtons, true);
       window.removeEventListener('resize', syncCodeButtons);
@@ -74,9 +79,10 @@ function mountPolish(
   root: ParentNode,
   labels: ContentUxPolishLabels,
   codeButtons: Map<HTMLElement, HTMLButtonElement>,
+  copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
 ): void {
   collectCodeBlocks(root).forEach((pre, index) => mountCodeDownload(pre, index, labels, codeButtons));
-  collectMessageNodes(root).forEach((message) => mountMessageActions(message, labels));
+  collectMessageNodes(root).forEach((message) => mountMessageActions(message, labels, copyFeedbackTimers));
   applyPolishLabels(root, labels);
   syncCodeButtonPositions(codeButtons);
 }
@@ -118,7 +124,11 @@ function collectMessageNodes(root: ParentNode): HTMLElement[] {
     .filter((node) => node.textContent?.trim());
 }
 
-function mountMessageActions(message: HTMLElement, labels: ContentUxPolishLabels): void {
+function mountMessageActions(
+  message: HTMLElement,
+  labels: ContentUxPolishLabels,
+  copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
+): void {
   const markdownButton = document.createElement('button');
   markdownButton.type = 'button';
   markdownButton.className = MESSAGE_BUTTON_CLASS;
@@ -147,15 +157,37 @@ function mountMessageActions(message: HTMLElement, labels: ContentUxPolishLabels
     event.stopPropagation();
     void copyTextToClipboard(getMessageText(message)).catch((error) => {
       console.warn('[DeepSeek++] copy full message output failed:', error);
+      showCopyFailure(copyButton, labels, copyFeedbackTimers);
     });
   });
   message.appendChild(copyButton);
 }
 
+function showCopyFailure(
+  button: HTMLButtonElement,
+  labels: ContentUxPolishLabels,
+  timers: Set<ReturnType<typeof setTimeout>>,
+): void {
+  button.dataset.status = 'failed';
+  button.textContent = labels.messageCopyFailed;
+  const timer = setTimeout(() => {
+    timers.delete(timer);
+    delete button.dataset.status;
+    button.textContent = labels.messageCopyButton;
+    button.title = labels.messageCopyTitle;
+  }, MESSAGE_COPY_STATUS_MS);
+  timers.add(timer);
+}
+
 async function copyTextToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // writeText rejects when clipboard permission is denied or the document
+      // is unfocused; fall through to the legacy path before giving up.
+    }
   }
   const textarea = document.createElement('textarea');
   textarea.value = text;
@@ -163,8 +195,11 @@ async function copyTextToClipboard(text: string): Promise<void> {
   textarea.style.opacity = '0';
   document.body.appendChild(textarea);
   textarea.select();
-  document.execCommand('copy');
+  const copied = document.execCommand('copy');
   textarea.remove();
+  if (!copied) {
+    throw new Error('Clipboard copy failed.');
+  }
 }
 
 function applyPolishLabels(root: ParentNode, labels: ContentUxPolishLabels): void {
@@ -177,6 +212,7 @@ function applyPolishLabels(root: ParentNode, labels: ContentUxPolishLabels): voi
     button.title = labels.messageMarkdownTitle;
   });
   root.querySelectorAll<HTMLButtonElement>(`.${MESSAGE_COPY_CLASS}`).forEach((button) => {
+    if (button.dataset.status === 'failed') return;
     button.textContent = labels.messageCopyButton;
     button.title = labels.messageCopyTitle;
   });
@@ -195,6 +231,7 @@ function normalizeRole(value: string | undefined): 'user' | 'assistant' | 'syste
 
 function createCandidateMountScheduler(
   getLabels: () => ContentUxPolishLabels,
+  copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
 ): { schedule(root: ParentNode, codeButtons: Map<HTMLElement, HTMLButtonElement>): void; cancel(): void } {
   const pending = new Set<ParentNode>();
   let pendingCodeButtons: Map<HTMLElement, HTMLButtonElement> | null = null;
@@ -212,7 +249,7 @@ function createCandidateMountScheduler(
         pending.clear();
         const labels = getLabels();
         for (const candidate of roots) {
-          if (pendingCodeButtons) mountPolish(candidate, labels, pendingCodeButtons);
+          if (pendingCodeButtons) mountPolish(candidate, labels, pendingCodeButtons, copyFeedbackTimers);
         }
         pendingCodeButtons = null;
       }, POLISH_MOUNT_DELAY_MS);
@@ -313,7 +350,7 @@ function injectStyles(): void {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .${CODE_BUTTON_CLASS}, .${MESSAGE_BUTTON_CLASS} {
+    .${CODE_BUTTON_CLASS}, .${MESSAGE_BUTTON_CLASS}, .${MESSAGE_COPY_CLASS} {
       border: 1px solid rgba(0, 0, 0, 0.12);
       border-radius: 6px;
       background: rgba(255, 255, 255, 0.92);
@@ -327,10 +364,14 @@ function injectStyles(): void {
       z-index: 2147483647;
       padding: 4px 7px;
     }
-    .${MESSAGE_BUTTON_CLASS} {
+    .${MESSAGE_BUTTON_CLASS}, .${MESSAGE_COPY_CLASS} {
       float: right;
       margin: 0 0 6px 8px;
       padding: 3px 6px;
+    }
+    .${MESSAGE_COPY_CLASS}[data-status="failed"] {
+      border-color: rgba(220, 38, 38, 0.55);
+      color: #b91c1c;
     }
   `;
   document.head.appendChild(style);

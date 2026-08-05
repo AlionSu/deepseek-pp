@@ -45,6 +45,7 @@ export interface ConversationExportRuntimeHandlerDependencies {
   missingAuthMessage(): string;
   generatingMessage(): string;
   cancelledMessage(): string;
+  emptyHistoryMessage(): string;
 }
 
 export function createConversationExportRuntimeHandlers(
@@ -128,6 +129,26 @@ export function createConversationExportRuntimeHandlers(
           assertExportActive(entry);
         },
       });
+
+      // An explicit current-session export that returns zero messages means the
+      // server history was empty (or transiently unavailable) while the page is
+      // showing messages. Fail visibly instead of emitting a silent empty
+      // artifact; bulk list-based exports may legitimately contain empty
+      // sessions and are unaffected.
+      if (payload.request.sessionIds?.length && exportData.stats.messageCount === 0) {
+        const message = dependencies.emptyHistoryMessage();
+        entry.state = 'failed';
+        entry.terminalNotification = publishProgress(entry, {
+          exportId,
+          phase: 'failed',
+          status: 'failed',
+          current: 0,
+          total: 0,
+          message,
+        }, 'failed');
+        await entry.terminalNotification;
+        return { ok: false, exportId, error: message };
+      }
 
       assertExportActive(entry);
       await publishProgress(entry, {
