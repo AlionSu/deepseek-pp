@@ -87,6 +87,27 @@ export function createDeepSeekWebProvider(deps: DeepSeekWebProviderDeps): Return
   });
 }
 
+/**
+ * Adapts a deepseek-web provider to pi's `StreamFn` seam consumed by
+ * `runAgentLoop`. The provider's `stream` is typed for `Model<'deepseek-web'>`
+ * and `ApiStreamOptions` (which, lacking an `ApiOptionsMap` entry, is the
+ * generic `StreamOptions & Record<string, unknown>`), while the loop passes
+ * the config model as `Model<Api>` and `SimpleStreamOptions`. The runtime
+ * model is always the provider's own catalog entry (api `deepseek-web`) and
+ * the StreamFn body consumes only `signal` from options, so this is a
+ * type-level widening only — no behavior change.
+ */
+export function deepSeekWebProviderToStreamFn(
+  provider: ReturnType<typeof createProvider<typeof DEEPSEEK_WEB_API>>,
+): StreamFn {
+  return (model, context, options) =>
+    provider.stream(
+      model as Model<typeof DEEPSEEK_WEB_API>,
+      context,
+      options ? { ...options } : undefined,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

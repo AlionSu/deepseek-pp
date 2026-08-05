@@ -25,7 +25,9 @@ import type { StreamFn, AgentEvent, AgentLoopConfig } from '@earendil-works/pi-a
 import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../../i18n';
 import type { ToolCall, ToolDescriptor, ToolExecutionRecord, ToolProviderIdentity } from '../../types';
-import { createDeepSeekStreamFn, createDeepSeekTurnSubmitter } from './deepseek-stream-fn';
+import { createClientHeaders } from '../../deepseek/adapter';
+import { createDeepSeekTurnSubmitter } from './deepseek-stream-fn';
+import { createDeepSeekWebProvider, deepSeekWebProviderToStreamFn } from './deepseek-web-provider';
 import type { DeepSeekSessionState, DeepSeekStreamFnDeps } from './stream-fn-port';
 import {
   createPiAgentTools,
@@ -151,7 +153,7 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
 
   // ------------------------------------------------------------- DS backend
   const submitter = createDeepSeekTurnSubmitter({ powWasmUrl });
-  const streamFn: StreamFn = createDeepSeekStreamFn({
+  const streamFnDeps = {
     submitTurn: submitter,
     session,
     serializePrompt: () => {
@@ -183,11 +185,31 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
         modelType: progress.modelType ?? promptOptions.modelType,
       });
     },
-  } satisfies DeepSeekStreamFnDeps);
+  } satisfies DeepSeekStreamFnDeps;
+
+  // The deepseek-web backend is registered as a first-class pi-ai provider
+  // (B1): the loop consumes the released `runAgentLoop` seam through
+  // `provider.stream` instead of a hand-built StreamFn. The provider owns no
+  // session state (the injected `session` is the chain authority) and its
+  // auth surface is ambient: `createClientHeaders` resolves the page session
+  // headers or throws when the login token is missing — provider auth
+  // resolution reports that as "not configured".
+  const provider = createDeepSeekWebProvider({
+    ...streamFnDeps,
+    resolveAuthHeaders: () => {
+      try {
+        return createClientHeaders();
+      } catch {
+        return undefined;
+      }
+    },
+  });
+  const providerModel: Model<Api> = provider.getModels()[0];
 
   // One 2.5–6.5s throttle delay before every DS request except the first
   // (released request pacing).
   let requestCount = 0;
+  const streamFn: StreamFn = deepSeekWebProviderToStreamFn(provider);
   const pacedStreamFn: StreamFn = async (model, context, options) => {
     if (requestCount > 0) {
       await waitBetweenDeepSeekRequests(signal);
@@ -196,18 +218,7 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
     return streamFn(model, context, options);
   };
 
-  const model: Model<Api> = {
-    id: 'deepseek-chat',
-    name: 'DeepSeek Chat',
-    api: 'openai-completions',
-    provider: 'deepseek',
-    baseUrl: '',
-    reasoning: false,
-    input: [],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 0,
-    maxTokens: 0,
-  };
+  const model: Model<Api> = providerModel;
 
   const piTools = createPiAgentTools({
     descriptors: toolDescriptors,
