@@ -27,7 +27,7 @@
 
 | Task | Issue | Delivery Batch | PR | Status |
 |:-----|:------|:---------------|:---|:-------|
-| A0（A0-T1 + A0-T2） | [#511](https://github.com/zhu1090093659/deepseek-pp/issues/511) | P1-B1 | — | Open |
+| A0（A0-T1 + A0-T2） | [#511](https://github.com/zhu1090093659/deepseek-pp/issues/511) | P1-B1 | [#516](https://github.com/zhu1090093659/deepseek-pp/pull/516) | In review |
 | A1（A1-T1..3） | [#512](https://github.com/zhu1090093659/deepseek-pp/issues/512) | P2-B1 | — | Open |
 | A2（A2-T1..3） | [#513](https://github.com/zhu1090093659/deepseek-pp/issues/513) | P3-B1 | — | Open |
 | A3（A3-T1..3） | [#514](https://github.com/zhu1090093659/deepseek-pp/issues/514) | P4-B1 | — | Open |
@@ -37,7 +37,7 @@
 
 | Batch | Issue | Integration Branch | Validation | Depends On | Status |
 |:------|:------|:--------------------|:-----------|:-----------|:-------|
-| P1-B1 | #511 | `batch/p1-b1-contract-foundation` | golden + compile + build:chrome + pi-bundle-budget | — | Planned |
+| P1-B1 | #511 | `batch/p1-b1-contract-foundation` | golden + compile + build:chrome + pi-bundle-budget | — | **PR #516 in review** |
 | P2-B1 | #512 | `batch/p2-b1-deepseek-stream-fn` | 定向测试 + compile + build:chrome + shake 断言 | P1-B1 | Planned |
 | P3-B1 | #513 | `batch/p3-b1-tool-bridge-auth` | 定向测试 + compile + prompt:freeze + build | P1-B1 | Planned |
 | P4-B1 | #514 | `batch/p4-b1-loop-swap` | 完整验证链（prompt:freeze 零 diff → build:all → verify → 窄冒烟） | P2-B1, P3-B1 | Planned |
@@ -54,8 +54,8 @@ gh api repos/zhu1090093659/deepseek-pp/milestones --jq '.[] | select(.number==51
 
 ## Current Status
 
-**Active Phase**: Phase 1（P1-B1）执行中
-**Active Task**: A0-T1 完成（`da0ad1a`，golden 9/9 + compile + 回归 25/25）；A0-T2 进行中（lane worktree `a0-t2-dep-probe`）
+**Active Phase**: Phase 1（P1-B1）批次集成完成，PR #516 待评审
+**Active Task**: A0-T1（`da0ad1a`）+ A0-T2（lane `3de8ff1`）已合入批次分支；合并 main 时解决依赖冲突（dexie 移除 + pi 锁版）与 docs rename 碰撞（已恢复 run 文档）
 **Blockers**: 无
 
 ## Governance Status
