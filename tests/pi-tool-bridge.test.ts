@@ -13,7 +13,6 @@ import { createArtifactToolDescriptors } from '../core/artifact';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { ToolCall, ToolExecutionRecord, ToolResult } from '../core/types';
 import {
-  assertContinuableChain,
   createPiAgentTools,
   createPiLoopBudgetMap,
   piToolResultToExecutionRecord,
@@ -134,19 +133,6 @@ describe('piToolResultToExecutionRecord', () => {
     });
 
     expect(record.result).toEqual({ ok: false, summary: 'results' });
-  });
-});
-
-describe('assertContinuableChain', () => {
-  it('fails closed when tool calls arrive without a continuable message id', () => {
-    expect(() => assertContinuableChain(null, 1)).toThrow(
-      'refusing to execute tools outside the conversation chain',
-    );
-  });
-
-  it('allows text-only turns and continuable tool turns', () => {
-    expect(() => assertContinuableChain(null, 0)).not.toThrow();
-    expect(() => assertContinuableChain(102, 2)).not.toThrow();
   });
 });
 

@@ -36,12 +36,12 @@
 //     A3 loop swap)
 //   - esbuild pi-only probe (minified): 213,749 raw / 59,616 gzip (more
 //     conservative retention; kept for reference)
-//   - Budgets allow ~32-40% raw / ~37-45% gzip headroom for bundler/engine
-//     drift and the extra runtime surface A3 is expected to import
-//     (runAgentLoopContinue etc.). A wide-entry regression (index.js
-//     `export *` pulling pi-ai's provider catalog and the heavy SDK tree)
-//     measures ~950,000 raw / ~260,000+ gzip and blows these budgets by a
-//     wide margin.
+//   - Budgets allow ~13-32% raw / ~14-37% gzip headroom over the measured
+//     graphs (tightest on the full-A3 probe) for bundler/engine drift and
+//     upstream upgrades. A wide-entry regression (index.js `export *`
+//     pulling pi-ai's provider catalog and the heavy SDK tree) measures
+//     ~950,000 raw / ~260,000+ gzip and blows these budgets by a wide
+//     margin.
 //
 // The real background today (720,903 raw / 208,719 gzip) plus the pi-only
 // probe increment (173,657 / 52,525) would exceed the red lines (~894,560 /

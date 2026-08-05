@@ -88,19 +88,6 @@ export function piToolResultToExecutionRecord(input: {
   };
 }
 
-/**
- * Fail-closed chain guard: refusing to execute tools outside the
- * conversation chain (mirrors the original loop's safety check).
- */
-export function assertContinuableChain(parentMessageId: number | null, toolCallCount: number): void {
-  if (parentMessageId === null && toolCallCount > 0) {
-    throw new Error(
-      'DeepSeek returned agent tool calls without a continuable response message; '
-      + 'refusing to execute tools outside the conversation chain.',
-    );
-  }
-}
-
 /** Budget constants mapped for the pi loop configuration (Issue A2-T2). */
 export interface PiLoopBudgetMap {
   maxSteps: number;

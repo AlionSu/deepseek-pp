@@ -19,7 +19,7 @@
  * `<task_complete>`/nudge prompts) is preserved via `buildContinuationPrompt`
  * / `buildNudgePrompt` — pi's own prompt templates are never used.
  */
-import type { Api, AssistantMessage, Model, Message } from '@earendil-works/pi-ai';
+import type { Api, AssistantMessage, Model, Message, ToolResultMessage } from '@earendil-works/pi-ai';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { StreamFn, AgentEvent, AgentLoopConfig } from '@earendil-works/pi-agent-core';
 import { runAgentLoop } from '@earendil-works/pi-agent-core';
@@ -27,7 +27,11 @@ import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../../i18n';
 import type { ToolCall, ToolDescriptor, ToolExecutionRecord, ToolProviderIdentity } from '../../types';
 import { createDeepSeekStreamFn, createDeepSeekTurnSubmitter } from './deepseek-stream-fn';
 import type { DeepSeekSessionState, DeepSeekStreamFnDeps } from './stream-fn-port';
-import { createPiAgentTools } from './tool-bridge';
+import {
+  createPiAgentTools,
+  createPiLoopBudgetMap,
+  piToolResultToExecutionRecord,
+} from './tool-bridge';
 import {
   buildContinuationPrompt,
   buildNudgePrompt,
@@ -214,6 +218,7 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
     },
   });
 
+  const budget = createPiLoopBudgetMap();
   const config: AgentLoopConfig = {
     model,
     toolExecution: 'sequential',
@@ -222,7 +227,7 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
     shouldStopAfterTurn: ({ message }) => {
       lastTurnText = extractText(message);
       lastTurnHasTools = message.content.some((block) => block.type === 'toolCall');
-      if (stepIndex >= INLINE_AGENT_MAX_STEPS) {
+      if (stepIndex >= budget.maxSteps) {
         if (stopNotice === null && collectedExecutions.length > 0) {
           stopNotice = buildInlineAgentBudgetNotice(locale, stepIndex);
         }
@@ -302,6 +307,9 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
         // previous one within a step (nudge text is not concatenated).
         stepText = '';
         lastPostedText = '';
+        // Post-abort the pi engine may still start one more turn after a
+        // tool batch; the released loop never emits that ghost step.
+        if (signal.aborted && turnsElapsed > 0) return;
         if (nudge.pendingTurn) {
           nudge.pendingTurn = false;
         } else {
@@ -324,11 +332,20 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
         break;
       case 'tool_execution_end': {
         const descriptor = descriptorByName.get(event.toolName);
-        executedInStep.push({
-          name: descriptor?.name ?? event.toolName,
+        const resultMessage: ToolResultMessage = {
+          role: 'toolResult',
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          content: [{ type: 'text', text: extractResultText(event.result) }],
+          details: (event.result as { details?: unknown } | undefined)?.details,
+          isError: event.isError,
+          timestamp: Date.now(),
+        };
+        executedInStep.push(piToolResultToExecutionRecord({
+          toolName: descriptor?.name ?? event.toolName,
           provider: providerFor(event.toolName),
-          result: normalizeToolResult(event),
-        });
+          message: resultMessage,
+        }));
         break;
       }
       case 'turn_end': {
@@ -456,21 +473,19 @@ function extractText(message: { content: Array<{ type: string; text?: string }> 
     .join('');
 }
 
+function extractResultText(result: unknown): string {
+  const content = (result as { content?: Array<{ type?: string; text?: string }> } | undefined)?.content;
+  if (!content) return '';
+  return content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+}
+
 function chainErrorText(nudgeTurn: boolean): string {
   return nudgeTurn
     ? 'DeepSeek returned nudge tool calls without a continuable response message; refusing to execute tools outside the conversation chain.'
     : 'DeepSeek returned agent tool calls without a continuable response message; refusing to execute tools outside the conversation chain.';
-}
-
-function normalizeToolResult(event: { result: unknown; isError: boolean }): { ok: boolean; summary: string } {
-  const details = (event.result as { details?: { ok?: boolean; summary?: string } } | undefined)?.details;
-  if (details && typeof details === 'object' && 'ok' in details) {
-    return {
-      ok: details.ok ?? !event.isError,
-      summary: details.summary ?? '',
-    };
-  }
-  return { ok: !event.isError, summary: '' };
 }
 
 function buildInlineAgentBudgetNotice(locale: SupportedLocale, completedSteps: number): string {
