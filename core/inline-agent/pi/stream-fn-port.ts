@@ -19,8 +19,9 @@
  * against the exact pi export shapes, so an upstream API break fails
  * compilation instead of surfacing at runtime.
  */
-import type { AgentContext, StreamFn } from '@earendil-works/pi-agent-core';
-import type { ToolCall } from '@earendil-works/pi-ai';
+import type { StreamFn } from '@earendil-works/pi-agent-core';
+import type { Context, ToolCall } from '@earendil-works/pi-ai';
+import type { ToolDescriptor } from '../../types';
 import type { ResponseTokenSpeedPayload } from '../../deepseek/stream-metrics';
 
 /** One DS-web turn request — the serializable wire contract. */
@@ -74,7 +75,7 @@ export interface DeepSeekSessionState {
 }
 
 /**
- * Serializes the pi agent context (system prompt + message transcript) into
+ * Serializes the pi request context (system prompt + message transcript) into
  * the DS-web wire prompt. Pure function; must not throw.
  *
  * The inline-agent wire contract (`<original_task>`/`<tool_results>`/
@@ -82,7 +83,7 @@ export interface DeepSeekSessionState {
  * preserved by this serializer — pi's own prompt templates are never used
  * (prompt-bytes invariant, AGENTS.md).
  */
-export type DeepSeekPromptSerializer = (context: AgentContext) => string;
+export type DeepSeekPromptSerializer = (context: Context) => string;
 
 /** Parsed XML tool call shape produced by the DS stream parser. */
 export interface ParsedXmlToolCall {
@@ -98,12 +99,29 @@ export interface ParsedXmlToolCall {
  */
 export type DeepSeekToolCallMapper = (call: ParsedXmlToolCall, index: number) => ToolCall;
 
+/** Per-run DS-web turn defaults (from the loop adapter's prompt options). */
+export interface DeepSeekTurnDefaults {
+  modelType: string | null;
+  refFileIds: string[];
+  thinkingEnabled: boolean;
+  searchEnabled: boolean;
+}
+
 /** Dependencies required to build the DS-web StreamFn (A1-T2). */
 export interface DeepSeekStreamFnDeps {
   submitTurn: DeepSeekTurnSubmitter;
   session: DeepSeekSessionState;
   serializePrompt: DeepSeekPromptSerializer;
   mapToolCall: DeepSeekToolCallMapper;
+  /** Tool descriptors used to parse XML tool calls out of the DS text stream. */
+  toolDescriptors: readonly ToolDescriptor[];
+  /** Per-run defaults merged into every turn request. */
+  turnDefaults: DeepSeekTurnDefaults;
+  /**
+   * Optional forwarder for DS-web token-speed progress. The loop adapter
+   * (A3) wires this to the `AGENT_TOKEN_SPEED` page event.
+   */
+  onTokenSpeed?: (progress: ResponseTokenSpeedPayload) => void;
 }
 
 /** The pi StreamFn factory implemented by the DS-web adapter. */
