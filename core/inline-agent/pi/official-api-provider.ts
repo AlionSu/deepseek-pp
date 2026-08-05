@@ -45,6 +45,7 @@ import type {
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import { submitOfficialDeepSeekStreaming } from '../../deepseek/official-api';
+import type { OfficialDeepSeekMessage } from '../../deepseek/official-api';
 import { createStreamingToolCallParser } from '../../interceptor/streaming-tool-call-parser';
 import { createStreamingToolTextAccumulator } from '../../interceptor/streaming-tool-text';
 import type { ToolCall as CoreToolCall } from '../../types';
@@ -52,6 +53,7 @@ import type { ToolDescriptor } from '../../types';
 import {
   DEEPSEEK_API,
   DEEPSEEK_API_PROVIDER,
+  type DeepSeekApiMessageMapper,
   type DeepSeekApiStreamFnDeps,
 } from './official-api-port';
 
@@ -249,9 +251,104 @@ export function createDeepSeekApiStreamFn(
   };
 }
 
+/**
+ * Adapts a deepseek-api provider to pi's `StreamFn` seam consumed by
+ * `runAgentLoop`. The provider's `stream` is typed for `Model<'deepseek-api'>`
+ * and `ApiStreamOptions`, while the loop passes the config model as
+ * `Model<Api>` and `SimpleStreamOptions`. The runtime model is always the
+ * provider's own catalog entry and the StreamFn body consumes only `signal`
+ * from options, so this is a type-level widening only — no behavior change.
+ */
+export function deepSeekApiProviderToStreamFn(
+  provider: ReturnType<typeof createProvider<typeof DEEPSEEK_API>>,
+): StreamFn {
+  return (model, context, options) =>
+    provider.stream(
+      model as Model<typeof DEEPSEEK_API>,
+      context,
+      options ? { ...options } : undefined,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * The released message mapper (B2-T2 contract): translates the pi Context
+ * transcript to official-API wire messages.
+ */
+export function createDeepSeekApiMessageMapper(): DeepSeekApiMessageMapper {
+  return (messages) => {
+    const output: OfficialDeepSeekMessage[] = [];
+    for (const message of messages) {
+      if (message.role === 'toolResult') {
+        const toolName = message.toolName ?? 'tool';
+        const text = extractMessageText(message.content);
+        output.push({
+          role: 'user',
+          content: `<${toolName}_result>\n${text}\n</${toolName}_result>`,
+        });
+        continue;
+      }
+      const text = extractMessageText(message.content);
+      const toolCalls = extractMessageToolCalls(message.content);
+      const reasoning = extractMessageThinking(message.content);
+      output.push({
+        role: message.role,
+        content: toolCalls.length > 0 ? `${text}${toolCalls}` : text,
+        ...(reasoning ? { reasoningContent: reasoning } : {}),
+      });
+    }
+    return output;
+  };
+}
+
+/**
+ * Re-serializes assistant toolCall blocks to the XML wire protocol the model
+ * itself produced (`<name>{json}</name>`). The official API has no native
+ * function calling, so the assistant turn must be sent back verbatim —
+ * mirroring the chat official-API loop, which stores the raw streamed text.
+ */
+function extractMessageToolCalls(
+  content: string | ReadonlyArray<{ type: string; text?: unknown; thinking?: unknown; name?: unknown; arguments?: unknown }>,
+): string {
+  if (typeof content === 'string') return '';
+  return content
+    .filter((block) => block.type === 'toolCall')
+    .map((block) => {
+      const name = typeof block.name === 'string' ? block.name : 'tool';
+      const args = block.arguments === undefined ? {} : block.arguments;
+      let json: string;
+      try {
+        json = JSON.stringify(args);
+      } catch {
+        json = '{}';
+      }
+      return `<${name}>${json}</${name}>`;
+    })
+    .join('');
+}
+
+function extractMessageText(
+  content: string | ReadonlyArray<{ type: string; text?: unknown; thinking?: unknown }>,
+): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text as string)
+    .join('');
+}
+
+function extractMessageThinking(
+  content: string | ReadonlyArray<{ type: string; text?: unknown; thinking?: unknown }>,
+): string {
+  if (typeof content === 'string') return '';
+  return content
+    .filter((block) => block.type === 'thinking' && typeof block.thinking === 'string')
+    .map((block) => block.thinking as string)
+    .join('');
+}
 
 /**
  * Adapts the pi StreamFn (whose type allows a Promise return) to pi-ai's

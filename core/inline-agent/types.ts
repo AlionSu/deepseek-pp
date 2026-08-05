@@ -14,6 +14,14 @@ export interface InlineAgentStartPayload {
   toolDescriptors: ToolDescriptor[];
   locale?: SupportedLocale;
   powWasmUrl?: string;
+  /**
+   * Model backend for this loop (B2). Defaults to `'web'` (released
+   * DeepSeek-web path, golden-locked). `'official-api'` runs the same pi
+   * loop over the DeepSeek official API (OpenAI-compatible messages +
+   * reasoning); the caller selects it when an official API key is
+   * configured, matching the sidepanel chat auto-switch semantics.
+   */
+  modelBackend?: 'web' | 'official-api';
 }
 
 export interface InlineAgentPromptOptions {

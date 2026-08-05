@@ -36,7 +36,7 @@ vi.mock('../core/deepseek/official-api', async (importOriginal) => {
   };
 });
 
-const { createDeepSeekApiProvider } = await import(
+const { createDeepSeekApiProvider, createDeepSeekApiMessageMapper } = await import(
   '../core/inline-agent/pi/official-api-provider'
 );
 
@@ -110,57 +110,11 @@ describe('deepseek-api provider port hygiene', () => {
 
 // --- Message mapping contract (real mapper, B2-T2) --------------------------
 
-// The mapper implementation is developed in B2-T3 alongside the provider;
-// until then these tests pin the mapping *rules* against a standalone
-// reference implementation under test, so the contract is fixed before the
-// provider consumes it.
-function createReferenceMapper(): DeepSeekApiMessageMapper {
-  return (messages) => {
-    const output: OfficialDeepSeekMessage[] = [];
-    for (const message of messages) {
-      if (message.role === 'toolResult') {
-        const toolName = message.toolName ?? 'tool';
-        const text = extractMessageText(message.content);
-        output.push({
-          role: 'user',
-          content: `<${toolName}_result>\n${text}\n</${toolName}_result>`,
-        });
-        continue;
-      }
-      const text = extractMessageText(message.content);
-      const reasoning = extractMessageThinking(message.content);
-      output.push({
-        role: message.role,
-        content: text,
-        ...(reasoning ? { reasoningContent: reasoning } : {}),
-      });
-    }
-    return output;
-  };
-}
-
-function extractMessageText(
-  content: string | ReadonlyArray<{ type: string; text?: unknown; thinking?: unknown }>,
-): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((block) => block.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text as string)
-    .join('');
-}
-
-function extractMessageThinking(
-  content: string | ReadonlyArray<{ type: string; text?: unknown; thinking?: unknown }>,
-): string {
-  if (typeof content === 'string') return '';
-  return content
-    .filter((block) => block.type === 'thinking' && typeof block.thinking === 'string')
-    .map((block) => block.thinking as string)
-    .join('');
-}
+// The message mapper is the real implementation (B2-T3); the mapping *rules*
+// are pinned here so a behavior change in the mapper fails these tests.
+const mapper = createDeepSeekApiMessageMapper();
 
 describe('deepseek-api message mapping contract', () => {
-  const mapper = createReferenceMapper();
   const userMsg = (content: Array<{ type: 'text'; text: string }>) => ({
     role: 'user' as const,
     content,
@@ -238,6 +192,38 @@ describe('deepseek-api message mapping contract', () => {
     ]);
   });
 
+  it('re-serializes assistant toolCall blocks to the XML wire protocol', () => {
+    const result = mapper([
+      {
+        role: 'assistant',
+        api: 'deepseek-api',
+        provider: 'deepseek-api',
+        model: 'deepseek-api',
+        usage: {
+          input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: 'toolUse',
+        content: [
+          { type: 'text', text: 'Let me check.' },
+          {
+            type: 'toolCall',
+            id: 'xml:0',
+            name: 'artifact_create',
+            arguments: { filename: 'a.txt', content: 'ok' },
+          },
+        ],
+        timestamp: 1,
+      },
+    ]);
+    expect(result).toEqual([
+      {
+        role: 'assistant',
+        content: 'Let me check.<artifact_create>{"filename":"a.txt","content":"ok"}</artifact_create>',
+      },
+    ]);
+  });
+
   it('preserves empty text messages without inventing fields', () => {
     const result = mapper([userMsg([])]);
     expect(result).toEqual([{ role: 'user', content: '' }]);
@@ -256,7 +242,7 @@ function createApiDeps(
       thinking: 'disabled' as const,
       reasoningEffort: 'high' as const,
     }),
-    mapMessages: createReferenceMapper(),
+    mapMessages: createDeepSeekApiMessageMapper(),
     ...overrides,
   };
 }
