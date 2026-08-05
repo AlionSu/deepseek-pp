@@ -129,3 +129,36 @@
 - GitHub milestones: #51-#52
 - GitHub issues: #511-#515
 - Batch PRs: #516-#520
+
+### pi-agent-core-step-b1
+
+- Description: Step B1 of the pi-agent-core integration: register the deepseek-web backend as a first-class pi-ai provider (`Provider<'deepseek-web'>` via `createProvider`, custom `Api` extension point), contract-first port + tests, provider probe bundle guardrail, loop wiring with golden byte-parity.
+- Date range: 2026-08-05 - 2026-08-05
+- Tracking mode: GITHUB_STANDARD
+- Archived progress: [MASTER.md](pi-agent-core-step-b1/progress/MASTER.md)
+- GitHub repository: `zhu1090093659/deepseek-pp`
+- GitHub milestone: #53
+- GitHub issue: #526
+- Batch PRs: #523-#525, #527, #529
+
+### pi-agent-core-step-b2
+
+- Description: Step B2 of the pi-agent-core integration: official DeepSeek API as a second model backend (`Provider<'deepseek-api'>`), OpenAI-compatible messages + reasoning, dual-backend single authority (`modelBackend`), per-backend chain authority with fail-closed checks.
+- Date range: 2026-08-05 - 2026-08-05
+- Tracking mode: GITHUB_STANDARD
+- Archived progress: [MASTER.md](pi-agent-core-step-b2/progress/MASTER.md)
+- GitHub repository: `zhu1090093659/deepseek-pp`
+- GitHub milestone: #54
+- GitHub issue: #530
+- Batch PRs: #531-#534
+
+### pi-agent-core-step-b3
+
+- Description: Step B3 of the pi-agent-core integration: pi/agentskills.io SKILL.md ecosystem import through the existing local-import pipeline, contract-hardened SKILL.md parser, zero pi-runtime-dependency bridge, pi prompt templates never enter the wire.
+- Date range: 2026-08-05 - 2026-08-05
+- Tracking mode: GITHUB_STANDARD
+- Archived progress: [MASTER.md](pi-agent-core-step-b3/progress/MASTER.md)
+- GitHub repository: `zhu1090093659/deepseek-pp`
+- GitHub milestone: #55
+- GitHub issue: #535
+- Batch PRs: #536-#539
