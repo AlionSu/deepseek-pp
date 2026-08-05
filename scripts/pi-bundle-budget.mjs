@@ -38,10 +38,10 @@
 //     (full-A3 + createDeepSeekWebProvider; the createProvider/models.js
 //     dependency surface adds only ~2.7K raw / ~1.2K gzip — no heavy SDK
 //     tree enters; calibrated 2026-08-05, B1-T4)
-//   - rolldown provider probe (minified): 383,593 raw / 128,037 gzip
-//     (full-A3 + createDeepSeekWebProvider; the createProvider/models.js
-//     dependency surface adds only ~2.7K raw / ~1.2K gzip — no heavy SDK
-//     tree enters; calibrated 2026-08-05, B1-T4)
+//   - rolldown provider probe + official API (minified): 389,437 raw /
+//     129,808 gzip (B1 provider surface + createDeepSeekApiProvider; the
+//     official-api client adds only ~5.9K raw / ~1.7K gzip — no OpenAI SDK
+//     tree enters; calibrated 2026-08-05, B2-T4)
 //   - esbuild pi-only probe (minified): 213,749 raw / 59,616 gzip (more
 //     conservative retention; kept for reference)
 //   - Budgets allow ~13-32% raw / ~14-37% gzip headroom over the measured
@@ -217,7 +217,8 @@ if (failures.length === 0) {
         "import { createDeepSeekStreamFn, createDeepSeekTurnSubmitter } from '../../core/inline-agent/pi/deepseek-stream-fn';",
         "import { runPiInlineAgentLoop } from '../../core/inline-agent/pi/loop-adapter';",
         "import { createDeepSeekWebProvider, createDeepSeekWebModels } from '../../core/inline-agent/pi/deepseek-web-provider';",
-        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter, typeof runPiInlineAgentLoop, typeof createDeepSeekWebProvider, typeof createDeepSeekWebModels);",
+        "import { createDeepSeekApiProvider } from '../../core/inline-agent/pi/official-api-provider';",
+        "console.log('pi-budget-probe', typeof agentLoop, typeof setDefaultStreamFn, typeof createDeepSeekStreamFn, typeof createDeepSeekTurnSubmitter, typeof runPiInlineAgentLoop, typeof createDeepSeekWebProvider, typeof createDeepSeekWebModels, typeof createDeepSeekApiProvider);",
         '',
       ].join('\n'),
     },

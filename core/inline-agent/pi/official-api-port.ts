@@ -27,6 +27,7 @@
  * fails compilation instead of surfacing at runtime.
  */
 import type { Provider } from '@earendil-works/pi-ai';
+import type { Message } from '@earendil-works/pi-ai';
 import type { OfficialApiChatConfig } from '../../chat/official-api-config-contract';
 import type { OfficialDeepSeekMessage } from '../../deepseek/official-api';
 
@@ -47,11 +48,7 @@ export const DEEPSEEK_API_PROVIDER = 'deepseek-api' as const;
  * Pure function; must not throw.
  */
 export type DeepSeekApiMessageMapper = (
-  messages: ReadonlyArray<{
-    role: 'user' | 'assistant' | 'toolResult';
-    content: ReadonlyArray<{ type: string; text?: string; thinking?: string }>;
-    [key: string]: unknown;
-  }>,
+  messages: readonly Message[],
 ) => OfficialDeepSeekMessage[];
 
 /** Dependencies required to build the official-API provider (B2-T3). */
