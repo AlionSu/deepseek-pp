@@ -44,6 +44,8 @@ export interface ToolExecutionRuntimeHandlerDependencies {
   getAuthorizationDescriptors(locale: SupportedLocale): Promise<ToolDescriptor[]>;
   refreshToolDescriptors(locale: SupportedLocale): Promise<ToolDescriptor[]>;
   createToolAuthorization(input: CreateToolAuthorizationInput): Promise<ToolAuthorizationGrantSummary>;
+  /** Background validation: whether a given directory belongs to an imported local skill (Review #2). */
+  validateLocalSkillDirectory(dir: string): Promise<boolean>;
   closeToolAuthorization(
     authorizationId: string,
     subject: ToolAuthorizationSubject,
@@ -114,6 +116,14 @@ export function createToolExecutionRuntimeHandlers(
         return { ok: false as const, error: 'unknown_tool_authorization_descriptor' };
       }
 
+      // Review #2: the page/model-supplied localSkillDir is untrusted; write it
+      // to the grant only when background confirms it belongs to an imported
+      // local-skill directory, otherwise do not force cwd.
+      const requestedLocalSkillDir = payload.localSkillDir;
+      const validatedLocalSkillDir =
+        requestedLocalSkillDir && await dependencies.validateLocalSkillDirectory(requestedLocalSkillDir)
+          ? requestedLocalSkillDir
+          : undefined;
       return dependencies.createToolAuthorization({
         requestId: payload.requestId,
         trigger: payload.trigger,
@@ -121,6 +131,7 @@ export function createToolExecutionRuntimeHandlers(
         runId: payload.runId,
         subject: createToolAuthorizationSubject(context),
         descriptors,
+        localSkillDir: validatedLocalSkillDir,
       });
     }),
     defineToolPayloadRuntimeCommandHandler('CLOSE_TOOL_AUTHORIZATION', async (decoded, context) => {

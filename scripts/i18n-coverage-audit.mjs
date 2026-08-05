@@ -99,6 +99,36 @@ const lineAllowlist = [
     includes: "['Agent', '任务']",
     reason: 'negative assertion checks README public-doc leakage fragments',
   },
+  {
+    path: 'scripts/automation-contract-smoke.mjs',
+    includes: "['Agent', '任务']",
+    reason: 'negative assertion checks README public-doc leakage fragments',
+  },
+  {
+    path: 'core/skill/local-skill-scorer.ts',
+    includes: '适用场景',
+    reason: 'scenario-matching regex keywords for applicable scenarios (source-authored matching data, not UI text)',
+  },
+  {
+    path: 'core/skill/local-skill-scorer.ts',
+    includes: '不适用场景',
+    reason: 'scenario-matching regex keywords for not-applicable scenarios (source-authored matching data, not UI text)',
+  },
+  {
+    path: 'core/skill/local-importer.ts',
+    includes: '适用场景',
+    reason: 'scenario-matching keywords/labels for applicable scenarios injected into the local-skill index card (source-authored matching data, not UI chrome text)',
+  },
+  {
+    path: 'core/skill/local-importer.ts',
+    includes: '不适用场景',
+    reason: 'scenario-matching keywords/labels for not-applicable scenarios injected into the local-skill index card (source-authored matching data, not UI chrome text)',
+  },
+  {
+    path: 'core/skill/local-skill-scorer.ts',
+    includes: "'财务', '新闻', '报告'",
+    reason: 'generic two-character Chinese stop-words used for weak-query down-weighting (source-authored linguistic scoring data, not UI text)',
+  },
 ];
 
 assertDeterministicKeyChecks();

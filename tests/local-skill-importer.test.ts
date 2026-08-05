@@ -20,6 +20,8 @@ import {
   importLocalSkillSource as importLocalSkillSourceWithRuntime,
   pickLocalSkillFolder as pickLocalSkillFolderWithRuntime,
   previewLocalSkillSource as previewLocalSkillSourceWithRuntime,
+  relocateLocalSkillSource as relocateLocalSkillSourceWithRuntime,
+  updateLocalSkillSource as updateLocalSkillSourceWithRuntime,
 } from '../core/skill/local-importer';
 import type { LocalSkillImportResponse, LocalSkillImportResult } from '../core/types';
 import type { LocalStateMutationStage } from '../core/persistence/local-state-mutation';
@@ -44,6 +46,10 @@ const pickLocalSkillFolder = (defaultPath?: string) =>
   pickLocalSkillFolderWithRuntime(defaultPath, importerDeps);
 const importLocalSkillSource = (request: Parameters<typeof importLocalSkillSourceWithRuntime>[0]) =>
   importLocalSkillSourceWithRuntime(request, importerDeps);
+const relocateLocalSkillSource = (sourceId: string, newRootPath: string) =>
+  relocateLocalSkillSourceWithRuntime(sourceId, newRootPath, importerDeps);
+const updateLocalSkillSource = (sourceId: string) =>
+  updateLocalSkillSourceWithRuntime(sourceId, importerDeps);
 
 beforeEach(() => {
   storage = {};
@@ -181,9 +187,11 @@ describe('local Skill importer', () => {
       scriptFiles: [{ path: 'scripts/run.py', bytes: 18 }],
     });
     expect(result.imported[0].instructions).toContain('Local Execution Boundary');
-    expect(result.imported[0].instructions).toContain('Run commands with cwd set to the Skill directory path: /Users/me/.codex/skills/demo');
+    expect(result.imported[0].instructions).toContain('Run commands with the initial cwd set to the Skill directory path: /Users/me/.codex/skills/demo');
     expect(result.imported[0].instructions).toContain('scripts/run.py');
-    expect(result.imported[0].instructions).toContain('### references/guide.md');
+    expect(result.imported[0].instructions).toContain('Index form: true');
+    expect(result.imported[0].instructions).toContain('Activation Notice');
+    expect(result.imported[0].instructions).not.toContain('### references/guide.md');
     expect(storage[SKILL_STORAGE_KEY]).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'demo-local', source: 'remote' }),
     ]));
@@ -205,9 +213,10 @@ describe('local Skill importer', () => {
       localDirectory: '/Users/me/.codex/skills/nested',
       scriptFiles: [{ path: 'nested/scripts/run.py', bytes: 15 }],
     });
-    expect(imported.instructions).toContain('Run commands with cwd set to the Skill directory path: /Users/me/.codex/skills/nested');
+    expect(imported.instructions).toContain('Run commands with the initial cwd set to the Skill directory path: /Users/me/.codex/skills/nested');
     expect(imported.instructions).toContain('- scripts/run.py (15 bytes)');
-    expect(imported.instructions).toContain('### references/child.md');
+    expect(imported.instructions).toContain('Index form: true');
+    expect(imported.instructions).not.toContain('### references/child.md');
     expect(imported.instructions).not.toContain('- nested/scripts/run.py');
     expect(imported.instructions).not.toContain('### nested/references/child.md');
   });
@@ -227,7 +236,7 @@ describe('local Skill importer', () => {
     const imported = result.imported[0];
     expect(imported.instructions).toContain('Supporting files available on demand: 1');
     expect(imported.instructions).toContain('## Supporting Files Available on Demand');
-    expect(imported.instructions).toContain('Read them with Shell MCP when the upstream instructions need them.');
+    expect(imported.instructions).toContain('Read them with the local file tool when the upstream instructions need them.');
     expect(imported.instructions).toContain('- references/extended-guide.md (2048 bytes)');
     expect(imported.instructions).not.toContain('## Omitted Supporting Files');
   });
@@ -448,6 +457,104 @@ describe('local Skill importer', () => {
     expect(result.imported).toHaveLength(1);
     expect(result.imported[0].name).toMatch(/^skill-[a-z0-9]{2,8}$/);
   });
+
+  describe('relocateLocalSkillSource', () => {
+    it('relocates a local Skill source to a renamed folder while preserving the source id', async () => {
+      // 先正常导入，使 source 落盘（provider=local，id 由 rootPath 推导）。
+      const imported = await importLocalSkillSource({
+        rootPath: '/Users/me/.codex/skills/demo',
+        selectedPaths: ['SKILL.md'],
+      });
+      expectImportSuccess(imported);
+      const originalId = imported.source.id;
+      expect(originalId).toBe('local:/Users/me/.codex/skills/demo');
+
+      // 用户重新选择了改名后的文件夹。
+      vi.mocked(executeMcpToolCall).mockResolvedValueOnce(
+        createLocalSkillToolResultAt('/Users/me/.codex/skills/demo-renamed'),
+      );
+
+      const relocated = await relocateLocalSkillSource(originalId, '/Users/me/.codex/skills/demo-renamed');
+      expect(relocated.ok).toBe(true);
+      if (!relocated.ok) throw new Error(relocated.error);
+
+      // 关键不变量：原地更新、保留原 source.id，激活引用 / 禁用状态 / 用户设置不断裂。
+      expect(relocated.source.id).toBe(originalId);
+      expect(relocated.source.rootPath).toBe('/Users/me/.codex/skills/demo-renamed');
+      expect(relocated.source.displayName).toBe('demo-renamed');
+      expect(relocated.source.skillPaths).toEqual(['SKILL.md']);
+      expect(relocated.imported).toHaveLength(1);
+      expect(relocated.imported[0].name).toBe('demo-local');
+    });
+
+    it('rejects an empty source id or empty new root path before touching storage', async () => {
+      await expect(relocateLocalSkillSource('', '/Users/me/.codex/skills/demo'))
+        .rejects.toThrow('Local Skill source id must be a non-empty string.');
+      await expect(relocateLocalSkillSource('local:/x', ''))
+        .rejects.toThrow('New root path must be a non-empty string.');
+      await expect(relocateLocalSkillSource('local:/x', '   '))
+        .rejects.toThrow('New root path must be a non-empty string.');
+    });
+
+    it('throws when the source id does not exist', async () => {
+      await expect(
+        relocateLocalSkillSource('local:does-not-exist', '/Users/me/.codex/skills/demo'),
+      ).rejects.toThrow('Local Skill source was not found');
+    });
+
+    it('throws when the relocated folder no longer contains the selected Skill paths', async () => {
+      const imported = await importLocalSkillSource({
+        rootPath: '/Users/me/.codex/skills/demo',
+        selectedPaths: ['SKILL.md'],
+      });
+      expectImportSuccess(imported);
+
+      // 新文件夹里只有 nested/SKILL.md，没有原来选中的 SKILL.md。
+      vi.mocked(executeMcpToolCall).mockResolvedValueOnce(createNestedLocalSkillToolResult());
+
+      await expect(
+        relocateLocalSkillSource(imported.source.id, '/Users/me/.codex/skills/moved'),
+      ).rejects.toThrow('Selected local Skill paths were not found: SKILL.md');
+    });
+  });
+
+  describe('updateLocalSkillSource', () => {
+    it('returns ok:false (not throw) when the original folder is gone, so the UI can offer relocation', async () => {
+      const imported = await importLocalSkillSource({
+        rootPath: '/Users/me/.codex/skills/demo',
+        selectedPaths: ['SKILL.md'],
+      });
+      expectImportSuccess(imported);
+
+      // 原文件夹被挪动：preview 返回空 skills → loadLocalSkillSource 抛 "No SKILL.md was found"。
+      vi.mocked(executeMcpToolCall).mockResolvedValueOnce({
+        ok: true,
+        summary: 'MCP tool executed',
+        output: {
+          ok: true,
+          data: {
+            rootPath: '/Users/me/.codex/skills/demo',
+            displayName: 'demo',
+            directoryName: 'demo',
+            warnings: [],
+            truncated: false,
+            skills: [],
+          },
+        },
+      });
+
+      // 关键：不抛异常，返回 ok:false，使 UI 进入 !response.ok 分支触发 relocate。
+      await expect(updateLocalSkillSource(imported.source.id)).resolves.toMatchObject({
+        ok: false,
+        error: expect.stringContaining('No SKILL.md was found'),
+      });
+    });
+
+    it('throws on a non-existent source id (unchanged contract)', async () => {
+      await expect(updateLocalSkillSource('local:does-not-exist'))
+        .rejects.toThrow('Local Skill source was not found');
+    });
+  });
 });
 
 function expectImportSuccess(
@@ -534,6 +641,29 @@ function createLocalSkillToolResult() {
             warnings: [],
           },
         ],
+      },
+    },
+  };
+}
+
+function createLocalSkillToolResultAt(rootPath: string) {
+  const result = createLocalSkillToolResult();
+  const skill = result.output.data.skills[0];
+  return {
+    ...result,
+    output: {
+      ...result.output,
+      data: {
+        ...result.output.data,
+        rootPath,
+        displayName: 'demo-renamed',
+        directoryName: 'demo-renamed',
+        skills: [{
+          ...skill,
+          directory: '',
+          directoryPath: rootPath,
+          content: skill.content,
+        }],
       },
     },
   };

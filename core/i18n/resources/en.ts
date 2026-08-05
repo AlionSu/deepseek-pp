@@ -112,6 +112,15 @@ export const en = {
         disableSkill: 'Disable {name}',
         editSkill: 'Edit {name}',
         deleteSkill: 'Delete {name}',
+        updateSkill: 'Update local Skill (re-read index)',
+      },
+      autoActivation: {
+        title: 'Auto-activation',
+        description: 'When on, DeepSeek++ matches and activates local Skills automatically from the conversation. When off, a Skill activates only when you explicitly call /skill-name.',
+        firstMessage: 'Auto-activate on first message of new chat',
+        firstMessageDescription: 'Only match and activate a local Skill on the first message of a new chat.',
+        everyMessage: 'Auto-activate on every message of current chat',
+        everyMessageDescription: 'Match and activate on every message of the current chat; enabling this also enables “first message”.',
       },
       form: {
         namePlaceholder: 'Name, e.g. my-skill',
@@ -340,6 +349,7 @@ export const en = {
       updatesFound: 'Upstream updates found',
       backendUnavailable: 'Skill storage is unavailable. Reload the extension and try again.',
       operationFailed: 'Skill operation failed: {error}',
+      relocatePrompt: 'The original folder was moved or no longer exists. Please reselect the local Skill folder.',
     },
     settings: {
       title: 'Settings',
@@ -1338,6 +1348,8 @@ export const en = {
     responseLanguageChinese: 'Simplified Chinese',
     responseLanguageEnglish: 'English',
     skillUserInputWrapper: '{instructions}\n\n---\n\nThe following is the user input for this turn. Follow the instructions above when handling it:\n\n{userInput}',
+    localSkillSystemContextHeader: '## Local Skill Activated',
+    localSkillActivationDirective: 'Local Skill "{skillName}" has been auto-activated. Before taking any action, you MUST complete the following prerequisite steps; otherwise you are forbidden from starting the task: use the `local_file_read` tool to read the entire contents of {skillMdPath}; understand its SOP, tool boundaries, and constraints section by section. Only after reading and understanding that file may you strictly follow its instructions to execute the user\'s request; before that, do not call any business tool and do not begin work directly.',
     inlineAgent: {
       continuationIntro: 'These are the tool results just executed for the tool-continuation task. Continue like a real agent, using the original task and these tool results to move the work forward.',
       continuationEnough: 'If the results are enough, output the final answer. Only call more tools when more information, verification, or file changes are truly needed.',

@@ -260,6 +260,11 @@ export async function getGitHubSkillSourceById(sourceId: string): Promise<GitHub
   return source?.provider === 'github' ? source : null;
 }
 
+export async function getLocalSkillSourceById(sourceId: string): Promise<LocalSkillSource | null> {
+  const source = await getSkillSourceById(sourceId);
+  return source?.provider === 'local' ? (source as LocalSkillSource) : null;
+}
+
 export async function updateGitHubSkillSourceLastCheckedAt(
   sourceId: string,
   lastCheckedAt: number,

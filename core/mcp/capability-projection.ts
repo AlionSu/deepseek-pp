@@ -180,7 +180,7 @@ function assertCompleteCapabilityHelperSet(helpers: readonly ToolDescriptor[]): 
   throw new Error(`MCP capability catalog is incomplete: missing ${missing.join(', ')}.`);
 }
 
-function normalizeSearchText(value: string): string {
+export function normalizeSearchText(value: string): string {
   return value.normalize('NFKC').toLowerCase().trim();
 }
 
@@ -190,7 +190,7 @@ function compareLexical(left: string, right: string): number {
   return 0;
 }
 
-function tokenize(value: string): string[] {
+export function tokenize(value: string): string[] {
   const matches = value.match(/[\p{L}\p{N}_-]+/gu) ?? [];
   return [...new Set(matches.filter((term) => term.length >= 2))];
 }

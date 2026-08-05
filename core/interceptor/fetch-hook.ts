@@ -136,6 +136,10 @@ export interface RequestContext {
   promptOptions: ResponseCompletePayload['promptOptions'];
   suppressPageEvents: boolean;
   toolDescriptors: ToolDescriptor[];
+  // The active local skill's skillDir for the current request (isolated by requestId);
+  // computed at augment time and passed via RequestBodyModification, pinning cwd during response parsing.
+  // Request-scoped data; never use global mutable state (Review #1 concurrency isolation requirement).
+  activeLocalSkillDir?: string;
 }
 
 interface RequestContextOverrides {
@@ -150,6 +154,9 @@ export interface RequestBodyModification {
   agentTaskPrompt: string;
   requestId?: string;
   toolDescriptors?: ToolDescriptor[];
+  // The current request's active local skill skillDir computed at augment time;
+  // travels with the request into RequestContext for cwd pinning during response-stream parsing (request-scoped isolation).
+  activeLocalSkillDir?: string;
 }
 
 export function hookFetch(): () => void {
@@ -207,6 +214,9 @@ export function hookFetch(): () => void {
       originalPrompt: originalContext.originalPrompt,
       agentTaskPrompt: modified?.agentTaskPrompt ?? originalContext.agentTaskPrompt,
       toolDescriptors: modified?.toolDescriptors ?? fallbackToolDescriptors,
+      ...(modified?.activeLocalSkillDir !== undefined
+        ? { activeLocalSkillDir: modified.activeLocalSkillDir }
+        : {}),
     });
     const requestInit = modified ? { ...init, body: modified.body } : init;
     return interceptFetchResponse(originalFetch.call(this, input, requestInit), requestContext);
@@ -426,7 +436,7 @@ function stripBypassHookHeader(headers: HeadersInit | undefined): HeadersInit | 
 function createStreamingResponseToolState(
   descriptors: readonly ToolDescriptor[],
   getSource: () => ToolCallSource,
-  options: { suppressEvents?: boolean } = {},
+  options: { suppressEvents?: boolean; activeLocalSkillDir?: string } = {},
 ) {
   // Internal inline-agent continuation requests suppress all page-facing
   // events, so the streaming tool parsers' output is never consumed (the
@@ -441,7 +451,7 @@ function createStreamingResponseToolState(
   }
 
   const toolText = createStreamingToolTextAccumulator(descriptors);
-  const toolCalls = createStreamingToolCallParser(descriptors);
+  const toolCalls = createStreamingToolCallParser(descriptors, { activeLocalSkillDir: options.activeLocalSkillDir });
   const notifiedToolSignatures = new Set<string>();
   let fallbackText = '';
   let fallbackTextTruncated = false;
@@ -1070,7 +1080,10 @@ function createPassiveDeepSeekStreamState(requestContext: RequestContext): Passi
   const responseToolState = createStreamingResponseToolState(
     requestContext.toolDescriptors,
     () => createManualChatToolCallSource(requestContext, summary.responseMessageId),
-    { suppressEvents: requestContext.suppressPageEvents },
+    {
+      suppressEvents: requestContext.suppressPageEvents,
+      activeLocalSkillDir: requestContext.activeLocalSkillDir,
+    },
   );
   const speedTracker = createResponseTokenSpeedTracker(
     (progress) => {

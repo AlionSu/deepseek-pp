@@ -16,6 +16,7 @@ import type {
   ProjectConversationInput,
 } from './project/types';
 import type { PromptInjectionSettings as PromptInjectionSettingsType } from './prompt/settings';
+import type { SkillAutoActivationSettings } from './skill/auto-activation-settings';
 import type { SandboxRunRequest as SandboxRunRequestType } from './sandbox/types';
 import type {
   SavedItemInput,
@@ -558,6 +559,8 @@ export type MessageAction =
   | { type: 'PREVIEW_LOCAL_SKILL_SOURCE'; payload: { rootPath: string } }
   | { type: 'PICK_LOCAL_SKILL_FOLDER'; payload?: { defaultPath?: string } }
   | { type: 'IMPORT_LOCAL_SKILL_SOURCE'; payload: LocalSkillImportRequest }
+  | { type: 'UPDATE_LOCAL_SKILL_SOURCE'; payload: { sourceId: string } }
+  | { type: 'RELOCATE_LOCAL_SKILL_SOURCE'; payload: { sourceId: string; newRootPath: string } }
   | { type: 'CHECK_GITHUB_SKILL_SOURCE_UPDATES'; payload: { sourceId: string } }
   | { type: 'UPDATE_GITHUB_SKILL_SOURCE'; payload: { sourceId: string } }
   | { type: 'DELETE_GITHUB_SKILL_SOURCE'; payload: { sourceId: string } }
@@ -576,6 +579,8 @@ export type MessageAction =
   | { type: 'GET_ACTIVE_PRESET' }
   | { type: 'GET_PROMPT_INJECTION_SETTINGS' }
   | { type: 'SAVE_PROMPT_INJECTION_SETTINGS'; payload: Partial<PromptInjectionSettingsType> }
+  | { type: 'GET_SKILL_AUTO_ACTIVATION_SETTINGS' }
+  | { type: 'SAVE_SKILL_AUTO_ACTIVATION_SETTINGS'; payload: Partial<SkillAutoActivationSettings> }
   | { type: 'GET_SAVED_ITEMS' }
   | { type: 'SAVE_SAVED_ITEM'; payload: SavedItemInput }
   | { type: 'DELETE_SAVED_ITEM'; payload: { id: string } }
@@ -615,6 +620,8 @@ export type MessageAction =
       runId?: string;
       descriptorIds?: string[];
       toolIntent?: string;
+      /** Background-validated local-skill directory; page/model untrusted, written to grant by background after validation (Review #2) */
+      localSkillDir?: string;
     };
   }
   | { type: 'CLOSE_TOOL_AUTHORIZATION'; payload: { authorizationId: string } }

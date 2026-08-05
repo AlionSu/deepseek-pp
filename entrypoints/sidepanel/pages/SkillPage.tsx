@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LocaleMessageKey, MessageParams, SupportedLocale } from '../../../core/i18n';
 import type { GitHubSkillSource, GitHubSkillUpdatePreview, Skill, SkillImportSource } from '../../../core/types';
+import { DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS, normalizeSkillAutoActivationSettings, type SkillAutoActivationSettings } from '../../../core/skill/auto-activation-settings';
 import { decodeSkillLibrary, decodeSkillSourceCollection } from '../../../core/skill/codec';
 import GitHubSkillImportPanel from '../components/GitHubSkillImportPanel';
 import LocalSkillImportPanel from '../components/LocalSkillImportPanel';
 import PageIntro from '../components/PageIntro';
 import SkillCard from '../components/SkillCard';
 import SkillForm from '../components/SkillForm';
-import { SkeletonList, useBanner, useConfirm } from '../components/settings/primitives';
+import { SkeletonList, ToggleRow, useBanner, useConfirm } from '../components/settings/primitives';
 import { requestGitHubApiPermission } from '../github-permission';
 import { useI18n } from '../i18n';
 import { createRequestGenerationFence } from '../async-state';
@@ -70,6 +71,7 @@ export default function SkillPage() {
   const [expandedThirdPartyGroups, setExpandedThirdPartyGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [autoActivation, setAutoActivation] = useState<SkillAutoActivationSettings>(DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS);
   const loadFence = useRef(createRequestGenerationFence());
   const banner = useBanner();
   const { confirm, node: confirmNode } = useConfirm();
@@ -116,6 +118,39 @@ export default function SkillPage() {
     void load();
     return () => loadFence.current.invalidate();
   }, [locale]);
+
+  useEffect(() => {
+    let cancelled = false;
+    sidepanelRuntimeClient.request(
+      { type: 'GET_SKILL_AUTO_ACTIVATION_SETTINGS' },
+      {
+        unavailableMessage: t('sidepanel.skillPage.backendUnavailable'),
+        decode: (value) => normalizeSkillAutoActivationSettings(value),
+      },
+    )
+      .then((loaded) => { if (!cancelled) setAutoActivation(loaded); })
+      .catch(() => { if (!cancelled) setAutoActivation(DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS); });
+    return () => { cancelled = true; };
+  }, [t]);
+
+  const handleSaveAutoActivation = async (patch: Partial<SkillAutoActivationSettings>) => {
+    const previous = autoActivation;
+    const next = normalizeSkillAutoActivationSettings({ ...previous, ...patch });
+    setAutoActivation(next);
+    try {
+      const saved = await sidepanelRuntimeClient.request(
+        { type: 'SAVE_SKILL_AUTO_ACTIVATION_SETTINGS', payload: next },
+        {
+          unavailableMessage: t('sidepanel.skillPage.backendUnavailable'),
+          decode: (value) => normalizeSkillAutoActivationSettings(value),
+        },
+      );
+      setAutoActivation(saved);
+    } catch (error) {
+      setAutoActivation(previous);
+      showOperationError(error);
+    }
+  };
 
   const closeForm = () => {
     setShowForm(false);
@@ -277,6 +312,94 @@ export default function SkillPage() {
     }
   };
 
+  const pickNewLocalFolder = async (defaultPath: string): Promise<string | null> => {
+    try {
+      const response = await sidepanelRuntimeClient.request({
+        type: 'PICK_LOCAL_SKILL_FOLDER',
+        payload: defaultPath ? { defaultPath } : {},
+      }, { unavailableMessage: t('sidepanel.skillPage.backendUnavailable') });
+      const pickedPath = typeof response?.path === 'string' ? response.path.trim() : '';
+      return pickedPath || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleUpdateLocalSkill = async (skill: Skill) => {
+    const sourceId = skill.remote?.sourceId;
+    if (!sourceId) return;
+    const defaultPath = skill.remote?.localDirectory ?? skill.remote?.localRootPath ?? '';
+    // Immediately enter the loading state: disable the local skill's "Update" button and show a spinner, removing the "unresponsive" feel.
+    setSourceActions((current) => ({
+      ...current,
+      [sourceId]: { status: 'updating', message: t('sidepanel.skillPage.syncing') },
+    }));
+    try {
+      const response = await sidepanelRuntimeClient.request({
+        type: 'UPDATE_LOCAL_SKILL_SOURCE',
+        payload: { sourceId },
+      }, {
+        unavailableMessage: t('sidepanel.skillPage.backendUnavailable'),
+        // Key point: when the folder is moved/invalid, updateLocalSkillSource returns {ok:false, error} (not a thrown exception).
+        // Omitting acceptFailure would make runtime-client treat ok:false as a fault and throw, skipping the
+        // !response.ok relocation branch below and the re-pick dialog. Passing true lets the response return normally into relocation.
+        acceptFailure: true,
+      });
+      if (response && !response.ok) {
+        // Original folder moved/invalid: guide the user to re-pick a new path and relocate (keep source.id, link unbroken).
+        const newRootPath = await pickNewLocalFolder(defaultPath);
+        if (!newRootPath) {
+          // User cancelled re-pick: clear the loading state and give a gentle hint.
+          setSourceActions((current) => {
+            const next = { ...current };
+            delete next[sourceId];
+            return next;
+          });
+          showOperationError(new Error(t('sidepanel.skillPage.relocatePrompt')));
+          return;
+        }
+        const relocateResponse = await sidepanelRuntimeClient.request({
+          type: 'RELOCATE_LOCAL_SKILL_SOURCE',
+          payload: { sourceId, newRootPath },
+        }, {
+          acceptFailure: true,
+          unavailableMessage: t('sidepanel.skillPage.backendUnavailable'),
+        });
+        if (relocateResponse && !relocateResponse.ok) {
+          // Relocation failed: clear loading state, then surface the specific error via the top banner (consistent with prior behavior).
+          setSourceActions((current) => {
+            const next = { ...current };
+            delete next[sourceId];
+            return next;
+          });
+          showOperationError(new Error(relocateResponse.error));
+          return;
+        }
+        setSourceActions((current) => {
+          const next = { ...current };
+          delete next[sourceId];
+          return next;
+        });
+        await load();
+        return;
+      }
+      setSourceActions((current) => {
+        const next = { ...current };
+        delete next[sourceId];
+        return next;
+      });
+      await load();
+    } catch (error) {
+      // Top-level exception (transport/unavailable, etc.): clear loading state, then surface via the top banner (consistent with prior behavior).
+      setSourceActions((current) => {
+        const next = { ...current };
+        delete next[sourceId];
+        return next;
+      });
+      showOperationError(error);
+    }
+  };
+
   const handleDeleteSource = async (source: GitHubSkillSource) => {
     const message = t('sidepanel.skillPage.deleteSourceConfirm', {
       repository: source.repository,
@@ -359,6 +482,29 @@ export default function SkillPage() {
         )}
       />
 
+      <div className="ds-surface-panel rounded-xl p-4 space-y-3">
+        <div>
+          <h2 className="text-[13px] font-medium" style={{ color: 'var(--ds-text)' }}>
+            {t('sidepanel.skill.autoActivation.title')}
+          </h2>
+          <p className="text-[11px] mt-0.5" style={{ color: 'var(--ds-text-tertiary)' }}>
+            {t('sidepanel.skill.autoActivation.description')}
+          </p>
+        </div>
+        <ToggleRow
+          title={t('sidepanel.skill.autoActivation.firstMessage')}
+          description={t('sidepanel.skill.autoActivation.firstMessageDescription')}
+          enabled={autoActivation.firstMessage}
+          onToggle={(enabled) => handleSaveAutoActivation({ firstMessage: enabled })}
+        />
+        <ToggleRow
+          title={t('sidepanel.skill.autoActivation.everyMessage')}
+          description={t('sidepanel.skill.autoActivation.everyMessageDescription')}
+          enabled={autoActivation.everyMessage}
+          onToggle={(enabled) => handleSaveAutoActivation({ everyMessage: enabled })}
+        />
+      </div>
+
       {confirmNode}
       {banner.node}
 
@@ -402,6 +548,8 @@ export default function SkillPage() {
         onToggleGroupEnabled={handleToggleGroupEnabled}
         onDelete={handleDelete}
         onToggleEnabled={handleToggleEnabled}
+        onUpdateLocal={handleUpdateLocalSkill}
+        sourceActions={sourceActions}
       />
       <SkillSection
         title={t('sidepanel.skillPage.sectionCustom')}
@@ -429,13 +577,15 @@ export default function SkillPage() {
   );
 }
 
-function ThirdPartySkillSection({ groups, expandedGroups, onToggleGroup, onToggleGroupEnabled, onDelete, onToggleEnabled }: {
+function ThirdPartySkillSection({ groups, expandedGroups, onToggleGroup, onToggleGroupEnabled, onDelete, onToggleEnabled, onUpdateLocal, sourceActions }: {
   groups: ThirdPartySkillGroup[];
   expandedGroups: Record<string, boolean>;
   onToggleGroup: (groupId: string) => void;
   onToggleGroupEnabled: (group: ThirdPartySkillGroup) => void;
   onDelete: (name: string) => void;
   onToggleEnabled: (skill: Skill) => void;
+  onUpdateLocal?: (skill: Skill) => void;
+  sourceActions: Record<string, SourceActionState>;
 }) {
   const { t } = useI18n();
   if (groups.length === 0) return null;
@@ -525,14 +675,20 @@ function ThirdPartySkillSection({ groups, expandedGroups, onToggleGroup, onToggl
                 className="space-y-2 p-3 pt-2 animate-slide-down"
                 style={{ borderTop: '1px solid var(--ds-border)' }}
               >
-                {group.skills.map((skill, index) => (
+                {group.skills.map((skill, index) => {
+                  const localAction = skill.remote?.sourceId ? sourceActions[skill.remote.sourceId] : undefined;
+                  const localBusy = localAction?.status === 'updating' || localAction?.status === 'checking';
+                  return (
                   <SkillCard
                     key={`${group.id}:${skill.name}:${index}`}
                     skill={skill}
                     onDelete={skill.source === 'remote' ? () => onDelete(skill.name) : undefined}
                     onToggleEnabled={() => onToggleEnabled(skill)}
+                    onUpdate={skill.remote?.provider === 'local' && onUpdateLocal ? () => onUpdateLocal(skill) : undefined}
+                    busy={localBusy}
                   />
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

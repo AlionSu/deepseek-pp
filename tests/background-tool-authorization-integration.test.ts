@@ -114,6 +114,8 @@ describe('R4.2 real tool authorization handler composition', () => {
       clearExternalizedToolPayloadNamespace,
       executeToolCall: runtime.executeToolCall,
       runSandbox: vi.fn(async () => ({ ok: true, summary: 'sandbox done' })),
+      // 评审 #2：mock 的本地目录校验——默认信任（本用例不针对 #2 校验逻辑）。
+      validateLocalSkillDirectory: vi.fn(async () => true),
       getToolCallHistory,
       clearToolCallHistory,
       getPlatformEnvironment: () => ({

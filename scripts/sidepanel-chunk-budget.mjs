@@ -13,7 +13,10 @@ if (requestedBrowsers.some((browser) => !browser)) {
   throw new Error('Usage: sidepanel-chunk-budget.mjs [--browser chrome|edge|firefox]');
 }
 
-// R6.4 pre-change Chrome baseline, captured from commit 87746a9 with WXT 0.20.26.
+// R6.4 Chrome baseline, re-captured after c6e00d3 (local-skill management feature)
+// with WXT 0.20.26, then re-baselined for that feature's activation / path-rewrite /
+// scoring / cwd-enforcement code, and again for the SkillPage / SkillCard
+// update-button loading + busy + acceptFailure feedback added on this PR.
 // Refreshed for the agent-harness PR (#490, head 0c0e7c8): main @ 60678ef
 // measured 365345 raw / 110321 gzip under Node 22 (3 bytes below the old
 // budget); the PR adds four content.agent i18n keys (zh/en) for the
@@ -29,9 +32,14 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // keys (#497-#499) add to the initial shell. Local Node-25 measurement:
 // 372032 raw / 111777 gzip (+2334 / +367 over the previous baseline); the
 // encoder variance allowance covers CI Node-22 gzip drift.
+// This PR ALSO adds the local-skill management surface (SkillPage / SkillCard /
+// activation / path-rewrite / scoring / cwd-enforcement); the combined footprint
+// was re-measured after merging main (#504): post-merge Node-25 measurement
+// 375456 raw / 112742 gzip; the initialShell below is set to the actual
+// post-merge build measurement so the budget guardrail stays meaningful.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 372_032, gzip: 111_777 },
+  initialShell: { raw: 375_456, gzip: 112_742 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -70,7 +78,7 @@ const BUDGET = Object.freeze({
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 402_500, gzip: 122_000 },
+  firstChatScreen: { raw: 405_800, gzip: 123_100 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },

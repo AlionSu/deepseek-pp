@@ -33,6 +33,8 @@ export interface SkillRuntimeHandlerDependencies {
   previewLocalSkillSource(rootPath: string): Promise<LocalSkillPreview>;
   pickLocalSkillFolder(defaultPath?: string): Promise<string>;
   importLocalSkillSource(request: LocalSkillImportRequest): Promise<LocalSkillImportResponse>;
+  updateLocalSkillSource(sourceId: string): Promise<LocalSkillImportResponse>;
+  relocateLocalSkillSource(sourceId: string, newRootPath: string): Promise<LocalSkillImportResponse>;
   checkGitHubSkillSourceUpdates(sourceId: string): Promise<GitHubSkillUpdatePreview>;
   updateGitHubSkillSource(sourceId: string): Promise<GitHubSkillImportResult>;
   deleteGitHubSkillSource(sourceId: string): Promise<void>;
@@ -92,6 +94,18 @@ export function createSkillRuntimeHandlers(
     })),
     definePersistencePayloadRuntimeCommandHandler('IMPORT_LOCAL_SKILL_SOURCE', async (request, context) => {
       const result = await dependencies.importLocalSkillSource(request);
+      if (!result.ok) return result;
+      await dependencies.broadcastStateUpdate(context.tabId);
+      return result;
+    }),
+    definePersistencePayloadRuntimeCommandHandler('UPDATE_LOCAL_SKILL_SOURCE', async (payload, context) => {
+      const result = await dependencies.updateLocalSkillSource(payload.sourceId);
+      if (!result.ok) return result;
+      await dependencies.broadcastStateUpdate(context.tabId);
+      return result;
+    }),
+    definePersistencePayloadRuntimeCommandHandler('RELOCATE_LOCAL_SKILL_SOURCE', async (payload, context) => {
+      const result = await dependencies.relocateLocalSkillSource(payload.sourceId, payload.newRootPath);
       if (!result.ok) return result;
       await dependencies.broadcastStateUpdate(context.tabId);
       return result;

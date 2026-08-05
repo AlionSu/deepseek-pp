@@ -98,7 +98,7 @@ export function createToolCallFromInvocation(
   payload: ToolPayload,
   raw: string,
   catalog: ToolInvocationCatalog,
-  options?: { parseError?: ToolError; id?: string },
+  options?: { parseError?: ToolError; id?: string; localSkillDir?: string },
 ): ToolCall {
   const descriptor =
     catalog.descriptorByInvocationName.get(invocationName) ||
@@ -114,6 +114,12 @@ export function createToolCallFromInvocation(
     parseError: options?.parseError,
   };
   if (options?.id) call.id = options.id;
+  // localSkillDir is only a trusted internal injection point for the "request-
+  // level cwd hint": its source is the parser's activeLocalSkillDir (upstream
+  // requestContext.activeLocalSkillDir, injected by content.ts's augment result
+  // via fetch-hook, NOT the page/model message body). The untrusted page field
+  // is stripped at runtime.ts:resolveToolCallPayload (Review #2).
+  if (options?.localSkillDir) call.localSkillDir = options.localSkillDir;
   return call;
 }
 

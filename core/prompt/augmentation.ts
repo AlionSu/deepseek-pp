@@ -17,6 +17,10 @@ export interface PromptAugmentationOptions {
   thinkingEnabled?: boolean;
   identityOnly?: boolean;
   visibleUserPrompt?: string;
+  // System context for local indexed skills ("activation instruction + index"): injected into the
+  // system-instruction region (like the ## Tools section), fixing the issue where implicit matches were
+  // treated as visible user input (passive chit-chat) and ignored the disk-read instruction (Bug ②).
+  skillSystemContext?: string | null;
   presetContent?: string | null;
   projectContext?: string | null;
   toolDescriptors?: readonly ToolDescriptor[];
@@ -40,6 +44,7 @@ export function buildPromptAugmentation(
     memories = [],
     thinkingEnabled = false,
     identityOnly = false,
+    skillSystemContext = null,
     presetContent = null,
     projectContext = null,
     locale = DEFAULT_LOCALE,
@@ -73,6 +78,7 @@ export function buildPromptAugmentation(
     : '';
   const system = [
     baseSystem,
+    skillSystemContext ? renderSkillSystemContext(skillSystemContext, locale) : '',
     standaloneMemories,
     renderProjectContext(projectContext),
     systemPromptEnabled ? renderWebSearchGuidance(toolDescriptors, locale) : '',
@@ -103,6 +109,11 @@ function renderForcedResponseLanguage(
     ? translate(locale, 'prompt.responseLanguageEnglish')
     : translate(locale, 'prompt.responseLanguageChinese');
   return translate(locale, 'prompt.forceResponseLanguage', { language });
+}
+
+function renderSkillSystemContext(context: string, locale: SupportedLocale): string {
+  const header = translate(locale, 'prompt.localSkillSystemContextHeader');
+  return `${header}\n\n${context}`;
 }
 
 export function renderToolSchemas(

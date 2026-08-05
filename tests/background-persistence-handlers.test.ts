@@ -147,10 +147,10 @@ describe('R4.1 persistence runtime handler ownership', () => {
       localPreference: createLocalPreferenceDependencies(),
     });
     const types = handlers.map((handler) => handler.type);
-    const expected = readInventoryCommands('R4.1 / #360 — Persistence, library, and local preferences (57)');
+    const expected = readInventoryCommands('R4.1 / #360 — Persistence, library, and local preferences (61)');
 
-    expect(types).toHaveLength(57);
-    expect(new Set(types).size).toBe(57);
+    expect(types).toHaveLength(61);
+    expect(new Set(types).size).toBe(61);
     expect([...types].sort()).toEqual([...expected].sort());
     for (const type of types) expect(getRuntimeCommandOwner(type)).toBe('typed-handler');
     const decodedTypes = Object.entries(RUNTIME_COMMAND_CONTRACTS)
@@ -482,6 +482,8 @@ function createSkillDependencies(): SkillRuntimeHandlerDependencies {
     previewLocalSkillSource: vi.fn(async () => localPreview),
     pickLocalSkillFolder: vi.fn(async () => '/picked'),
     importLocalSkillSource: vi.fn(async () => localImport),
+    updateLocalSkillSource: vi.fn(async () => localImport),
+    relocateLocalSkillSource: vi.fn(async () => localImport),
     checkGitHubSkillSourceUpdates: vi.fn(async () => updatePreview),
     updateGitHubSkillSource: vi.fn(async () => githubImport),
     deleteGitHubSkillSource: vi.fn(async () => undefined),
@@ -508,6 +510,8 @@ function createLibraryDependencies(): LibraryRuntimeHandlerDependencies {
       presetCadence: settings.presetCadence ?? ('default' as const),
       forceResponseLanguage: settings.forceResponseLanguage ?? ('auto' as const),
     })),
+    getSkillAutoActivationSettings: vi.fn(async () => ({ firstMessage: true, everyMessage: false })),
+    saveSkillAutoActivationSettings: vi.fn(async () => ({ firstMessage: true, everyMessage: false })),
     getAllSavedItems: vi.fn(async () => [savedItem]),
     saveSavedItem: vi.fn(async () => savedItem),
     deleteSavedItem: vi.fn(async () => undefined),

@@ -22,6 +22,7 @@ import {
   stageUpsertLocalSkillSourceAlreadyLocked,
   type SkillCollisionCandidate,
 } from './registry';
+import { extractScenarioBlock } from './local-skill-scorer';
 
 const MAX_SKILL_BYTES = 120_000;
 const ON_DEMAND_RESOURCE_READER_NAMES = new Set(['local_file_read', 'shell_exec']);
@@ -197,6 +198,127 @@ export async function importLocalSkillSource(
   };
 }
 
+// Update a local skill source: re-scan the same rootPath and store in place.
+// The source id is derived from rootPath and stays stable across re-imports, so
+// this refreshes the index layer (name/description) and keeps the skillDir pointer.
+// Drives the UI "Update" button (definition file changed -> re-read index; whole
+// folder moved -> when the path is invalid, the UI guides re-selection).
+export async function updateLocalSkillSource(
+  sourceId: string,
+  deps: LocalSkillImportDeps,
+): Promise<LocalSkillImportResponse> {
+  if (!sourceId) throw new Error('Local Skill source id must be a non-empty string.');
+  const sources = await getAllSkillSources();
+  const source = sources.find((candidate) => candidate.id === sourceId);
+  if (!source || source.provider !== 'local') {
+    throw new Error('Local Skill source was not found');
+  }
+  const localSource = source as LocalSkillSource;
+  // When the original folder is moved/invalid, importLocalSkillSource throws
+  // (e.g. "SKILL.md not found"). Convert it to { ok: false } so the UI's UPDATE
+  // response enters the !response.ok branch, guiding re-selection and triggering
+  // T8 relocation, instead of letting runtime-client reject and blocking relocation.
+  try {
+    return await importLocalSkillSource(
+      { rootPath: localSource.rootPath, selectedPaths: localSource.skillPaths },
+      deps,
+    );
+  } catch (error) {
+    // Preserve the original block code for LocalSkillImportBlockedError (matching
+    // relocateLocalSkillSource); other failures fall back to shell_discovery_failed so
+    // the UI's UPDATE branch still enters !response.ok and guides re-selection (T8).
+    const importBlock: LocalSkillImportBlock =
+      error instanceof LocalSkillImportBlockedError ? error.importBlock : { code: 'shell_discovery_failed' };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      importBlock,
+    };
+  }
+}
+
+// Relocate a local skill source: after the original folder is moved/renamed,
+// re-import from the user's newly selected path.
+// Key: update the existing source record in place, keeping the original source.id
+// (stable linkage) to avoid breaking activation references, disabled states, and user settings.
+// Do NOT call importLocalSkillSource (which would generate a new id from the new rootPath, invalidating old references).
+// Path-validation / missing-source errors reuse existing messages (:160 / :211).
+export async function relocateLocalSkillSource(
+  sourceId: string,
+  newRootPath: string,
+  deps: LocalSkillImportDeps,
+): Promise<LocalSkillImportResponse> {
+  if (!sourceId) throw new Error('Local Skill source id must be a non-empty string.');
+  if (!newRootPath?.trim()) throw new Error('New root path must be a non-empty string.');
+  const sources = await getAllSkillSources();
+  const source = sources.find((candidate) => candidate.id === sourceId);
+  if (!source || source.provider !== 'local') {
+    throw new Error('Local Skill source was not found');
+  }
+  const localSource = source as LocalSkillSource;
+
+  let loaded: LoadedLocalSource;
+  try {
+    loaded = await loadLocalSkillSource(newRootPath.trim(), new Set(localSource.skillPaths), undefined, deps);
+  } catch (error) {
+    if (error instanceof LocalSkillImportBlockedError) {
+      return { ok: false, error: error.message, importBlock: error.importBlock };
+    }
+    throw error;
+  }
+  const selected = loaded.skills.filter((skill) => localSource.skillPaths.includes(skill.item.path));
+  const importedPaths = new Set(selected.map((skill) => skill.item.path));
+  const missingPaths = localSource.skillPaths.filter((path) => !importedPaths.has(path));
+  if (missingPaths.length > 0) {
+    throw new Error(`Selected local Skill paths were not found: ${missingPaths.join(', ')}`);
+  }
+  if (selected.length === 0) {
+    throw new Error('Selected local Skill paths were not found.');
+  }
+
+  const now = Date.now();
+  // Use the old source as the base, keeping id/provider/importedAt, overwriting fields from the new-path load result.
+  const updated: LocalSkillSource = {
+    ...localSource,
+    rootPath: loaded.preview.source.rootPath,
+    displayName: loaded.preview.source.displayName,
+    directoryName: loaded.preview.source.directoryName,
+    warnings: loaded.preview.source.warnings,
+    skillPaths: selected.map((skill) => skill.item.path),
+    importedSkillNames: selected.map((skill) => skill.skill.name),
+    updatedAt: now,
+    lastCheckedAt: now,
+  };
+  const incomingSkills = selected.map((loadedSkill) => ({
+    ...loadedSkill.skill,
+    remote: loadedSkill.skill.remote ? {
+      ...loadedSkill.skill.remote,
+      // Relocation updates in place and keeps the original source.id (see the updated construction).
+      // The new-path load yields a fresh remote.sourceId that must be aligned with the retained old id,
+      // otherwise the "remote must match source" assertion (registry.ts:315) rejects the write.
+      sourceId: updated.id,
+      importedAt: loadedSkill.skill.remote.importedAt || now,
+      updatedAt: now,
+      lastCheckedAt: now,
+    } : undefined,
+  }));
+  const result = await deps.runLocalStateMutation(() => (
+    stageUpsertLocalSkillSourceAlreadyLocked(updated, incomingSkills)
+  ));
+
+  return {
+    ok: true,
+    source: {
+      ...updated,
+      importedSkillNames: result.imported.map((skill) => skill.name),
+    },
+    imported: result.imported,
+    replaced: result.replaced,
+    renamed: result.renamed,
+    warnings: loaded.preview.warnings,
+  };
+}
+
 async function loadLocalSkillSource(
   rootPath: string,
   selectedPaths?: Set<string>,
@@ -278,6 +400,18 @@ function loadLocalSkill(
     omittedFiles: hostSkill.omittedFiles,
     scriptFiles: hostSkill.scriptFiles,
   });
+  // Bring the SKILL.md applicable / not-applicable scenario text into the index card
+  // (instructions) so the implicit scorer's scenarioAdjustment can match it.
+  // Otherwise a local Skill's description holds only the frontmatter one-liner, scenarioAdjustment
+  // can never extract scenario text, and Chinese queries almost never activate the local Skill
+  // (breaking the intended "activate on match" design).
+  const applicable = extractScenarioBlock(hostSkill.content, '适用场景', '适用场景|适用|使用场景');
+  const notApplicable = extractScenarioBlock(hostSkill.content, '不适用场景', '不适用场景|不适用|禁用场景');
+  const scenarioSection = [
+    applicable && `适用场景：\n${applicable}`,
+    notApplicable && `不适用场景：\n${notApplicable}`,
+  ].filter(Boolean).join('\n\n');
+  const finalInstructions = scenarioSection ? `${instructions}\n\n---\n\n${scenarioSection}` : instructions;
   const remote = {
     provider: 'local' as const,
     sourceId: source.id,
@@ -299,7 +433,7 @@ function loadLocalSkill(
   const skill: Skill = {
     name: importName,
     description: parsed.description,
-    instructions,
+    instructions: finalInstructions,
     source: 'remote',
     memoryEnabled: false,
     enabled: existingRemoteSkill?.enabled ?? true,
@@ -567,6 +701,14 @@ function parseFile(value: unknown): RemoteSkillFile {
   };
 }
 
+// Index-form marker: used at runtime to distinguish "index-imported" (Plan 2) instructions
+// from "legacy frozen snapshot" instructions. See isLocalIndexSkill in request-augmentation.ts (T10 migration compat).
+export const LOCAL_INDEX_MARKER = 'Index form: true';
+
+export function isLocalIndexInstructions(instructions: string | undefined): boolean {
+  return typeof instructions === 'string' && instructions.includes(LOCAL_INDEX_MARKER);
+}
+
 function buildLocalImportedInstructions(input: {
   source: LocalSkillSource;
   skillPath: string;
@@ -578,6 +720,9 @@ function buildLocalImportedInstructions(input: {
   scriptFiles: RemoteSkillFile[];
 }): string {
   const { source, skillPath, directory, directoryPath, parsed, resources, omittedFiles, scriptFiles } = input;
+  // Plan 2: import only registers an "index" (name/description + skillDir pointer + activation hint + D4 boundary),
+  // no longer inlining the SKILL.md body and full text-resource contents. The real disk read is done by the
+  // Agent at activation via local_file_read (see the local-skill activation branch in request-augmentation.ts).
   const header = [
     `# Local Skill: ${parsed.name}`,
     '',
@@ -586,30 +731,22 @@ function buildLocalImportedInstructions(input: {
     `- Source: ${source.displayName}`,
     `- Root path: ${source.rootPath}`,
     `- Skill path: ${skillPath}`,
-    `- Skill directory: ${directory || '.'}`,
     `- Skill directory path: ${directoryPath}`,
     parsed.version ? `- Upstream version: ${parsed.version}` : '',
     parsed.lastUpdated ? `- Upstream updated: ${parsed.lastUpdated}` : '',
+    `- ${LOCAL_INDEX_MARKER}`,
     `- Bundled supporting files: ${resources.length}`,
     scriptFiles.length > 0 ? `- Local executable/script files: ${scriptFiles.length}` : '',
     omittedFiles.length > 0 ? `- Supporting files available on demand: ${omittedFiles.length}` : '',
+    '',
+    '## Activation Notice',
+    '',
+    'This Skill was imported by reference from a local folder. Its full SKILL.md body and supporting file contents are NOT inlined here.',
+    'When this Skill is activated (explicit `/' + parsed.name + '` or an implicit scoring match), you MUST read the local definition before doing any work:',
+    `- Read the Skill definition file with the local file tool: ${directoryPath}/SKILL.md`,
+    '- Parse and follow it fully before starting the task.',
+    '- Resolve every relative path inside it against the Skill directory path above (double-base rule).',
   ].filter(Boolean).join('\n');
-
-  const executionBoundary = [
-    '## Local Execution Boundary',
-    '',
-    '- This Skill was imported by reference from a local folder. The extension did not execute any local script during import.',
-    '- If the task requires a bundled script, use Shell MCP only when the tool list exposes the needed shell tool. Do not invent command results.',
-    `- Run commands with cwd set to the Skill directory path: ${directoryPath}`,
-    '- Use shell_status first when command syntax or platform-specific quoting matters.',
-    '- Treat paths shown here as local user-machine paths. Do not expose or rewrite them unless the user asks.',
-  ].join('\n');
-
-  const body = [
-    '## Upstream SKILL.md',
-    '',
-    parsed.body.trim(),
-  ].join('\n');
 
   const scripts = scriptFiles.length === 0 ? '' : [
     '## Local Script Files',
@@ -619,27 +756,37 @@ function buildLocalImportedInstructions(input: {
     ...scriptFiles.map((file) => `- ${relativeToSkillDirectory(file.path, directory)} (${file.bytes} bytes)`),
   ].join('\n');
 
-  const resourceDocs = resources.length === 0 ? '' : [
-    '## Bundled Supporting Files',
-    '',
-    'These text files come from the same local Skill directory and supplement agents, references, templates, or examples referenced by the original SKILL.md.',
-    '',
-    ...resources.map((resource) => [
-      `### ${relativeToSkillDirectory(resource.path, directory)}`,
-      '',
-      resource.content.trim(),
-    ].join('\n')),
-  ].join('\n\n');
-
   const omitted = omittedFiles.length === 0 ? '' : [
     '## Supporting Files Available on Demand',
     '',
-    'These files remain in the referenced local Skill directory and were not bundled into the prompt because of count or size limits. Read them with Shell MCP when the upstream instructions need them.',
+    'These files remain in the referenced local Skill directory and were not bundled into the prompt because of count or size limits. Read them with the local file tool when the upstream instructions need them.',
     '',
     ...omittedFiles.map((file) => `- ${relativeToSkillDirectory(file.path, directory)} (${file.bytes} bytes)`),
   ].join('\n');
 
-  return [header, executionBoundary, body, scripts, resourceDocs, omitted].filter(Boolean).join('\n\n---\n\n');
+  const executionBoundary = buildLocalExecutionBoundary(directoryPath);
+
+  return [header, scripts, omitted, executionBoundary].filter(Boolean).join('\n\n---\n\n');
+}
+
+  // D4 dynamic soft hint (fallback layer): generates a "local execution boundary" note from skillDir.
+  // Both import and activation use this function, keeping path-resolution rules / initial cwd hint / escape prohibition consistent.
+  // Note (Review #4 Route A): "cwd set to skillDir" means the initial hint that "session-start cwd is skillDir",
+  // not a hard session-wide persistent binding; real-body relative references rely on the Agent following the "double-base rule" (Review #3 Route A).
+export function buildLocalExecutionBoundary(skillDir: string): string {
+  return [
+    '## Local Execution Boundary',
+    '',
+    '- This Skill was imported by reference from a local folder. The extension did not execute any local script during import.',
+    '- If the task requires a bundled script, use Shell MCP only when the tool list exposes the needed shell tool. Do not invent command results.',
+    `- Run commands with the initial cwd set to the Skill directory path: ${skillDir}`,
+    `- Resolve every relative path inside this Skill against the Skill directory path: ${skillDir}`,
+    '- Use the double-base rule: first try relative to the referencing file, then relative to the Skill directory path.',
+    '- Never use `..` to escape the Skill directory path.',
+    '- Treat paths shown here as local user-machine paths. Do not expose or rewrite them unless the user asks.',
+    `- Before relying on this Skill, verify the definition file exists: run local_file_stat on \`${skillDir}/SKILL.md\`.`,
+    '- If the definition file is missing or moved, stop and tell the user the Skill definition file is unavailable; suggest using the Skill Update action to re-specify the path.',
+  ].join('\n');
 }
 
 function relativeToSkillDirectory(path: string, directory: string): string {

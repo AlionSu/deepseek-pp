@@ -29,6 +29,8 @@ import {
   importLocalSkillSource,
   pickLocalSkillFolder,
   previewLocalSkillSource,
+  relocateLocalSkillSource,
+  updateLocalSkillSource,
 } from '../core/skill/local-importer';
 import {
   getAllPresets,
@@ -116,6 +118,10 @@ import {
   savePromptInjectionSettings,
   shouldInjectPresetForTurn,
 } from '../core/prompt/settings';
+import {
+  getSkillAutoActivationSettings,
+  saveSkillAutoActivationSettings,
+} from '../core/skill/auto-activation-settings';
 import {
   detectVoiceCapabilities,
   getVoiceSettings,
@@ -365,6 +371,8 @@ const persistenceMutations = createPersistenceMutationBindings({
   stageDeleteProjectContextAndMemoriesAlreadyLocked,
   importGitHubSkillSource,
   importLocalSkillSource,
+  updateLocalSkillSource,
+  relocateLocalSkillSource,
   updateGitHubSkillSource,
   executeLocalSkillImporterToolCall,
 });
@@ -434,6 +442,8 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
           { executeToolCall: executeLocalSkillImporterToolCall },
         ),
         importLocalSkillSource: persistenceMutations.importLocalSkillSource,
+        updateLocalSkillSource: persistenceMutations.updateLocalSkillSource,
+        relocateLocalSkillSource: persistenceMutations.relocateLocalSkillSource,
         checkGitHubSkillSourceUpdates,
         updateGitHubSkillSource: persistenceMutations.updateGitHubSkillSource,
         deleteGitHubSkillSource: persistenceMutations.deleteGitHubSkillSource,
@@ -447,6 +457,8 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         getActivePreset,
         getPromptInjectionSettings,
         savePromptInjectionSettings,
+        getSkillAutoActivationSettings,
+        saveSkillAutoActivationSettings,
         getAllSavedItems,
         saveSavedItem,
         deleteSavedItem,
@@ -531,6 +543,27 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         getAuthorizationDescriptors: getRuntimeAuthorizationDescriptors,
         refreshToolDescriptors: refreshRuntimeToolDescriptors,
         createToolAuthorization,
+        // Review #2: validate whether a directory belongs to an imported local
+        // skill (owned and trusted by background).
+        validateLocalSkillDirectory: async (dir: string): Promise<boolean> => {
+          if (!dir) return false;
+          const sources = await getAllSkillSources();
+          // Review #2: treat dir as trusted when it matches an imported local
+          // skill source's root path, OR when it matches the actual install
+          // directory (localDirectory) of any imported local skill. The latter
+          // is required because activeLocalSkillDir is set to the skill's
+          // localDirectory (e.g. rootPath/subSkill) rather than the source
+          // rootPath when a multi-skill folder is imported.
+          if (sources.some(
+            (source) => source.provider === 'local' && source.rootPath === dir,
+          )) {
+            return true;
+          }
+          const skills = await getAllSkills({ includeDisabled: true });
+          return skills.some(
+            (skill) => skill.remote?.provider === 'local' && skill.remote?.localDirectory === dir,
+          );
+        },
         closeToolAuthorization,
         authorizeExternalToolPayloadChunk,
         createToolAuthorizationResult,
@@ -1001,14 +1034,15 @@ async function getDeepSeekTabsForAuthRefresh(preferredTabId?: number): Promise<c
 }
 
 async function broadcastStateUpdate(excludeTabId?: number) {
-  const [memories, skills, activePreset, modelType, promptSettings] = await Promise.all([
+  const [memories, skills, activePreset, modelType, promptSettings, skillAutoActivation] = await Promise.all([
     getAllMemories(),
     getAllSkills({ locale: currentBackgroundLocale }),
     getActivePreset(),
     getModelType(),
     getPromptInjectionSettings(),
+    getSkillAutoActivationSettings(),
   ]);
-  await broadcastToTabs({ type: 'STATE_UPDATED', memories, skills, activePreset, modelType, promptSettings }, excludeTabId);
+  await broadcastToTabs({ type: 'STATE_UPDATED', memories, skills, activePreset, modelType, promptSettings, skillAutoActivation }, excludeTabId);
 }
 
 async function notifyCommittedStateUpdate(excludeTabId?: number): Promise<void> {

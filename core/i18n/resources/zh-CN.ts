@@ -112,6 +112,15 @@ export const zhCN = {
         disableSkill: '停用 {name}',
         editSkill: '编辑 {name}',
         deleteSkill: '删除 {name}',
+        updateSkill: '更新本地 Skill（重读索引）',
+      },
+      autoActivation: {
+        title: '自动激活',
+        description: '开启后，DeepSeek++ 会根据对话内容自动匹配并激活本地 Skill；关闭则只有你显式调用 /技能名 时才能激活。',
+        firstMessage: '新对话首条消息自动激活',
+        firstMessageDescription: '仅在新对话的第一条消息上自动匹配并激活本地 Skill。',
+        everyMessage: '当前对话每条消息自动激活',
+        everyMessageDescription: '对当前对话的每一条消息都自动匹配并激活；开启时联动开启“首条消息”。',
       },
       form: {
         namePlaceholder: '名称（如 my-skill）',
@@ -340,6 +349,7 @@ export const zhCN = {
       updatesFound: '发现上游更新',
       backendUnavailable: 'Skill 存储不可用，请重新加载扩展后再试。',
       operationFailed: 'Skill 操作失败：{error}',
+      relocatePrompt: '原文件夹已挪动或不存在，请重新选择本地 Skill 文件夹。',
     },
     settings: {
       title: '设置',
@@ -1338,6 +1348,8 @@ export const zhCN = {
     responseLanguageChinese: '简体中文',
     responseLanguageEnglish: '英文',
     skillUserInputWrapper: '{instructions}\n\n---\n\n以下是用户本次的输入，请根据上述指令处理：\n\n{userInput}',
+    localSkillSystemContextHeader: '## 本地 Skill 激活（Local Skill Activated）',
+    localSkillActivationDirective: '已自动激活本地 Skill「{skillName}」。在动手前，你**必须**先完成以下前置步骤，否则禁止开始执行任务：使用 `local_file_read` 工具完整读取 {skillMdPath} 的全部内容；逐段理解其 SOP、工具边界与约束。只有在读取并理解该文件之后，你才可以严格遵循其指示执行用户指令；在此之前，不得调用任何业务工具，也不得直接开始工作。',
     inlineAgent: {
       continuationIntro: '以下是工具续跑任务刚刚执行的工具结果。请像真正的 Agent 一样，基于原始任务和这些工具结果继续推进。',
       continuationEnough: '如果结果已经足够，请输出最终结论；只有确实需要更多信息、验证或文件修改时才继续调用工具。',

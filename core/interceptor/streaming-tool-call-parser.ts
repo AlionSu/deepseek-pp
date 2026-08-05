@@ -36,10 +36,18 @@ export interface ToolCallPayloadChunk {
   requestId?: string;
 }
 
+export interface StreamingToolCallParserOptions {
+  // The active local skill's skillDir for the request owning the current response; when non-empty, parsed
+  // shell_exec / shell_session_begin calls carry localSkillDir as the "initial cwd hint" at the background
+  // runtime (not a hard persistent binding; Review #4 Route A).
+  activeLocalSkillDir?: string;
+}
+
 export function createStreamingToolCallParser(
   descriptors: readonly ToolDescriptor[],
+  options?: StreamingToolCallParserOptions,
 ): StreamingToolCallParser {
-  return new XmlStreamingToolCallParser(createToolInvocationCatalog(descriptors));
+  return new XmlStreamingToolCallParser(createToolInvocationCatalog(descriptors), options);
 }
 
 class XmlStreamingToolCallParser implements StreamingToolCallParser {
@@ -59,9 +67,15 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
     failed: boolean;
   } | null = null;
 
-  constructor(private readonly catalog: ToolInvocationCatalog) {
+  constructor(
+    private readonly catalog: ToolInvocationCatalog,
+    options?: StreamingToolCallParserOptions,
+  ) {
     this.invocationNames = new Set(catalog.invocationNames);
+    this.activeLocalSkillDir = options?.activeLocalSkillDir || undefined;
   }
+
+  private readonly activeLocalSkillDir: string | undefined;
 
   append(chunk: string): StreamingToolCallParserEvent {
     const event = createEmptyParserEvent();
@@ -190,7 +204,7 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
         createExternalizedToolPayload(current.id, current.invocationName),
         createExternalizedRaw(current),
         this.catalog,
-        { id: current.id },
+        { id: current.id, localSkillDir: this.activeLocalSkillDir },
       );
     }
 
@@ -202,6 +216,7 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
       if (!isToolPayload(parsed)) {
         return createToolCallFromInvocation(current.invocationName, {}, raw, this.catalog, {
           id: current.id,
+          localSkillDir: this.activeLocalSkillDir,
           parseError: createToolParseError(
             'tool_call_payload_invalid',
             current.invocationName,
@@ -211,10 +226,12 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
       }
       return createToolCallFromInvocation(current.invocationName, parsed, raw, this.catalog, {
         id: current.id,
+        localSkillDir: this.activeLocalSkillDir,
       });
     } catch (error) {
       return createToolCallFromInvocation(current.invocationName, {}, raw, this.catalog, {
         id: current.id,
+        localSkillDir: this.activeLocalSkillDir,
         parseError: createToolParseError(
           'tool_call_json_invalid',
           current.invocationName,
@@ -241,6 +258,7 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
       this.catalog,
       {
         id: current.id,
+        localSkillDir: this.activeLocalSkillDir,
         parseError: createToolParseError(
           INCOMPLETE_TOOL_CALL_ERROR_CODE,
           current.invocationName,
@@ -260,6 +278,7 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
       this.catalog,
       {
         id: current.id,
+        localSkillDir: this.activeLocalSkillDir,
         parseError: createToolParseError(
           'tool_call_payload_too_large',
           current.invocationName,

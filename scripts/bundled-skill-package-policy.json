@@ -5,7 +5,7 @@
     "backgroundGzipBytes": 421521
   },
   "budget": {
-    "backgroundRawBytesMax": 810000,
+    "backgroundRawBytesMax": 820000,
     "backgroundGzipBytesMax": 240000,
     "assetCount": 28,
     "assetRawBytes": 588408

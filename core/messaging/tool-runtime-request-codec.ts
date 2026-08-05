@@ -55,6 +55,10 @@ interface DecodedCreateToolAuthorizationPayload {
   runId?: string;
   descriptorIds?: string[];
   toolIntent?: string;
+  // Review #2: the page/model-supplied localSkillDir is an untrusted field;
+  // after decoding, background validates whether it belongs to an imported local
+  // skill directory (validateLocalSkillDirectory) before deciding to write it to the grant.
+  localSkillDir?: string;
 }
 
 const MAX_TOOL_INTENT_CHARS = 16_000;
@@ -209,6 +213,7 @@ export const TOOL_RUNTIME_PAYLOAD_DECODERS: ToolRuntimePayloadDecoderMap = {
           || !value.descriptorIds.every((id) => typeof id === 'string')
         )
       )
+      || (value.localSkillDir !== undefined && typeof value.localSkillDir !== 'string')
     ) {
       return invalidDecodedPayload('invalid_tool_authorization_request');
     }
@@ -219,6 +224,7 @@ export const TOOL_RUNTIME_PAYLOAD_DECODERS: ToolRuntimePayloadDecoderMap = {
       runId: value.runId,
       descriptorIds: value.descriptorIds as string[] | undefined,
       toolIntent: value.toolIntent as string | undefined,
+      localSkillDir: value.localSkillDir as string | undefined,
     });
   },
   CLOSE_TOOL_AUTHORIZATION(value) {

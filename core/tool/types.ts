@@ -106,6 +106,13 @@ export interface ToolCall {
   parseError?: ToolError;
   source?: ToolCallSource;
   createdAt?: number;
+  // Written by the parser when a local skill is activated: serves as the
+  // "initial cwd hint" for this call (shell_exec / shell_session_begin) on the
+  // Native Host side. Carried cross-process via the message channel to the
+  // background runtime, where parseExternalizedToolPayload uses it to initialize
+  // cwd (not a hard persistent binding; Review #4 Route A). The trusted source is
+  // the background grant-derived value; page fields are stripped.
+  localSkillDir?: string;
 }
 
 export interface ToolError {

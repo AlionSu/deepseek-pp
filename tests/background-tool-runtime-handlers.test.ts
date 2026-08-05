@@ -878,6 +878,8 @@ function createExecutionDependencies(): ToolExecutionRuntimeHandlerDependencies 
     broadcastToolDescriptorsUpdate: vi.fn(async () => undefined),
     broadcastMcpServersUpdate: vi.fn(async () => undefined),
     broadcastToolCallHistoryUpdate: vi.fn(async () => undefined),
+    // 评审 #2：mock 的本地目录校验——默认信任（本用例不针对 #2 校验逻辑）。
+    validateLocalSkillDirectory: vi.fn(async () => true),
   };
 }
 

@@ -47,6 +47,10 @@ interface StoredToolAuthorizationGrant {
   calls: Record<string, StoredCallAuthorization>;
   issuedAt: number;
   expiresAt: number;
+  // Local-skill directory validated and written by background when creating the
+  // grant. At execution time cwd is derived solely from this; any page/model-
+  // supplied localSkillDir is ignored (Review #2).
+  localSkillDir?: string;
 }
 
 interface ToolAuthorizationState {
@@ -68,6 +72,12 @@ export interface CreateToolAuthorizationInput {
   automationRunId?: string;
   subject: ToolAuthorizationSubject;
   descriptors: readonly ToolDescriptor[];
+  /**
+   * Background-validated local-skill directory (from the augment's
+   * activeLocalSkillDir). When non-empty, execution-time cwd is derived solely
+   * from this; any page/model-supplied localSkillDir is ignored (Review #2).
+   */
+  localSkillDir?: string;
   now?: number;
 }
 
@@ -121,6 +131,7 @@ export async function createToolAuthorization(
     calls: {},
     issuedAt: now,
     expiresAt: now + TOOL_AUTHORIZATION_TTL_MS,
+    localSkillDir: input.localSkillDir ?? undefined,
   };
 
   await mutateState((state) => {
@@ -310,6 +321,19 @@ export async function closeToolAuthorization(
     delete state.grants[grantId];
     return { result: undefined, changed: true };
   });
+}
+
+/**
+ * Read the background-validated local-skill directory on the grant (Review #2).
+ * Execution-time cwd is derived solely from this; any page/model-supplied
+ * localSkillDir is ignored. Only this field is exposed, not the whole grant.
+ */
+export async function getGrantLocalSkillDir(grantId: string): Promise<string | undefined> {
+  const grant = await mutateState(async (state) => {
+    const g = state.grants[grantId];
+    return { result: g ? g.localSkillDir : undefined, changed: false };
+  });
+  return grant;
 }
 
 export async function getToolAuthorizationAuditTrigger(
@@ -743,6 +767,7 @@ function isStoredGrant(id: string, value: unknown): value is StoredToolAuthoriza
     'calls',
     'issuedAt',
     'expiresAt',
+    'localSkillDir',
   ]) &&
     grant.id === id &&
     isIdentity(grant.id) &&

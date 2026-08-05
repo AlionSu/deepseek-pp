@@ -27,6 +27,7 @@ describe('tool provider import boundary', () => {
       './execution-error',
       './externalized-payload',
       './history',
+      './local-skill-cwd',
       './provider-registry',
       './types',
     ]);
@@ -154,7 +155,7 @@ function parseModuleSpecifiers(file: string): string[] {
 function listSourceFiles(root: string): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(root)) {
-    if (entry === 'node_modules' || entry === '.git' || entry === '.output' || entry === 'dist') continue;
+    if (entry === 'node_modules' || entry === '.git' || entry === '.output' || entry === 'dist' || entry === '.workbuddy') continue;
     const path = join(root, entry);
     if (statSync(path).isDirectory()) {
       files.push(...listSourceFiles(path));
@@ -207,5 +208,6 @@ function stronglyConnectedComponents(graph: ReadonlyMap<string, ReadonlySet<stri
 }
 
 function toRelative(path: string): string {
-  return normalize(path).slice(`${normalize(ROOT)}/`.length);
+  const normalizedRoot = normalize(ROOT).replace(/\\/g, '/');
+  return normalize(path).replace(/\\/g, '/').slice(`${normalizedRoot}/`.length);
 }

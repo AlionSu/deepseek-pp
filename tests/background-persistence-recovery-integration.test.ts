@@ -142,6 +142,8 @@ function createProjectDeletionDependencies(
     stageDeletePresetAlreadyLocked: unusedMutationStage,
     importGitHubSkillSource: async () => unusedDependency(),
     importLocalSkillSource: async () => unusedDependency(),
+    updateLocalSkillSource: async () => unusedDependency(),
+    relocateLocalSkillSource: async () => unusedDependency(),
     updateGitHubSkillSource: async () => unusedDependency(),
     executeLocalSkillImporterToolCall: async () => unusedDependency(),
   });
