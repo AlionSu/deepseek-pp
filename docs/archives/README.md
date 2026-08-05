@@ -109,3 +109,12 @@
 - GitHub milestones: #49-#50
 - GitHub issues: #395-#401
 - Final batch PR: #402
+
+### mcp-capability-plane
+
+- Description: Bounded, on-demand MCP capability projection without weakening real tool authorization or execution (CP.1-CP.5): core capability contracts, runtime surfaces and controls, Side Panel controls, compatibility inventory and validation.
+- Date range: 2026-07-16 - 2026-07-16
+- Tracking mode: LOCAL_ONLY
+- Archived progress: [MASTER.md](mcp-capability-plane/progress/MASTER.md)
+- GitHub repository: `zhu1090093659/deepseek-pp`
+- GitHub issue: #407

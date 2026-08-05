@@ -76,3 +76,4 @@
 |:--|:--|:--|
 | 2026-07-16 | Planning / execution start | Archived completed Wave 2 root artifacts, created fresh bounded capability-plane run, inspected MCP/tool authorization contracts and began CP.1. |
 | 2026-07-16 | CP-B1 closure | Completed CP.1–CP.5: bounded projections, opaque capability leases, all runtime surfaces, Side Panel controls, compatibility inventory and validation. `npm run ci:quality` passed. |
+| 2026-07-31 | Archive | Archived per spec-driven closure on user authorization. CP-B1 code batch remains uncommitted in the main working tree, pending its owning agent's completion; commit when authorized. |
