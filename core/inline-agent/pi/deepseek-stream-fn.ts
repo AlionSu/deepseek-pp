@@ -38,6 +38,7 @@ import {
   type ModelTurn,
   type SubmitPromptInput,
 } from '../../deepseek/adapter';
+import { extractToolCalls } from '../../interceptor/tool-parser';
 import { createStreamingToolCallParser } from '../../interceptor/streaming-tool-call-parser';
 import { createStreamingToolTextAccumulator } from '../../interceptor/streaming-tool-text';
 import type { ToolCall as CoreToolCall } from '../../types';
@@ -118,6 +119,12 @@ export function createDeepSeekStreamFn(deps: DeepSeekStreamFnDeps): StreamFn {
         let lastVisibleText = '';
         let textContentIndex: number | null = null;
         let toolCallCount = 0;
+        // Raw (un-stripped) stream text for the released fallback parse:
+        // legacy DSML blocks are invisible to the streaming XML parser and are
+        // only recovered at flush time.
+        let fallbackRawText = '';
+        let fallbackRawTruncated = false;
+        const FALLBACK_PARSE_MAX_CHARS = 120_000;
 
         const emitText = (fullText: string) => {
           const delta = fullText.slice(lastVisibleText.length);
@@ -154,6 +161,14 @@ export function createDeepSeekStreamFn(deps: DeepSeekStreamFnDeps): StreamFn {
 
         const callbacks: DeepSeekTurnCallbacks = {
           onTextChunk(text) {
+            if (!fallbackRawTruncated) {
+              if (fallbackRawText.length + text.length > FALLBACK_PARSE_MAX_CHARS) {
+                fallbackRawTruncated = true;
+                fallbackRawText = '';
+              } else {
+                fallbackRawText += text;
+              }
+            }
             emitText(textAccumulator.append(text));
             onParsed(toolCallParser.append(text));
           },
@@ -170,6 +185,15 @@ export function createDeepSeekStreamFn(deps: DeepSeekStreamFnDeps): StreamFn {
 
         onParsed(toolCallParser.flush());
         emitText(textAccumulator.flush());
+        if (!fallbackRawTruncated && fallbackRawText) {
+          const shouldFallback = fallbackRawText.includes('｜DSML｜')
+            || (toolCallCount === 0 && fallbackRawText.includes('<'));
+          if (shouldFallback) {
+            for (const call of extractToolCalls(fallbackRawText, { descriptors: toolDescriptors })) {
+              emitToolCall({ name: call.name, invocationName: call.invocationName ?? call.name, payload: call.payload });
+            }
+          }
+        }
         if (textContentIndex !== null) {
           emit({
             type: 'text_end',

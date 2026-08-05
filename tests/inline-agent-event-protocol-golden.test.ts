@@ -17,7 +17,9 @@
  *   unclamped final text on `AGENT_LOOP_COMPLETE`).
  * - `AGENT_TOOL_DETECTED.call` keeps `{name, invocationName, payload}` only;
  *   volatile fields (id/raw/provider/parseError) are not part of the contract.
- * - `AGENT_STEP_COMPLETE.toolExecutions` keeps `{name, ok, summary}` only.
+ * - `AGENT_STEP_COMPLETE.toolExecutions` keeps the full released record
+ *   surface: `{name, ok, summary, detail, output, error, truncated}` (fields
+ *   absent from the record stay absent; undefined fields are not compared).
  * - All other payload fields are compared exactly.
  */
 
@@ -85,6 +87,10 @@ function normalizeEvent(type: string, data: unknown): NormalizedEvent {
           name: e.name,
           ok: e.result.ok,
           summary: e.result.summary,
+          detail: e.result.detail,
+          output: e.result.output,
+          error: e.result.error,
+          truncated: e.result.truncated,
         })),
       };
     case 'AGENT_LOOP_COMPLETE': {
@@ -388,6 +394,59 @@ describe('AGENT_* event protocol golden', () => {
       { type: 'AGENT_STEP_COMPLETE', loopId: 'loop-1', stepIndex: 1, responseMessageId: 103, toolExecutions: [] },
       { type: 'AGENT_LOOP_COMPLETE', loopId: 'loop-1', totalSteps: 2, totalTools: 2, finalText: 'All done.' },
     ]);
+  });
+
+  it('G9 full tool record: STEP_COMPLETE carries detail/output/error/truncated verbatim', async () => {
+    vi.useFakeTimers();
+    const fullExecution: ToolExecutionRecord = {
+      name: 'artifact_create',
+      provider: { kind: 'local', id: 'artifact', displayName: 'Artifact', transport: 'in_process' },
+      result: {
+        ok: false,
+        summary: 'Artifact failed',
+        detail: 'disk full',
+        output: [{ title: 'attempt-1' }],
+        error: { code: 'E_DISK', message: 'No space left', retryable: true },
+        truncated: true,
+      },
+    };
+    adapterMocks.submitPromptStreaming
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onTextChunk(TOOL_CALL_TEXT);
+        return { assistantText: '', responseMessageId: 102, requestMessageId: 101, finished: true };
+      })
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onTextChunk('All done.');
+        return { assistantText: '', responseMessageId: 103, requestMessageId: 102, finished: true };
+      });
+
+    const { events, post } = createCollector();
+    const executeTool = vi.fn(async () => fullExecution);
+
+    const run = runInlineAgentLoop(
+      { ...createPayload(), toolDescriptors: createArtifactToolDescriptors('en') },
+      { post, executeTool, signal: new AbortController().signal },
+    );
+    await vi.advanceTimersByTimeAsync(7_000);
+    await run;
+
+    const stepComplete = events.find((e) => e.type === 'AGENT_STEP_COMPLETE');
+    expect(stepComplete).toMatchObject({
+      type: 'AGENT_STEP_COMPLETE',
+      stepIndex: 0,
+      responseMessageId: 102,
+      toolExecutions: [
+        {
+          name: 'artifact_create',
+          ok: false,
+          summary: 'Artifact failed',
+          detail: 'disk full',
+          output: [{ title: 'attempt-1' }],
+          error: { code: 'E_DISK', message: 'No space left', retryable: true },
+          truncated: true,
+        },
+      ],
+    });
   });
 
   it('G8b stream-event truncation: 12k clamp on STREAM_CHUNK, unclamped final text', async () => {
