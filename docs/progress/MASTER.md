@@ -25,15 +25,17 @@
 
 | Task | Issue | Delivery Batch | PR | Status |
 |:-----|:------|:---------------|:---|:-------|
-| B1-T1..T7 | #B1（待创建） | P1-B1 / P2-B1 / P3-B1 | 待创建 | Planning |
+| B1-T1..T2 | [#522](https://github.com/zhu1090093659/deepseek-pp/issues/522) | P1-B1 | [#523](https://github.com/zhu1090093659/deepseek-pp/pull/523) | **Merged** |
+| B1-T3..T4 | [#522](https://github.com/zhu1090093659/deepseek-pp/issues/522) | P2-B1 | [#524](https://github.com/zhu1090093659/deepseek-pp/pull/524) | **Merged** |
+| B1-T5..T7 | [#522](https://github.com/zhu1090093659/deepseek-pp/issues/522) | P3-B1 | [#525](https://github.com/zhu1090093659/deepseek-pp/pull/525) | PR 评审中 |
 
 ## Delivery Batches
 
 | Batch | Tasks | Integration Branch | Validation | Depends On | Status |
 |:------|:------|:--------------------|:-----------|:-----------|:-------|
-| P1-B1 | B1-T1..T2 | `batch/b1-p1-provider-contract` | 定向测试 + compile（生产零改动） | — | Planning |
-| P2-B1 | B1-T3..T4 | `batch/b1-p2-provider-impl` | 定向测试 + compile + build:chrome + 护栏 | P1-B1 | Planning |
-| P3-B1 | B1-T5..T7 | `batch/b1-p3-loop-wiring` | 完整验证链 + golden + ci:quality | P2-B1 | Planning |
+| P1-B1 | B1-T1..T2 | `batch/b1-p1-provider-contract` | 定向测试 + compile（生产零改动） | — | **Merged (#523)** |
+| P2-B1 | B1-T3..T4 | `batch/b1-p2-provider-impl` | 定向测试 + compile + build:chrome + 护栏 | P1-B1 | **Merged (#524)** |
+| P3-B1 | B1-T5..T7 | `batch/b1-p3-loop-wiring` | 完整验证链 + golden + ci:quality | P2-B1 | PR #525 评审中 |
 
 ## Quick Status Commands
 
@@ -43,8 +45,8 @@ gh issue list --repo zhu1090093659/deepseek-pp --label spec:pi-agent-core-provid
 
 ## Current Status
 
-**Active Phase**: Planning（Phase 1 分析完成）
-**Active Task**: B1-T1（provider 端口定义）
+**Active Phase**: Phase 3（P3-B1 接线完成，PR #525 评审中）
+**Active Task**: B1-T7（ci:quality 收尾 + Issue 关闭）
 **Blockers**: 无
 
 ## Governance Status
