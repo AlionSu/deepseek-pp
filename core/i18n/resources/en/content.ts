@@ -99,6 +99,7 @@ export const content = {
     budgetReached: 'DeepSeek++ paused after {count} automated tool-continuation rounds to avoid presenting incomplete work as a final answer. Send "continue" in this conversation to resume the remaining work.',
     error: 'Execution error',
     footerComplete: 'Agent complete ({steps} steps, {tools} tool calls)',
+    footerPaused: 'Agent paused ({steps} steps, {tools} tool calls)',
     process: 'Process',
     tools: 'Tool calls',
     results: 'Results',

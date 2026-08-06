@@ -99,6 +99,7 @@ export const content = {
     budgetReached: 'DeepSeek++ 已执行 {count} 轮自动工具续跑并暂停，避免把未完成任务伪装成最终答案。请发送“继续”让当前对话接着处理剩余工作。',
     error: '执行出错',
     footerComplete: 'Agent 完成（{steps} 步，{tools} 次工具调用）',
+    footerPaused: 'Agent 已暂停（{steps} 步，{tools} 次工具调用）',
     process: '过程',
     tools: '工具调用',
     results: '执行结果',

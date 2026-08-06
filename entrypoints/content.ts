@@ -61,6 +61,7 @@ import type {
   InlineAgentStartPayload,
   InlineAgentStreamChunkMsg,
   InlineAgentStepCompleteMsg,
+  InlineAgentToolDetectedMsg,
   InlineAgentLoopCompleteMsg,
   InlineAgentLoopErrorMsg,
   InlineAgentTraceRecord,
@@ -79,6 +80,7 @@ import {
   createAgentFooter,
   createAgentRunningIndicator,
   updateAgentRunningIndicator,
+  isInlineAgentBudgetFinalText,
 } from '../core/inline-agent/renderer';
 import { renderInlineMarkdown } from '../core/inline-agent/markdown';
 import {
@@ -477,6 +479,7 @@ function getAgentRendererLabels() {
   return {
     step: (stepNumber: number) => contentT('content.agent.step', { index: stepNumber }),
     streaming: contentT('content.agent.streaming'),
+    executingTools: contentT('content.agent.executingTools'),
     stop: contentT('content.agent.stop'),
     process: contentT('content.agent.process'),
     tools: contentT('content.agent.tools'),
@@ -487,6 +490,8 @@ function getAgentRendererLabels() {
     toolError: contentT('content.toolBlock.summaries.failed'),
     footerComplete: (totalSteps: number, totalTools: number) =>
       contentT('content.agent.footerComplete', { steps: totalSteps, tools: totalTools }),
+    footerPaused: (totalSteps: number, totalTools: number) =>
+      contentT('content.agent.footerPaused', { steps: totalSteps, tools: totalTools }),
     footerError: (totalSteps: number, totalTools: number) =>
       contentT('content.agent.footerError', { steps: totalSteps, tools: totalTools }),
   };
@@ -3727,7 +3732,7 @@ function stopInlineAgent(): void {
   activeAgentAbort?.abort();
   activeAgentAbort = null;
   if (container) {
-    const footer = createAgentFooter(0, 0, false, contentT('content.agent.stopped'), getAgentRendererLabels());
+    const footer = createAgentFooter(0, 0, 'paused', contentT('content.agent.stopped'), getAgentRendererLabels());
     container.appendChild(footer);
   }
 }
@@ -3844,6 +3849,7 @@ function handleInlineAgentLoopEvent(type: string, data: unknown): void {
       break;
     }
     case 'AGENT_TOOL_DETECTED':
+      handleAgentToolDetected(data as InlineAgentToolDetectedMsg);
       break;
     case 'AGENT_STEP_COMPLETE':
       handleAgentStepComplete(data as InlineAgentStepCompleteMsg);
@@ -3879,6 +3885,20 @@ function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): vo
   }));
 }
 
+/**
+ * Tool calls were detected in the model turn: surface the real state instead
+ * of leaving the step at a blinking "streaming..." (Issue #541). The live
+ * panel now shows "executing tools" (⚙) until text resumes on the nudge turn
+ * or the step completes.
+ */
+function handleAgentToolDetected(msg: InlineAgentToolDetectedMsg): void {
+  if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
+  updateStepStatus(inlineAgentCurrentStep, 'executing_tools', getAgentRendererLabels().executingTools);
+  updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
+    status: 'executing_tools',
+  }));
+}
+
 function handleAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
   showAgentRunningIndicator(msg.stepIndex);
@@ -3895,12 +3915,18 @@ function handleAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
 
 function renderInlineAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
-  const previousText = getInlineAgentStepText(inlineAgentCurrentStep);
+  const step = inlineAgentCurrentStep;
+  const previousText = getInlineAgentStepText(step);
   const nextText = clampText(getInlineAgentDisplayStepText(msg.fullText) || previousText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '';
-  updateStepStreamText(inlineAgentCurrentStep, nextText);
+  updateStepStreamText(step, nextText);
+  // Text is flowing again: a tool-phase step returns to the streaming state
+  // (Issue #541).
+  if (nextText && step.getAttribute('data-status') === 'executing_tools') {
+    updateStepStatus(step, 'streaming', getAgentRendererLabels().streaming);
+  }
   updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
     text: nextText,
-    status: 'streaming',
+    ...(nextText ? { status: 'streaming' as const } : {}),
     collapsed: false,
   }));
 }
@@ -3968,7 +3994,20 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
     const finalText = getInlineAgentDisplayFinalText(msg.finalText);
     appendInlineAgentFinalAnswer(inlineAgentContainer, finalText, msg.loopId);
 
-    const footer = createAgentFooter(msg.totalSteps, msg.totalTools, false, undefined, getAgentRendererLabels());
+    // Budget-exhausted loops end with the budget notice as their final text;
+    // they are paused, not complete, so the footer must not claim success
+    // (Issue #541).
+    const budgetPaused = isInlineAgentBudgetFinalText(
+      msg.finalText,
+      (count) => contentT('content.agent.budgetReached', { count }),
+    );
+    const footer = createAgentFooter(
+      msg.totalSteps,
+      msg.totalTools,
+      budgetPaused ? 'paused' : 'complete',
+      undefined,
+      getAgentRendererLabels(),
+    );
     inlineAgentContainer.appendChild(footer);
 
     const executedToolNames = collectInlineAgentExecutedToolNames();
@@ -4102,7 +4141,7 @@ function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
       updateStepStatus(inlineAgentCurrentStep, 'error', msg.error);
     }
 
-    const footer = createAgentFooter(msg.stepIndex, msg.totalTools, true, msg.error, getAgentRendererLabels());
+    const footer = createAgentFooter(msg.stepIndex, msg.totalTools, 'error', msg.error, getAgentRendererLabels());
     inlineAgentContainer.appendChild(footer);
     updateActiveInlineAgentTrace((trace) => ({
       ...trace,
@@ -6293,11 +6332,29 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
   }
 
   if (trace.status === 'complete') {
-    container.appendChild(createAgentFooter(trace.totalSteps, trace.totalTools, false, undefined, getAgentRendererLabels()));
+    // A budget-paused trace persists status 'complete' with the budget notice
+    // as its final text; restore it as paused, not as a success (Issue #541).
+    const budgetPaused = isInlineAgentBudgetFinalText(
+      trace.finalText,
+      (count) => contentT('content.agent.budgetReached', { count }),
+    );
+    container.appendChild(createAgentFooter(
+      trace.totalSteps,
+      trace.totalTools,
+      budgetPaused ? 'paused' : 'complete',
+      undefined,
+      getAgentRendererLabels(),
+    ));
   } else if (trace.status === 'error') {
-    container.appendChild(createAgentFooter(trace.totalSteps, trace.totalTools, true, trace.error, getAgentRendererLabels()));
+    container.appendChild(createAgentFooter(trace.totalSteps, trace.totalTools, 'error', trace.error, getAgentRendererLabels()));
   } else if (trace.status === 'stopping') {
-    container.appendChild(createAgentFooter(trace.totalSteps, trace.totalTools, false, trace.error ?? contentT('content.agent.stopped'), getAgentRendererLabels()));
+    container.appendChild(createAgentFooter(
+      trace.totalSteps,
+      trace.totalTools,
+      'paused',
+      trace.error ?? contentT('content.agent.stopped'),
+      getAgentRendererLabels(),
+    ));
   }
 
   return container;
