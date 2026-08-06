@@ -1,7 +1,6 @@
 # Inline Agent 空行渲染问题 — 任务交接文档
 
-> 状态：**未解决（用户已确认多次修复后仍然存在）**，移交给下一位 Agent 接手。
-> 本文件是唯一交接凭证：包含完整现象、已排查路径、已修复内容、未验证假设与下一步建议。
+> 状态：**✅ 已解决（2026-08-06，真实浏览器复现 + 修复 + 验证）**，本文件保留为排查记录。
 > 仓库：`zhu1090093659/deepseek-pp`（v1.13.0，WXT/React/TS MV3 浏览器扩展）
 > 工作目录：`/Users/zcl/code/deepseek-pp`
 
@@ -33,10 +32,15 @@
 
 ---
 
-## 2. 系统架构（接手前必须理解）
+## 2. 系统架构（接手前必须理解）—— ⚠️ 2026-08-06 用户纠正后的正确理解
+
+> **重要纠正（用户原话）**："我发现你对 Agent 模式理解错了，Agent 模式就是调用我们提供的额外工具，包括 mcp、web_search 之类的都算。"
+>
+> 也就是说：**Agent 模式 = DeepSeek++ 的 inline-agent loop 调用扩展提供的工具（mcp、web_search、artifact 等），工具执行结果展示在扩展面板的步骤卡片里**。排查范围**必须包含工具结果的渲染路径**，不能只看模型文本流。
 
 - DeepSeek++ 拦截 DeepSeek 网页（`chat.deepseek.com`）的请求与流（MAIN world 注入 `entrypoints/main-world.content.ts` → `core/interceptor/fetch-hook.ts`）。
-- Agent 模式（深度思考 + 联网搜索）下，扩展会**改写请求 prompt**（注入工具调用指令），模型输出因此包含 `<tool_call>...</tool_call>` XML 块，并且**输出格式变成"每行/每段之间用 `\n\n` 分隔"**（这是模型在工具 prompt 引导下的输出习惯）。
+- **Agent 模式（扩展的 inline agent）**：用户在 DeepSeek 页面发起提问 → 扩展注入工具 prompt → 模型输出 `<tool_call>...</tool_call>` XML 块（调用 mcp / web_search / artifact 等扩展工具）+ 普通文本，且输出格式习惯"每行/每段之间用 `\n\n` 分隔"。
+- 扩展的 loop（`core/inline-agent/pi/loop-adapter.ts`）执行工具调用（mcp、web_search 等），工具**执行结果**通过 `addToolResultToStep` / `addToolResultDetailsToStep` 渲染到步骤卡片里。
 - fetch-hook 的 `XmlToolStreamFilter`（`core/interceptor/fetch-hook.ts`）把工具调用 XML 从流向页面的文本中**剥离**，把"干净文本"喂回 DeepSeek 页面，**页面用原生渲染器渲染这段文本**（页面中间区域，即用户所说的"DS 网页上中间区域"）。
 - 同时扩展自己还有一个 **Inline-Agent 面板**（`core/inline-agent/`）：挂载在页面消息区（`mountInlineAgentContainer` → `getAssistantResponseHost(message).appendChild(container)`），面板内有 step 1/2/3 步骤卡片（`.dpp-agent-step-body`）和最终答案 div（`[data-dpp-body-text]`），两者都通过 `core/inline-agent/markdown.ts` 的 `renderInlineMarkdown()` 渲染。
 
@@ -114,6 +118,26 @@ M tests/xml-tool-stream-filter.test.ts   ← 新增 3 个折叠回归测试
 ## 5. 为什么用户仍说"没有解决"——未验证的假设（接手重点）
 
 ⚠️ 关键：前几轮修复都是**代码层推理 + 单测**，**没有在真实浏览器 + 真实 Agent 流上验证过**。用户反复确认"还是没有解决"，说明至少有一条路径漏了。接手后**第一优先级是复现**。
+
+### ⚠️ 假设 E（2026-08-06 用户纠正理解后新增，最可疑）：工具结果的渲染路径从未被折叠
+
+用户纠正："Agent 模式就是调用我们提供的额外工具，包括 mcp、web_search 之类的都算。"
+
+**这条路径完全没检查过空行问题**：
+
+- `core/inline-agent/renderer.ts` 中：
+  - `addToolResultToStep()`（@~760）：工具摘要行 `.dpp-agent-tool-summary`，用 **`detail.textContent = summary`** 直接设置；
+  - `addToolResultDetailsToStep()`（@~870）→ `appendResultLine()`：工具结果详情 `.dpp-tool-result-line`，用 **`line.textContent = `${key}: ${value}``** 直接设置；
+- 对应 CSS：
+  - `.dpp-agent-tool-summary { white-space: pre-wrap; }`（@~397）
+  - `.dpp-agent-step-tool-result-body { white-space: pre-wrap; }`（@~443）
+- **`textContent` + `white-space: pre-wrap` = 原始文本原样渲染**。web_search 的搜索结果（每条结果之间 `\n\n` 分隔）、mcp 返回的多行内容，会**原样显示空行**！这正是"最后一步/最后的输出仍有空行"的极可能来源——**工具结果不是 markdown，是纯文本，`\n\n` 就是空行**。
+- 用户"刷新后空行消失"也吻合：实时运行时工具结果以 pre-wrap 原样显示；刷新后从 trace 恢复渲染（`createRestoredInlineAgentContainer`）时……（需验证恢复路径是否同样 pre-wrap，或 trace 里的 summary 已清洗）。
+
+**待验证/修复方向**：
+1. 真实跑一次 Agent 模式（触发 web_search / mcp 调用），展开工具结果卡片，确认空行是否来自这里；
+2. 若确认：在 `appendResultLine` / `addToolResultToStep` 设置 `textContent` 前，对工具结果文本做**空行折叠**（`\n{2,}` → `\n`，保留单换行；注意工具结果里可能有代码块/JSON，谨慎处理或只折叠连续 3+ 换行），或在 CSS 层面改为紧凑渲染；
+3. 同时检查恢复路径 `createRestoredInlineAgentContainer`（`entrypoints/content.ts` @~6360）对工具结果的渲染是否一致。
 
 ### 假设 A（最可疑）：用户看到的空行在**页面原生渲染路径**（路径 A），而不在扩展面板（路径 B）
 
@@ -196,7 +220,8 @@ npm run verify:extension-utf8
 |---|---|
 | 流过滤（剥离工具调用 XML + 空行折叠） | `core/interceptor/fetch-hook.ts`（`XmlToolStreamFilter` 类、`collapseExcessBlankLines`、`cloneParsedWithCollapsedBlankLines`） |
 | 面板 markdown 渲染器 | `core/inline-agent/markdown.ts`（`renderInlineMarkdown`） |
-| 面板样式 | `core/inline-agent/renderer.ts`（`injectInlineAgentStyles`，`[data-dpp-body-text]`、`.dpp-agent-step-body`） |
+| 面板样式 | `core/inline-agent/renderer.ts`（`injectInlineAgentStyles`，`[data-dpp-body-text]`、`.dpp-agent-step-body`、`.dpp-agent-tool-summary`、`.dpp-agent-step-tool-result-body`） |
+| **工具结果渲染（⚠️ 未检查空行的路径）** | `core/inline-agent/renderer.ts`（`addToolResultToStep` @~760、`addToolResultDetailsToStep` @~870、`appendResultLine` @~925）——`textContent` + `white-space: pre-wrap` 原样渲染工具结果（web_search/mcp 返回），`\n\n` 会显示为空行 |
 | 最终答案插入 | `entrypoints/content.ts`（`appendInlineAgentFinalAnswer` @~4080、`handleAgentLoopComplete` @~4015、恢复路径 `mountRestoredInlineAgentContainer` @~6418） |
 | 步骤正文实时渲染 | `entrypoints/content.ts`（`renderInlineAgentStreamChunk` @~3941）、`core/inline-agent/renderer.ts`（`updateStepStreamText` @~696） |
 | DOM 级工具调用清理 | `entrypoints/content.ts`（`stripToolCallTextNodes` @~6941、`collapseRenderedExcessBlankLines`） |
@@ -210,3 +235,44 @@ npm run verify:extension-utf8
 - 验证顺序：定向测试 → `npm run compile` →（涉及 prompt/工具/行为时 `npm run prompt:freeze`）→ `npm run build:all` → `verify:manifest-policy` / `verify:extension-utf8` → `npm run ci:quality`。
 - 不新增持久化键；不引入 Android/移动端。
 - 完成前：在真实浏览器复现验证，不要只依赖单测。
+
+---
+
+## 11. ✅ 最终根因与修复（2026-08-06，真实浏览器验证）
+
+### 复现方式（本次实际执行的）
+
+- 环境：ego-browser（ego lite Chromium）加载 `/Users/zcl/code/deepseek-pp/dist/chrome-mv3`（unpacked），继承用户登录态。
+- 步骤：`chat.deepseek.com` → 专家模式 → 提问"请使用 web_search 工具搜索今天的重要科技新闻，并总结出 3 条要点" → agent loop 真实执行 web_search + web_fetch → 观察步骤框与最终答案 DOM。
+- ⚠️ 注意：改代码后必须**重新加载扩展（chrome://extensions → 重新加载）+ 关闭所有旧 tab 后全新打开**，否则 content script 仍是旧版本（本次踩坑：reload 后复用旧 tab，DOM 显示旧渲染，误以为修复无效）。
+
+### 真正根因（假设 A/D 的合体，非假设 E）
+
+- 页面原生路径（路径 A）**本来就没有空行问题**：`.ds-markdown` 原生渲染为 `<p class="ds-markdown-paragraph">` 紧凑段落，上一轮 fetch-hook 折叠修复已足够。
+- 空行的真正来源是**扩展面板渲染器 `renderInlineMarkdown`**（路径 B）：
+  1. 它把 `\n{2,}` 折叠成 `\n` 后**把每个 `\n` 转成 `<br>`**（`html.replace(/\n/g, '<br>')`）；
+  2. 同时又用**裸 `<li>`**（不包 `<ul>/<ol>`）和 `<h1>-<h6>` 等**块级元素**输出；
+  3. 结果 HTML 变成 `...</li><br><li>...` / `<br><h4>...</h4><br>...`——`<br>` 与块级元素的行盒叠加 = **双重换行 = 每行之间的视觉空行**（实测同内容旧渲染 175px vs 原生 p 风格 130px）。
+  4. 上一轮把"`<br><h4>`"写进测试断言当正确行为，掩盖了该问题。
+- 假设 E（工具结果 `textContent`+`pre-wrap`）：实测 web_fetch 结果无 `\n\n`（单行 JSON），且工具结果在折叠详情区，非用户投诉主路径；未改。
+
+### 修复内容
+
+`core/inline-agent/markdown.ts` 重写为**块级感知渲染**（`renderBlockLayout`）：
+
+- 空行 = 块分隔符，**不产生任何输出**（间距由 CSS margin 控制，对齐原生）；
+- 标题行 → `<h1>`..`<h6>`；列表项行 → 连续项合并进单个 `<ul>/<ol>`（项间空行不拆列表）；`>` 行 → `<blockquote>`；表格/代码块原样块级输出；
+- 普通连续行 → `<p>` 段落（段内单换行保留 `<br>` 软换行）；
+- 全程**块级元素之间不再出现 `<br>`**。
+
+CSS（`renderer.ts`）无需改动：`[data-dpp-body-text] p { margin: 3px 0 }`、`ul/ol/li/hN/blockquote` 样式早已就位。
+
+### 验证结果
+
+- 单测：`tests/inline-markdown.test.ts` + `tests/inline-agent-renderer.test.ts` 断言更新为新块级结构（新增 `</p><h4>`、`<ol><li>...` 断言，删除 `<br><h4>` 旧断言）；全量 **1661 passed**。
+- `npm run compile`、`npm run build:all`、`verify:manifest-policy`、`verify:extension-utf8` 全部通过。
+- **真实浏览器**（专家模式 + web_search agent loop）：
+  - 步骤框：`<p>...</p><p>...</p><ol><li>...</li><li>...</li></ol>` — 0 个 `<br>`，紧凑；
+  - 最终答案 `[data-dpp-body-text]`：`<p>`/`<h2>`/`<h3>`/`<ol>`/`<blockquote>` 块级结构，与页面原生 `.ds-markdown`（`<p class="ds-markdown-paragraph">`）一致；
+  - 用户贴的 `#### 1.` 样例：单测覆盖 → `<h4>`，块间无 `<br>`。
+- 未提交内容：`core/inline-agent/markdown.ts`、`tests/inline-markdown.test.ts`、`tests/inline-agent-renderer.test.ts`、本文档。

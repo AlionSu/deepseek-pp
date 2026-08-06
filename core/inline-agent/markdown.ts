@@ -4,7 +4,7 @@ export function renderInlineMarkdown(text: string): string {
   try {
     const codeBlocks: string[] = [];
     // Normalize CRLF/CR line endings to LF up front so the blank-line
-    // collapse below also works when the model output uses `\r\n`
+    // handling below also works when the model output uses `\r\n`
     // (Issue: agent panel blank-line rendering).
     let html = escapeHtml(text).replace(/\r\n?/g, '\n');
 
@@ -22,35 +22,141 @@ export function renderInlineMarkdown(text: string): string {
       if (!isSafeHref(decodedHref)) return `${label} (${href})`;
       return `<a href="${escapeAttribute(decodedHref)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
     });
-    // ATX headings, longest first so `####` is not swallowed by `##`
-    // (agent-mode output uses `####` sub-headings; the page's own markdown
-    // renderer renders them as headings, so the inline agent panel must too).
-    html = html.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
-    html = html.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
-    html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
-    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-    // List items: unordered (`-`/`*`) and ordered (`1.`), matching how the
-    // page's markdown renderer displays them as compact rows.
-    html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
-    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-    // Blockquote lines, rendered like the page's markdown renderer.
-    html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-    // Collapse runs of blank lines into a single newline before the `<br>`
-    // conversion: DeepSeek agent-mode output separates every list item or
-    // sentence with `\n\n`, and rendering each blank line as a second `<br>`
-    // produces the "blank line between every row" effect. The page's own
-    // markdown renderer shows the same source compactly, so the inline agent
-    // panel must match that (Issue: agent panel blank-line rendering).
-    html = html.replace(/\n{2,}/g, '\n');
-    html = html.replace(/\n/g, '<br>');
+    // Block-level layout: headings, lists, blockquotes, tables, code fences
+    // and paragraphs are emitted as their own block elements (with list items
+    // wrapped in <ul>/<ol> and paragraph text in <p>), so the visual result
+    // matches the DeepSeek page's own markdown renderer: compact rows with no
+    // blank line between every row. The previous all-`<br>` conversion put a
+    // <br> next to every block element (<h4>/<li>), which stacked the block
+    // element's own line break on top of the <br> and rendered an empty row
+    // between every paragraph/list item (Issue: agent panel blank-line
+    // rendering).
+    html = renderBlockLayout(html);
     html = html.replace(/@@DPP_CODE_BLOCK_(\d+)@@/g, (_match, index) => codeBlocks[Number(index)] ?? '');
 
     return html;
   } catch {
     return escapeHtml(text).replace(/\r\n?/g, '\n').replace(/\n{2,}/g, '\n').replace(/\n/g, '<br>');
   }
+}
+
+/**
+ * Splits already-inline-rendered HTML into markdown block elements.
+ *
+ * - ATX headings (`#`..`######`) become `<h1>`..`<h6>`.
+ * - Consecutive list-item lines (unordered `-`/`*` and ordered `N.`) are
+ *   wrapped in a single `<ul>`/`<ol>`; a blank line between items does not
+ *   split the list (agent-mode output separates every item with `\n\n`).
+ * - `>` quote lines become `<blockquote>`.
+ * - Table and fenced-code output is emitted as-is (already block-level).
+ * - Everything else is grouped into `<p>` paragraphs, with single line
+ *   breaks inside a paragraph kept as `<br>`.
+ *
+ * Blank lines are structural separators and never produce their own output:
+ * block spacing comes from CSS margins, exactly like the page's native
+ * markdown renderer.
+ */
+function renderBlockLayout(html: string): string {
+  const lines = html.split('\n');
+  const blocks: string[] = [];
+  let i = 0;
+
+  const isCodeBlockToken = (line: string): boolean => /^@@DPP_CODE_BLOCK_\d+@@$/.test(line);
+  const isTableLine = (line: string): boolean => line.startsWith('<table>');
+  const isBlockLine = (line: string): boolean =>
+    isCodeBlockToken(line) ||
+    isTableLine(line) ||
+    /^(#{1,6}) /.test(line) ||
+    /^[-*] /.test(line) ||
+    /^\d+\. /.test(line) ||
+    /^&gt; /.test(line);
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      // Blank line: block separator, no output (matches native paragraph
+      // spacing driven by CSS margins).
+      i += 1;
+      continue;
+    }
+
+    // Fenced code block placeholder / table: already block-level HTML.
+    if (isCodeBlockToken(trimmed) || isTableLine(trimmed)) {
+      blocks.push(trimmed);
+      i += 1;
+      continue;
+    }
+
+    // ATX headings, longest first so `####` is not swallowed by `##`
+    // (agent-mode output uses `####` sub-headings; the page's own markdown
+    // renderer renders them as headings, so the inline agent panel must too).
+    const heading = /^(#{1,6}) (.+)$/.exec(trimmed);
+    if (heading) {
+      const level = heading[1].length;
+      blocks.push(`<h${level}>${heading[2]}</h${level}>`);
+      i += 1;
+      continue;
+    }
+
+    // Blockquote lines, rendered like the page's markdown renderer.
+    const quote = /^&gt; (.+)$/.exec(trimmed);
+    if (quote) {
+      blocks.push(`<blockquote>${quote[1]}</blockquote>`);
+      i += 1;
+      continue;
+    }
+
+    // List items: collect consecutive items (blank lines between items are
+    // skipped so `1. a\n\n2. b` stays one compact list) and wrap them in a
+    // single <ul>/<ol>, matching native markdown list semantics.
+    const listMatch = /^([-*]|\d+\.) (.+)$/.exec(trimmed);
+    if (listMatch) {
+      const ordered = /^\d+\. /.test(trimmed);
+      const tag = ordered ? 'ol' : 'ul';
+      const items: string[] = [listMatch[2]];
+      i += 1;
+      while (i < lines.length) {
+        const current = lines[i].trim();
+        if (!current) {
+          // Blank line: only keep collecting when the next non-blank line is
+          // another item of the same list type.
+          let j = i + 1;
+          while (j < lines.length && !lines[j].trim()) j += 1;
+          const next = j < lines.length ? lines[j].trim() : '';
+          const isSameItem = ordered ? /^\d+\. /.test(next) : /^[-*] /.test(next);
+          if (!isSameItem) break;
+          const item = /^([-*]|\d+\.) (.+)$/.exec(next);
+          if (!item) break;
+          items.push(item[2]);
+          i = j + 1;
+          continue;
+        }
+        const item = /^([-*]|\d+\.) (.+)$/.exec(current);
+        if (!item) break;
+        const isSameItem = ordered ? /^\d+\. /.test(current) : /^[-*] /.test(current);
+        if (!isSameItem) break;
+        items.push(item[2]);
+        i += 1;
+      }
+      blocks.push(`<${tag}>${items.map((item) => `<li>${item}</li>`).join('')}</${tag}>`);
+      continue;
+    }
+
+    // Plain paragraph: collect consecutive non-block lines; single line
+    // breaks inside the paragraph stay as <br> (soft line breaks).
+    const paragraph: string[] = [trimmed];
+    i += 1;
+    while (i < lines.length) {
+      const next = lines[i].trim();
+      if (!next || isBlockLine(next)) break;
+      paragraph.push(next);
+      i += 1;
+    }
+    blocks.push(`<p>${paragraph.join('<br>')}</p>`);
+  }
+
+  return blocks.join('');
 }
 
 function renderMarkdownTables(html: string): string {

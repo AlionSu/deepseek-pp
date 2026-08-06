@@ -71,10 +71,12 @@ describe('inline agent renderer', () => {
 
     const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
     expect(body?.innerHTML).not.toContain('<br><br>');
-    expect(body?.innerHTML).toContain('新闻。<br>从搜索结果中');
-    // Ordered list rows render as list items (native markdown semantics).
-    expect(body?.innerHTML).toContain('<li>远景科技集团的乌兰察布星河基地投产。</li>');
-    expect(body?.innerHTML).toContain('<li>新华网报道了中国的一些科技进展。</li>');
+    // Paragraphs render as <p> blocks with no <br> between them (block
+    // spacing comes from CSS margins, like the page's native renderer).
+    expect(body?.innerHTML).not.toContain('<br>');
+    expect(body?.innerHTML).toContain('</p><p>从搜索结果中，我可以看到当天有几个重大科技新闻：</p>');
+    // Ordered list rows wrap in one <ol> (native markdown semantics).
+    expect(body?.innerHTML).toContain('<ol><li>远景科技集团的乌兰察布星河基地投产。</li><li>谷歌AI部门发生重大调整。</li><li>新华网报道了中国的一些科技进展。</li></ol>');
   });
 
   it('follows the streaming step body while the reader is at the bottom', () => {
