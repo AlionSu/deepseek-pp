@@ -18,6 +18,8 @@ import {
   normalizeConversationExportRequest,
 } from '../core/export/schema';
 import { normalizeDeepSeekHistory } from '../core/export/normalize';
+import { applyConversationExportContentScope } from '../core/export/scope';
+import { createConversationExportArchiveArtifact } from '../core/export/zip';
 import type { ConversationExport } from '../core/export/types';
 
 const fixtureDir = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/deepseek-export');
@@ -90,21 +92,17 @@ describe('DeepSeek conversation export adapter and service', () => {
               id: 1,
               message_role: 'user',
               created_at: 1760000001,
-              fragments: [
-                { type: 'text', content: '早' },
-              ],
+              fragments: [{ type: 'REQUEST', content: '早' }],
             },
             {
               id: 2,
               parent_id: 1,
               message_role: 'assistant',
               created_at: 1760000002,
-              message_content: {
-                parts: [
-                  { content_type: 'text', content: '早上好！' },
-                  { content_type: 'text', content: '新的一天开始了。' },
-                ],
-              },
+              fragments: [
+                { type: 'THINK', content: '先礼貌回应。' },
+                { type: 'RESPONSE', content: '早上好！新的一天开始了。' },
+              ],
             },
           ],
         },
@@ -112,8 +110,60 @@ describe('DeepSeek conversation export adapter and service', () => {
     }, { includeRaw: false });
 
     expect(session.messages[0].content).toBe('早');
+    expect(session.messages[0].contentFragments).toEqual([{ kind: 'text', text: '早' }]);
     expect(session.messages[1].content).toContain('早上好！');
     expect(session.messages[1].content).toContain('新的一天开始了。');
+    expect(session.messages[1].contentFragments).toEqual([
+      { kind: 'reasoning', text: '先礼貌回应。' },
+      { kind: 'text', text: '早上好！新的一天开始了。' },
+    ]);
+  });
+
+  it('applies input-output scope before returning stats and artifacts', async () => {
+    const exportData = await runConversationExport({
+      exportId: 'real-fragment-scope',
+      extensionVersion: '0.0.0-test',
+      baseUrl: 'https://chat.deepseek.com',
+      request: {
+        mode: 'sanitized',
+        contentScope: 'input-output',
+        formats: ['markdown'],
+        includeAttachmentMetadata: false,
+        includeFileBodies: false,
+        sessionIds: ['session-real'],
+      },
+      transport: {
+        listSessions: vi.fn(async () => []),
+        fetchFiles: vi.fn(async () => []),
+        fetchHistory: vi.fn(async () => ({
+          data: {
+            biz_data: {
+              chat_session: { id: 'session-real', title: 'Real fragment types' },
+              chat_messages: [
+                { message_id: 1, role: 'USER', fragments: [{ type: 'REQUEST', content: '初始输入' }] },
+                { message_id: 2, role: 'ASSISTANT', fragments: [{ type: 'THINK', content: '思考' }] },
+                {
+                  message_id: 3,
+                  role: 'USER',
+                  fragments: [{
+                    type: 'REQUEST',
+                    content: '<original_task>初始输入</original_task><tool_results>[]</tool_results>',
+                  }],
+                },
+                { message_id: 4, role: 'ASSISTANT', fragments: [{ type: 'RESPONSE', content: '最终产出' }] },
+              ],
+            },
+          },
+        })),
+      },
+    });
+
+    expect(exportData.stats.messageCount).toBe(2);
+    expect(exportData.sessions[0].messages.map((message) => message.content)).toEqual(['初始输入', '最终产出']);
+    const markdown = buildConversationExportArtifacts(exportData)[0];
+    expect(markdown.content).toContain('Messages: 2');
+    expect(markdown.content).not.toContain('<tool_results>');
+    expect(markdown.content).not.toContain('思考');
   });
 
   it('paginates sessions and exports sanitized artifacts with attachment metadata', async () => {
@@ -430,7 +480,7 @@ describe('conversation export content scope projection', () => {
       source: { provider: 'deepseek-official-web', baseUrl: 'https://chat.deepseek.com', endpointVerification: 'static-bundle-and-browser-session', fileBodies: 'unsupported-unverified' },
       generatedBy: { name: 'DeepSeek++', version: '0.0.0-test' },
       request: { mode: 'sanitized', contentScope: 'full', formats: ['markdown'], includeAttachmentMetadata: true, includeFileBodies: false, pageSize: 50, sessionIds: ['s1'] },
-      stats: { sessionCount: 1, messageCount: 5, attachmentCount: 0, failedSessionCount: 0, startedAt: '2026-08-04T00:00:00.000Z', completedAt: '2026-08-04T00:00:00.000Z' },
+      stats: { sessionCount: 1, messageCount: 6, attachmentCount: 3, failedSessionCount: 0, startedAt: '2026-08-04T00:00:00.000Z', completedAt: '2026-08-04T00:00:00.000Z' },
       sessions: [{
         id: 's1',
         title: '测试会话',
@@ -440,15 +490,20 @@ describe('conversation export content scope projection', () => {
         createdAt: null,
         updatedAt: null,
         messages: [
-          { id: 'm1', parentId: null, role: 'user', content: '输入一', contentFragments: [{ kind: 'text', text: '输入一' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
-          { id: 'm2', parentId: 'm1', role: 'assistant', content: '思考中工具调用', contentFragments: [{ kind: 'reasoning', text: '思考' }, { kind: 'tool', text: '<shell_exec>…' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
-          { id: 'm3', parentId: 'm2', role: 'tool', content: '工具结果', contentFragments: [{ kind: 'tool', text: '工具结果' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
-          { id: 'm4', parentId: 'm3', role: 'assistant', content: '最终产出A（含思考）', contentFragments: [{ kind: 'reasoning', text: '不该出现' }, { kind: 'text', text: '最终产出A' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
-          { id: 'm5', parentId: 'm4', role: 'assistant', content: '最终产出B', contentFragments: [{ kind: 'text', text: '最终产出B' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+          { id: 'm1', parentId: null, role: 'user', content: '输入一', contentFragments: [{ kind: 'text', text: '输入一' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [{ id: 'file-input', role: 'referenced' }] },
+          { id: 'm2', parentId: 'm1', role: 'assistant', content: '思考中工具调用', contentFragments: [{ kind: 'reasoning', text: '思考' }, { kind: 'tool', text: '<shell_exec>…' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [{ id: 'file-internal', role: 'generated' }] },
+          { id: 'm3', parentId: 'm2', role: 'user', content: '内部续跑输入', contentFragments: [{ kind: 'text', text: '内部续跑输入' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+          { id: 'm4', parentId: 'm3', role: 'tool', content: '工具结果', contentFragments: [{ kind: 'tool', text: '工具结果' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+          { id: 'm5', parentId: 'm4', role: 'assistant', content: '最终产出A（含思考）', contentFragments: [{ kind: 'reasoning', text: '不该出现' }, { kind: 'text', text: '最终产出A' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [] },
+          { id: 'm6', parentId: 'm5', role: 'assistant', content: '最终产出B', contentFragments: [{ kind: 'text', text: '最终产出B' }], createdAt: null, updatedAt: null, modelType: null, searchEnabled: null, thinkingEnabled: null, attachmentRefs: [{ id: 'file-output', role: 'generated' }] },
         ],
         failures: [],
       }],
-      attachments: [],
+      attachments: [
+        { id: 'file-input', fileName: 'input.txt', mimeType: 'text/plain', sizeBytes: 1, status: 'metadata_available', sourceMessageIds: ['m1'] },
+        { id: 'file-internal', fileName: 'internal.txt', mimeType: 'text/plain', sizeBytes: 2, status: 'metadata_available', sourceMessageIds: ['m2'] },
+        { id: 'file-output', fileName: 'output.txt', mimeType: 'text/plain', sizeBytes: 3, status: 'metadata_available', sourceMessageIds: ['m6', 'missing-message'] },
+      ],
       failures: [],
     };
     return base;
@@ -462,16 +517,57 @@ describe('conversation export content scope projection', () => {
     expect(markdown?.content).toContain('最终产出B');
   });
 
-  it('projects input-output scope to user inputs plus the final assistant text output', async () => {
-    const data = { ...buildExportData(), request: { ...buildExportData().request, contentScope: 'input-output' as const } };
-    const artifacts = await buildConversationExportArtifactsCancellable(data);
+  it('projects to the initial input plus final output and scopes attachments', async () => {
+    const base = buildExportData();
+    const source = {
+      ...base,
+      request: { ...base.request, contentScope: 'input-output' as const },
+    };
+    const scoped = applyConversationExportContentScope(source, 'input-output');
+    const artifacts = await buildConversationExportArtifactsCancellable(source);
     const markdown = artifacts.find((artifact) => artifact.format === 'markdown');
+
+    expect(scoped.sessions[0].messages.map((message) => message.id)).toEqual(['m1', 'm6']);
+    expect(scoped.attachments.map((attachment) => attachment.id)).toEqual(['file-input', 'file-output']);
+    expect(scoped.attachments[1].sourceMessageIds).toEqual(['m6']);
+    expect(scoped.stats).toMatchObject({ messageCount: 2, attachmentCount: 2 });
     expect(markdown?.content).toContain('输入一');
     expect(markdown?.content).toContain('最终产出B');
+    expect(markdown?.content).not.toContain('内部续跑输入');
     expect(markdown?.content).not.toContain('工具结果');
     expect(markdown?.content).not.toContain('不该出现');
     expect(markdown?.content).not.toContain('最终产出A');
     expect(markdown?.content).not.toContain('<shell_exec>');
+    expect(markdown?.content).not.toContain('internal.txt');
     expect(markdown?.content).toContain('Messages: 2');
+    expect(markdown?.content).toContain('Attachments: 2');
+  });
+});
+
+describe('conversation export multi-format archive', () => {
+  it('packs selected formats into one UTF-8 ZIP download', () => {
+    const archive = createConversationExportArchiveArtifact([
+      {
+        format: 'html',
+        filename: 'deepseek-conversations-sanitized-2026-08-06T10-00-00.html',
+        mimeType: 'text/html;charset=utf-8',
+        content: '<h1>你好</h1>',
+      },
+      {
+        format: 'markdown',
+        filename: 'deepseek-conversations-sanitized-2026-08-06T10-00-00.md',
+        mimeType: 'text/markdown;charset=utf-8',
+        content: '# 你好',
+      },
+    ], new Date('2026-08-06T10:00:00.000Z'));
+
+    expect(archive.filename).toBe('deepseek-conversations-sanitized-2026-08-06T10-00-00.zip');
+    expect(archive.mimeType).toBe('application/zip');
+    expect(Array.from(archive.content.slice(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    const decoded = new TextDecoder().decode(archive.content);
+    expect(decoded).toContain('deepseek-conversations-sanitized-2026-08-06T10-00-00.html');
+    expect(decoded).toContain('deepseek-conversations-sanitized-2026-08-06T10-00-00.md');
+    expect(decoded).toContain('<h1>你好</h1>');
+    expect(decoded).toContain('# 你好');
   });
 });

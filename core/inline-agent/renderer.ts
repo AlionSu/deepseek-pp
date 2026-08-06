@@ -1,7 +1,7 @@
 import { renderInlineMarkdown } from './markdown';
 import { injectInjectedThemeStyles } from '../ui/injected-theme';
 import { INLINE_AGENT_MAX_STEPS } from './types';
-import type { ToolExecutionRecord } from '../types';
+import type { ToolExecutionRecord, ToolResult } from '../types';
 
 const AGENT_STEP_STYLE_ID = 'dpp-inline-agent-css';
 const TOOL_SUMMARY_MAX_CHARS = 600;
@@ -757,12 +757,13 @@ export function updateStepStatus(step: HTMLElement, status: string, label?: stri
 export function addToolResultToStep(
   step: HTMLElement,
   toolName: string,
-  ok: boolean,
-  summary: string,
+  result: Pick<ToolResult, 'ok' | 'summary' | 'detail' | 'error'>,
   labels?: Partial<InlineAgentRendererLabels>,
 ): void {
   const tools = step.querySelector('.dpp-agent-step-tools');
   if (!tools) return;
+  const { ok } = result;
+  const summary = getToolRowSummary(result);
 
   // The tools section label stays hidden until the first tool row exists
   // (Issue #544).
@@ -821,6 +822,13 @@ export function addToolResultToStep(
   item.appendChild(toggle);
   item.appendChild(detail);
   tools.appendChild(item);
+}
+
+function getToolRowSummary(result: Pick<ToolResult, 'ok' | 'summary' | 'detail' | 'error'>): string {
+  if (result.ok) return result.summary;
+  const reason = result.detail?.trim() || result.error?.message.trim() || '';
+  if (!reason || reason === result.summary.trim()) return result.summary;
+  return `${result.summary}\n${reason}`;
 }
 
 export type AgentFooterVariant = 'complete' | 'error' | 'paused';

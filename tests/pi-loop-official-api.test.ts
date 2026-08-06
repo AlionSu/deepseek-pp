@@ -153,6 +153,41 @@ describe('runInlineAgentLoop with official-api backend', () => {
     expect(complete?.totalTools).toBe(1);
   });
 
+  it('gives the same XML tool index a distinct authorization identity in each model turn', async () => {
+    vi.useFakeTimers();
+    officialApiMocks.submitOfficialDeepSeekStreaming
+      .mockImplementationOnce(async (_input, callbacks) => {
+        callbacks.onTextChunk?.(TOOL_CALL_TEXT);
+        callbacks.onFinished?.();
+        return { assistantText: TOOL_CALL_TEXT, reasoningText: '', finished: true };
+      })
+      .mockImplementationOnce(async (_input, callbacks) => {
+        callbacks.onTextChunk?.(TOOL_CALL_TEXT);
+        callbacks.onFinished?.();
+        return { assistantText: TOOL_CALL_TEXT, reasoningText: '', finished: true };
+      })
+      .mockImplementationOnce(async (_input, callbacks) => {
+        callbacks.onTextChunk?.('Both files are ready.');
+        callbacks.onFinished?.();
+        return { assistantText: 'Both files are ready.', reasoningText: '', finished: true };
+      });
+
+    const callIds: string[] = [];
+    const loopPromise = runLoop(createPayload(), async (call) => {
+      callIds.push(call.id);
+      return {
+        name: call.name,
+        provider: { kind: 'local', id: 'artifact', displayName: 'Artifact', transport: 'in_process' },
+        result: { ok: true, summary: 'created' },
+      };
+    });
+    await vi.advanceTimersByTimeAsync(7_000);
+    await vi.advanceTimersByTimeAsync(7_000);
+    await loopPromise;
+
+    expect(callIds).toEqual(['turn:1:xml:0', 'turn:2:xml:0']);
+  });
+
   it('forwards official-API messages in OpenAI-compatible shape with tool results', async () => {
     vi.useFakeTimers();
     officialApiMocks.submitOfficialDeepSeekStreaming

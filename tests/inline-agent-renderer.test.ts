@@ -149,8 +149,8 @@ describe('inline agent renderer', () => {
   it('renders each tool execution as an independently collapsible row', () => {
     const step = createAgentStepElement(0, undefined, timelineLabels);
 
-    addToolResultToStep(step, 'web_search', true, 'found 5 results', timelineLabels);
-    addToolResultToStep(step, 'web_fetch', false, 'request failed: 403', timelineLabels);
+    addToolResultToStep(step, 'web_search', { ok: true, summary: 'found 5 results' }, timelineLabels);
+    addToolResultToStep(step, 'web_fetch', { ok: false, summary: 'request failed: 403' }, timelineLabels);
 
     const items = step.querySelectorAll<HTMLElement>('.dpp-agent-step-tool-item');
     expect(items).toHaveLength(2);
@@ -185,11 +185,32 @@ describe('inline agent renderer', () => {
     const step = createAgentStepElement(0, undefined, timelineLabels);
     const longSummary = 'x'.repeat(2000);
 
-    addToolResultToStep(step, 'shell_exec', true, longSummary, timelineLabels);
+    addToolResultToStep(step, 'shell_exec', { ok: true, summary: longSummary }, timelineLabels);
 
     const summary = step.querySelector<HTMLElement>('.dpp-agent-tool-summary');
     expect(summary?.textContent?.startsWith('x'.repeat(600))).toBe(true);
     expect(summary?.textContent).toContain('[truncated]');
+  });
+
+  it('shows the concrete rejection reason in the matching failed tool row', () => {
+    const step = createAgentStepElement(0, undefined, timelineLabels);
+
+    addToolResultToStep(step, 'shell_exec', {
+      ok: false,
+      summary: '工具授权被拒绝',
+      detail: 'Tool call turn:2:xml:0 has already been reserved or consumed.',
+      error: {
+        code: 'tool_call_replayed',
+        message: 'Tool call turn:2:xml:0 has already been reserved or consumed.',
+        retryable: false,
+      },
+    }, timelineLabels);
+
+    const toggle = step.querySelector<HTMLButtonElement>('.dpp-agent-tool-toggle');
+    toggle?.click();
+    expect(step.querySelector('.dpp-agent-tool-summary')?.textContent).toBe(
+      '工具授权被拒绝\nTool call turn:2:xml:0 has already been reserved or consumed.',
+    );
   });
 
   it('renders collapsible tool result details per execution', () => {
@@ -251,7 +272,7 @@ describe('inline agent renderer', () => {
     expect(processLabel?.hidden).toBe(false);
     expect(resultsLabel?.hidden).toBe(true);
 
-    addToolResultToStep(step, 'web_search', true, 'found 5 results');
+    addToolResultToStep(step, 'web_search', { ok: true, summary: 'found 5 results' });
     expect(toolsLabel?.hidden).toBe(false);
     expect(toolsLabel?.textContent).toBe('Tool calls');
   });
@@ -277,7 +298,7 @@ describe('inline agent renderer', () => {
   it('restores the same collapsed timeline structure from persisted trace data', () => {
     const step = createAgentStepElement(1, undefined, timelineLabels);
     updateStepStreamText(step, 'process text');
-    addToolResultToStep(step, 'web_search', true, 'summary', timelineLabels);
+    addToolResultToStep(step, 'web_search', { ok: true, summary: 'summary' }, timelineLabels);
     updateStepStatus(step, 'complete', 'Complete (1 tools)');
     setAgentStepCollapsed(step, true);
 
@@ -299,8 +320,8 @@ describe('inline agent renderer', () => {
 
     const step = createAgentStepElement(0, undefined, timelineLabels);
     updateStepStreamText(step, 'process text');
-    addToolResultToStep(step, 'web_search', true, 'found 5 results', timelineLabels);
-    addToolResultToStep(step, 'web_fetch', false, 'request failed: 403', timelineLabels);
+    addToolResultToStep(step, 'web_search', { ok: true, summary: 'found 5 results' }, timelineLabels);
+    addToolResultToStep(step, 'web_fetch', { ok: false, summary: 'request failed: 403' }, timelineLabels);
     updateStepStatus(step, 'complete', 'Complete (2 tools)');
 
     setAgentStepCollapsed(step, true);

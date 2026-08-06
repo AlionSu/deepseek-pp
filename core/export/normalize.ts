@@ -204,8 +204,25 @@ function normalizeContentPart(part: unknown): ExportedContentFragment | null {
 function normalizeContentKind(kind: string | null): ExportedContentFragment['kind'] {
   const lower = kind?.toLowerCase();
   if (lower === 'reasoning' || lower === 'thinking' || lower === 'think') return 'reasoning';
-  if (lower === 'tool' || lower === 'tool_result') return 'tool';
-  if (lower === 'text' || lower === 'markdown' || lower === 'content') return 'text';
+  if (
+    lower === 'tool' ||
+    lower === 'tool_result' ||
+    lower === 'tool_call' ||
+    lower === 'tool_calls' ||
+    lower === 'function_call' ||
+    lower === 'function_result'
+  ) return 'tool';
+  // DeepSeek's current history API names visible user/assistant fragments
+  // REQUEST and RESPONSE. Treating those as unknown made the #499
+  // input-output projection discard every visible message even though the
+  // full export still had text in `message.content` (Issue #546).
+  if (
+    lower === 'text' ||
+    lower === 'markdown' ||
+    lower === 'content' ||
+    lower === 'request' ||
+    lower === 'response'
+  ) return 'text';
   return 'unknown';
 }
 
