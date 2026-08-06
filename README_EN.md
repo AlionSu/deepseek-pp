@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1130-release-highlights">1.13.0 Highlights</a>
+  <a href="#1131-release-highlights">1.13.1 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.13.0 Release Highlights](#1130-release-highlights)
+- [1.13.1 Release Highlights](#1131-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -305,7 +305,20 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.13.0 Release Highlights
+## 1.13.1 Release Highlights
+
+1.13.1 polishes the inline agent experience and stabilizes conversation export: inline agent output renders like the native Markdown, tool states are shown honestly, and HTML export and downloads are more reliable.
+
+| Area | Main changes |
+|------|--------------|
+| Inline agent | Output renders as compact block elements matching the native Markdown renderer, with collapsed blank lines around stripped tool calls and aligned heading levels; tool execution states are shown honestly, streaming scroll is safer, and the paused state uses a neutral footer; icons moved to SVG with a unified type/radius system, more immediate interaction feedback, better keyboard and screen-reader accessibility, and silent start failures are now surfaced. |
+| Conversation export | HTML export includes input/output statistics, and the export and download paths are more stable. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.13.0 - 0.2.0)</summary>
+
+### 1.13.0 Release Highlights
 
 1.13.0 upgrades the inline agent engine and local Skill management: the inline agent runs on a more stable engine with an official API backend option, local folder-imported Skills move to an index-based flow with re-association and auto-activation, and background performance and conversation export are more reliable.
 
