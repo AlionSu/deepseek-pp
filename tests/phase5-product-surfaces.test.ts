@@ -17,6 +17,7 @@ import {
   inferCodeFilename,
   startContentUxPolish,
 } from '../entrypoints/content/adapters/ux-polish';
+import { createBrowserDownloadManager } from '../entrypoints/content/download-manager';
 import type { SavedItem } from '../core/saved-items';
 
 let storage: Record<string, unknown>;
@@ -132,6 +133,51 @@ describe('Phase 5 product surface helpers', () => {
       history.stop();
       polish.stop();
     }
+  });
+
+  it('mounts message actions on the current printable virtual-list message shape', () => {
+    document.body.innerHTML = `
+      <div class="ds-virtual-list ds-virtual-list--printable">
+        <div class="ds-virtual-list-visible-items">
+          <div data-virtual-list-item-key="2">
+            <div class="ds-assistant-message-main-content">完整回复内容</div>
+          </div>
+        </div>
+      </div>
+    `;
+    const polish = startContentUxPolish(() => ({
+      codeDownloadButton: '下载',
+      messageMarkdownButton: 'MD',
+      messageMarkdownTitle: '下载消息为 Markdown',
+      messageCopyButton: '复制',
+      messageCopyTitle: '复制完整对话输出',
+      messageCopyFailed: '复制失败',
+    }));
+
+    try {
+      const message = document.querySelector<HTMLElement>('[data-virtual-list-item-key="2"]')!;
+      expect(message.querySelectorAll('.dpp-message-download')).toHaveLength(1);
+      expect(message.querySelectorAll('.dpp-message-copy')).toHaveLength(1);
+    } finally {
+      polish.stop();
+    }
+  });
+
+  it('keeps the object URL alive until the download lease expires', () => {
+    vi.useFakeTimers();
+    const createObjectURL = vi.fn(() => 'blob:download-1');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const downloads = createBrowserDownloadManager(1_000);
+
+    downloads.download('export.md', new Blob(['hello'], { type: 'text/markdown' }));
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1_000);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:download-1');
+    downloads.stop();
   });
 
   it('does not rescan processed large code block text while streaming', async () => {

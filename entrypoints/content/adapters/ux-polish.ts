@@ -1,4 +1,8 @@
 import { createMessageMarkdownArtifact } from '../../../core/export/secondary-artifacts';
+import {
+  createBrowserDownloadManager,
+  type BrowserDownloadManager,
+} from '../download-manager';
 
 export interface ContentUxPolishController {
   stop(): void;
@@ -18,7 +22,15 @@ const STYLE_ID = 'dpp-content-ux-polish-css';
 const CODE_BUTTON_CLASS = 'dpp-code-download';
 const MESSAGE_BUTTON_CLASS = 'dpp-message-download';
 const MESSAGE_COPY_CLASS = 'dpp-message-copy';
-const MESSAGE_SELECTOR = '[data-message-id][data-message-role], [data-message-author-role]';
+const PRIMARY_MESSAGE_SELECTOR = [
+  '.ds-message',
+  '[data-message-id][data-message-role]',
+  '[data-message-author-role]',
+].join(', ');
+const VIRTUAL_MESSAGE_SELECTOR =
+  '.ds-virtual-list--printable .ds-virtual-list-visible-items > [data-virtual-list-item-key]';
+const MESSAGE_SELECTOR = `${PRIMARY_MESSAGE_SELECTOR}, ${VIRTUAL_MESSAGE_SELECTOR}`;
+const ASSISTANT_CONTENT_SELECTOR = '._74c0879, .ds-assistant-message-main-content';
 const POLISH_MOUNT_DELAY_MS = 50;
 const CODE_BUTTON_OFFSET_PX = 6;
 const MESSAGE_COPY_STATUS_MS = 1600;
@@ -29,11 +41,12 @@ export function startContentUxPolish(
   injectStyles();
   const codeButtons = new Map<HTMLElement, HTMLButtonElement>();
   const copyFeedbackTimers = new Set<ReturnType<typeof setTimeout>>();
+  const downloads = createBrowserDownloadManager();
   const syncCodeButtons = () => syncCodeButtonPositions(codeButtons);
-  const mount = () => mountPolish(document, getLabels(), codeButtons, copyFeedbackTimers);
+  const mount = () => mountPolish(document, getLabels(), codeButtons, copyFeedbackTimers, downloads);
   const refreshLabels = () => applyPolishLabels(document, getLabels());
   mount();
-  const candidateMountScheduler = createCandidateMountScheduler(getLabels, copyFeedbackTimers);
+  const candidateMountScheduler = createCandidateMountScheduler(getLabels, copyFeedbackTimers, downloads);
   const observer = new MutationObserver((mutations) => {
     for (const root of collectPolishCandidateRoots(mutations)) {
       candidateMountScheduler.schedule(root, codeButtons);
@@ -50,6 +63,7 @@ export function startContentUxPolish(
     stop() {
       observer.disconnect();
       candidateMountScheduler.cancel();
+      downloads.stop();
       copyFeedbackTimers.forEach((timer) => clearTimeout(timer));
       copyFeedbackTimers.clear();
       window.removeEventListener('dpp:navigation', mount);
@@ -80,9 +94,10 @@ function mountPolish(
   labels: ContentUxPolishLabels,
   codeButtons: Map<HTMLElement, HTMLButtonElement>,
   copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
+  downloads: BrowserDownloadManager,
 ): void {
-  collectCodeBlocks(root).forEach((pre, index) => mountCodeDownload(pre, index, labels, codeButtons));
-  collectMessageNodes(root).forEach((message) => mountMessageActions(message, labels, copyFeedbackTimers));
+  collectCodeBlocks(root).forEach((pre, index) => mountCodeDownload(pre, index, labels, codeButtons, downloads));
+  collectMessageNodes(root).forEach((message) => mountMessageActions(message, labels, copyFeedbackTimers, downloads));
   applyPolishLabels(root, labels);
   syncCodeButtonPositions(codeButtons);
 }
@@ -92,6 +107,7 @@ function mountCodeDownload(
   index: number,
   labels: ContentUxPolishLabels,
   codeButtons: Map<HTMLElement, HTMLButtonElement>,
+  downloads: BrowserDownloadManager,
 ): void {
   if (codeButtons.has(pre)) return;
 
@@ -103,7 +119,10 @@ function mountCodeDownload(
   button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    downloadText(inferCodeFilename(pre, index), getCodeBlockText(pre), 'text/plain;charset=utf-8');
+    downloads.download(
+      inferCodeFilename(pre, index),
+      new Blob([getCodeBlockText(pre)], { type: 'text/plain;charset=utf-8' }),
+    );
   });
   document.body.appendChild(button);
   codeButtons.set(pre, button);
@@ -120,6 +139,7 @@ export function getCodeBlockText(pre: HTMLElement): string {
 
 function collectMessageNodes(root: ParentNode): HTMLElement[] {
   return queryIncludingRoot<HTMLElement>(root, MESSAGE_SELECTOR)
+    .filter((node) => !node.matches(VIRTUAL_MESSAGE_SELECTOR) || !node.querySelector(PRIMARY_MESSAGE_SELECTOR))
     .filter((node) => !node.querySelector(`:scope > .${MESSAGE_BUTTON_CLASS}, :scope > .${MESSAGE_COPY_CLASS}`))
     .filter((node) => node.textContent?.trim());
 }
@@ -128,6 +148,7 @@ function mountMessageActions(
   message: HTMLElement,
   labels: ContentUxPolishLabels,
   copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
+  downloads: BrowserDownloadManager,
 ): void {
   const markdownButton = document.createElement('button');
   markdownButton.type = 'button';
@@ -138,12 +159,12 @@ function mountMessageActions(
     event.preventDefault();
     event.stopPropagation();
     const artifact = createMessageMarkdownArtifact({
-      id: message.dataset.messageId || `dom-${Date.now()}`,
-      role: normalizeRole(message.dataset.messageRole ?? message.dataset.messageAuthorRole),
+      id: message.dataset.messageId || message.dataset.virtualListItemKey || `dom-${Date.now()}`,
+      role: getMessageRole(message),
       content: getMessageText(message),
       createdAt: null,
     });
-    downloadText(artifact.filename, artifact.content, artifact.mimeType);
+    downloads.download(artifact.filename, new Blob([artifact.content], { type: artifact.mimeType }));
   });
   message.appendChild(markdownButton);
 
@@ -229,9 +250,18 @@ function normalizeRole(value: string | undefined): 'user' | 'assistant' | 'syste
   return 'unknown';
 }
 
+function getMessageRole(message: HTMLElement): 'user' | 'assistant' | 'system' | 'tool' | 'unknown' {
+  const explicit = normalizeRole(message.dataset.messageRole ?? message.dataset.messageAuthorRole);
+  if (explicit !== 'unknown') return explicit;
+  if (message.querySelector(ASSISTANT_CONTENT_SELECTOR)) return 'assistant';
+  if (message.matches('.ds-message, [data-virtual-list-item-key]')) return 'user';
+  return 'unknown';
+}
+
 function createCandidateMountScheduler(
   getLabels: () => ContentUxPolishLabels,
   copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
+  downloads: BrowserDownloadManager,
 ): { schedule(root: ParentNode, codeButtons: Map<HTMLElement, HTMLButtonElement>): void; cancel(): void } {
   const pending = new Set<ParentNode>();
   let pendingCodeButtons: Map<HTMLElement, HTMLButtonElement> | null = null;
@@ -249,7 +279,9 @@ function createCandidateMountScheduler(
         pending.clear();
         const labels = getLabels();
         for (const candidate of roots) {
-          if (pendingCodeButtons) mountPolish(candidate, labels, pendingCodeButtons, copyFeedbackTimers);
+          if (pendingCodeButtons) {
+            mountPolish(candidate, labels, pendingCodeButtons, copyFeedbackTimers, downloads);
+          }
         }
         pendingCodeButtons = null;
       }, POLISH_MOUNT_DELAY_MS);
@@ -320,18 +352,6 @@ function positionCodeButton(pre: HTMLElement, button: HTMLButtonElement): void {
   button.style.display = hidden ? 'none' : '';
   button.style.top = `${Math.min(maxTop, Math.max(CODE_BUTTON_OFFSET_PX, rect.top + CODE_BUTTON_OFFSET_PX))}px`;
   button.style.left = `${Math.min(maxLeft, Math.max(CODE_BUTTON_OFFSET_PX, rect.right - CODE_BUTTON_OFFSET_PX))}px`;
-}
-
-function downloadText(filename: string, content: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
 }
 
 function extensionForLanguage(language: string): string {

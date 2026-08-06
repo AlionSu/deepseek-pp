@@ -171,6 +171,7 @@ import type {
   ConversationExportProgress,
   ConversationExportResult,
 } from '../core/export/types';
+import { createConversationExportArchiveArtifact } from '../core/export/zip';
 import type { ToolCallPayloadChunk } from '../core/interceptor/streaming-tool-call-parser';
 import {
   replaceContentDocumentLifecycle,
@@ -192,6 +193,10 @@ import { notifyContentAuthStatusChanged } from './content/auth-status-notifier';
 import { createContentPersistenceTracker } from './content/persistence-tracking';
 import { getRestoredMessageMutationAction } from './content/restored-message-targets';
 import { bindNewChatToolCallToBrowserSession } from './content/tool-session-binding';
+import {
+  createBrowserDownloadManager,
+  type BrowserDownloadManager,
+} from './content/download-manager';
 
 const TOOL_BLOCK_ID = 'dpp-tool-block';
 const TOOL_BLOCK_STYLE_ID = 'dpp-tool-block-css';
@@ -439,10 +444,12 @@ let toolCapabilityScope: ContentResourceScope | null = null;
 let toolCapabilityEpoch = 0;
 const pendingToolPersistenceOperations = new Set<Promise<unknown>>();
 let inlineAgentCapabilityScope: ContentResourceScope | null = null;
+let inlineAgentDownloadManager: BrowserDownloadManager | null = null;
 let inlineAgentCapabilityEpoch = 0;
 const pendingInlineAgentPersistenceOperations = new Set<Promise<unknown>>();
 let multimodalCapabilityScope: ContentResourceScope | null = null;
 let exportCapabilityScope: ContentResourceScope | null = null;
+let exportDownloadManager: BrowserDownloadManager | null = null;
 let backgroundCapabilityScope: ContentResourceScope | null = null;
 let petCapabilityScope: ContentResourceScope | null = null;
 
@@ -815,6 +822,8 @@ function startInlineAgentCapability(
   mutationHub: ContentMutationHub,
 ): void {
   inlineAgentCapabilityScope = scope;
+  inlineAgentDownloadManager?.stop();
+  inlineAgentDownloadManager = createBrowserDownloadManager();
   const epoch = ++inlineAgentCapabilityEpoch;
   startInlineAgentContinuationMessageHider(scope, mutationHub);
   observeReportedPersistence(restorePersistedInlineAgentTraces(scope, epoch));
@@ -822,6 +831,8 @@ function startInlineAgentCapability(
 
 async function stopInlineAgentCapability(): Promise<void> {
   inlineAgentCapabilityScope = null;
+  inlineAgentDownloadManager?.stop();
+  inlineAgentDownloadManager = null;
   inlineAgentCapabilityEpoch += 1;
   stopInlineAgentContinuationMessageHider();
   if (activeAgentAbort || inlineAgentContainer) stopInlineAgent();
@@ -885,6 +896,8 @@ function startExportCapability(
   mutationHub: ContentMutationHub,
 ): void {
   exportCapabilityScope = scope;
+  exportDownloadManager?.stop();
+  exportDownloadManager = createBrowserDownloadManager();
   scope.addCleanup('cleanup', mutationHub.subscribe({
     matches: (mutations) => (
       exportCapabilityScope === scope
@@ -898,6 +911,8 @@ function startExportCapability(
 
 function stopExportCapability(): void {
   exportCapabilityScope = null;
+  exportDownloadManager?.stop();
+  exportDownloadManager = null;
   stopConversationExportActionInjector();
 }
 
@@ -2027,11 +2042,11 @@ async function startCurrentConversationExport(
       throw new Error(response?.error ?? contentT('content.export.failed'));
     }
 
-    for (const artifact of response.artifacts) {
-      if (formats.includes(artifact.format)) {
-        downloadConversationExportArtifact(artifact);
-      }
+    const artifacts = response.artifacts.filter((artifact) => formats.includes(artifact.format));
+    if (artifacts.length !== formats.length) {
+      throw new Error(contentT('content.export.failed'));
     }
+    downloadConversationExportArtifacts(artifacts);
 
     const warning = response.summary.failedSessionCount > 0;
     showConversationExportToast(
@@ -2989,16 +3004,19 @@ function injectMultimodalMediaStyles() {
   document.head.appendChild(style);
 }
 
-function downloadConversationExportArtifact(artifact: ConversationExportArtifact) {
-  const blob = new Blob([artifact.content], { type: artifact.mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = artifact.filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+function downloadConversationExportArtifacts(artifacts: readonly ConversationExportArtifact[]) {
+  const manager = exportDownloadManager;
+  if (!manager || artifacts.length === 0) throw new Error(contentT('content.export.failed'));
+  if (artifacts.length === 1) {
+    const artifact = artifacts[0];
+    manager.download(artifact.filename, new Blob([artifact.content], { type: artifact.mimeType }));
+    return;
+  }
+
+  const archive = createConversationExportArchiveArtifact(artifacts);
+  const archiveBytes = new Uint8Array(archive.content.byteLength);
+  archiveBytes.set(archive.content);
+  manager.download(archive.filename, new Blob([archiveBytes], { type: archive.mimeType }));
 }
 
 function showConversationExportToast(message: string, tone: 'info' | 'success' | 'warning' | 'error') {
@@ -3980,7 +3998,7 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
   flushPendingInlineAgentStreamRender();
 
   for (const exec of msg.toolExecutions) {
-    addToolResultToStep(inlineAgentCurrentStep, exec.name, exec.result.ok, exec.result.summary, getAgentRendererLabels());
+    addToolResultToStep(inlineAgentCurrentStep, exec.name, exec.result, getAgentRendererLabels());
   }
   addToolResultDetailsToStep(inlineAgentCurrentStep, msg.toolExecutions);
   agentRunningToolCount += msg.toolExecutions.length;
@@ -4146,15 +4164,10 @@ async function downloadAgentOutputArtifact(artifactId: string): Promise<void> {
       return;
     }
     const artifact = response.artifact;
-    const blob = new Blob([artifact.content], { type: artifact.mimeType });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = artifact.filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    inlineAgentDownloadManager?.download(
+      artifact.filename,
+      new Blob([artifact.content], { type: artifact.mimeType }),
+    );
   } catch (error) {
     console.warn('[DeepSeek++] agent output artifact download request failed:', error);
   }
@@ -6353,7 +6366,7 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
     const stepText = getInlineAgentDisplayFinalText(step.text) || step.text;
     updateStepStreamText(stepEl, clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '');
     for (const exec of step.toolExecutions) {
-      addToolResultToStep(stepEl, exec.name, exec.result.ok, exec.result.summary, getAgentRendererLabels());
+      addToolResultToStep(stepEl, exec.name, exec.result, getAgentRendererLabels());
     }
     addToolResultDetailsToStep(stepEl, step.toolExecutions);
     // A mid-flight step (streaming / executing tools) persisted by a page

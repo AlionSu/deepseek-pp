@@ -178,9 +178,15 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
   // Shared per-run stream wiring: model selection + pacing wrapper. The web
   // path keeps the released semantics byte-for-byte (golden); the
   // official-api path is a peer backend over the same pi loop.
+  let requestCount = 0;
   const mapToolCall = (call: { name: string; invocationName: string; payload: Record<string, unknown> }, index: number) => ({
     type: 'toolCall' as const,
-    id: `xml:${index}`,
+    // XML indexes restart at zero for every model response. A single inline
+    // run intentionally reuses one background authorization grant, so the raw
+    // `xml:${index}` id made the first tool in turn 2 look like a replay of the
+    // first tool in turn 1. Bind the id to the model-request sequence while
+    // keeping it stable for any parsing/retry inside that same request.
+    id: `turn:${requestCount}:xml:${index}`,
     name: call.invocationName,
     arguments: call.payload,
   });
@@ -255,7 +261,6 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
 
   // One 2.5–6.5s throttle delay before every DS request except the first
   // (released request pacing).
-  let requestCount = 0;
   const pacedStreamFn: StreamFn = async (model, context, options) => {
     if (requestCount > 0) {
       await waitBetweenDeepSeekRequests(signal);

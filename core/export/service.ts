@@ -140,7 +140,14 @@ export async function runConversationExport(input: RunConversationExportInput): 
     failures,
   };
 
-  const finalExport = request.mode === 'sanitized' ? sanitizeConversationExport(exportData) : exportData;
+  const modeExport = request.mode === 'sanitized' ? sanitizeConversationExport(exportData) : exportData;
+  // Apply the requested range after sanitization and before the returned stats
+  // are validated/observed by the background coordinator. This makes
+  // projected-empty current-session exports fail visibly and keeps the response
+  // summary aligned with every generated artifact (Issue #546). Artifact
+  // builders repeat this idempotent projection defensively to preserve their
+  // existing public helper contract.
+  const finalExport = applyConversationExportContentScope(modeExport, request.contentScope);
   assertNotCancelled(input.signal);
   await report(input, 'completed', 'completed', 1, 1, '导出完成');
   assertNotCancelled(input.signal);
