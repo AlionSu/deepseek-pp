@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   addToolResultDetailsToStep,
   addToolResultToStep,
+  createAgentFooter,
   createAgentRunningIndicator,
   createAgentStepElement,
   injectInlineAgentStyles,
+  isInlineAgentBudgetFinalText,
   setAgentStepCollapsed,
   updateAgentRunningIndicator,
   updateStepStatus,
@@ -47,15 +49,58 @@ describe('inline agent renderer', () => {
     expect(body?.innerHTML).toContain('<td><strong>Average price</strong></td>');
   });
 
-  it('keeps the streaming step body scrolled to the newest output', () => {
+  it('follows the streaming step body while the reader is at the bottom', () => {
     const step = createAgentStepElement(0);
     const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
     expect(body).toBeTruthy();
     Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 480 });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 456 });
 
     updateStepStreamText(step, 'line 1\nline 2\nline 3');
 
     expect(body?.scrollTop).toBe(480);
+  });
+
+  it('does not yank the streaming step body scroll away from a reader who scrolled up', () => {
+    const step = createAgentStepElement(0);
+    const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
+    expect(body).toBeTruthy();
+    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 480 });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 200 });
+    Object.defineProperty(body, 'scrollTop', { configurable: true, value: 100, writable: true });
+
+    updateStepStreamText(step, 'line 1\nline 2\nline 3');
+
+    expect(body?.scrollTop).toBe(100);
+  });
+
+  it('renders paused footers as neutral, distinct from complete and error', () => {
+    const complete = createAgentFooter(2, 3, 'complete');
+    expect(complete.className).toContain('complete');
+    expect(complete.className).not.toContain('paused');
+    expect(complete.textContent).toBe('Agent complete (2 steps, 3 tool calls)');
+
+    const paused = createAgentFooter(2, 3, 'paused');
+    expect(paused.className).toContain('paused');
+    expect(paused.className).not.toContain('complete');
+    expect(paused.className).not.toContain('error');
+    expect(paused.textContent).toBe('Agent paused (2 steps, 3 tool calls)');
+
+    const stopped = createAgentFooter(0, 0, 'paused', 'Stopped');
+    expect(stopped.textContent).toBe('Stopped');
+
+    const error = createAgentFooter(2, 3, 'error');
+    expect(error.className).toContain('error');
+  });
+
+  it('recognizes the exact budget-exhaustion notice as a paused final text', () => {
+    const noticeFor = (count: number) => `paused after ${count} rounds`;
+    expect(isInlineAgentBudgetFinalText('paused after 3 rounds', noticeFor)).toBe(true);
+    expect(isInlineAgentBudgetFinalText('paused after 25 rounds', noticeFor)).toBe(true);
+    expect(isInlineAgentBudgetFinalText('paused after 27 rounds', noticeFor)).toBe(true);
+    expect(isInlineAgentBudgetFinalText('paused after 28 rounds', noticeFor)).toBe(false);
+    expect(isInlineAgentBudgetFinalText('Here is the final answer.', noticeFor)).toBe(false);
+    expect(isInlineAgentBudgetFinalText('', noticeFor)).toBe(false);
   });
 
   it('labels the streamed model output as process text separate from the answer', () => {

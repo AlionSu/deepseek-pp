@@ -1,9 +1,12 @@
 import { renderInlineMarkdown } from './markdown';
 import { injectInjectedThemeStyles } from '../ui/injected-theme';
+import { INLINE_AGENT_MAX_STEPS } from './types';
 import type { ToolExecutionRecord } from '../types';
 
 const AGENT_STEP_STYLE_ID = 'dpp-inline-agent-css';
 const TOOL_SUMMARY_MAX_CHARS = 600;
+/** Distance from the bottom within which streaming output keeps auto-following. */
+const STREAM_SCROLL_FOLLOW_TOLERANCE_PX = 24;
 
 let agentDomSequence = 0;
 
@@ -15,6 +18,7 @@ function nextAgentDomId(prefix: string): string {
 export interface InlineAgentRendererLabels {
   step: (stepNumber: number) => string;
   streaming: string;
+  executingTools: string;
   stop: string;
   process: string;
   tools: string;
@@ -23,6 +27,7 @@ export interface InlineAgentRendererLabels {
   toolOk: string;
   toolError: string;
   footerComplete: (totalSteps: number, totalTools: number) => string;
+  footerPaused: (totalSteps: number, totalTools: number) => string;
   footerError: (totalSteps: number, totalTools: number) => string;
 }
 
@@ -431,6 +436,10 @@ export function injectInlineAgentStyles(): void {
       content: '\\25A0 ';
       color: var(--dpp-ui-success);
     }
+    .dpp-agent-footer.paused::before {
+      content: '\\25A0 ';
+      color: var(--dpp-ui-text-subtle);
+    }
     .dpp-agent-footer.error::before {
       content: '\\25A0 ';
       color: var(--dpp-ui-error);
@@ -594,11 +603,19 @@ export function updateStepStreamText(step: HTMLElement, visibleText: string): vo
 }
 
 function scrollStepBodyToBottom(body: HTMLElement): void {
+  const distanceFromBottom = body.scrollHeight - body.scrollTop - body.clientHeight;
+  // Only follow the stream while the reader is already at the bottom; never
+  // yank the scroll position away from a reader who scrolled up (Issue #541).
+  const stickToBottom = distanceFromBottom <= STREAM_SCROLL_FOLLOW_TOLERANCE_PX;
+  if (!stickToBottom) return;
   body.scrollTop = body.scrollHeight;
   if (typeof requestAnimationFrame !== 'function') return;
 
   requestAnimationFrame(() => {
-    body.scrollTop = body.scrollHeight;
+    const after = body.scrollHeight - body.scrollTop - body.clientHeight;
+    if (after <= STREAM_SCROLL_FOLLOW_TOLERANCE_PX) {
+      body.scrollTop = body.scrollHeight;
+    }
   });
 }
 
@@ -674,25 +691,60 @@ export function addToolResultToStep(
   tools.appendChild(item);
 }
 
+export type AgentFooterVariant = 'complete' | 'error' | 'paused';
+
+/**
+ * Footer for the finished agent panel. `'paused'` covers both the
+ * user-stopped and budget-exhausted ends (Issue #541): neither is a success
+ * nor an error, so it must not reuse the green "complete" styling.
+ */
 export function createAgentFooter(
   totalSteps: number,
   totalTools: number,
-  isError: boolean,
+  variant: AgentFooterVariant,
   labelOverride?: string,
   labels?: Partial<InlineAgentRendererLabels>,
 ): HTMLElement {
   const footer = document.createElement('div');
-  footer.className = `dpp-agent-footer ${isError ? 'error' : 'complete'}`;
+  footer.className = `dpp-agent-footer ${variant}`;
   if (labelOverride) {
     footer.textContent = labelOverride;
-  } else if (isError) {
+  } else if (variant === 'error') {
     footer.textContent = labels?.footerError?.(totalSteps, totalTools) ??
       `Agent error (${totalSteps} steps, ${totalTools} tool calls)`;
+  } else if (variant === 'paused') {
+    footer.textContent = labels?.footerPaused?.(totalSteps, totalTools) ??
+      `Agent paused (${totalSteps} steps, ${totalTools} tool calls)`;
   } else {
     footer.textContent = labels?.footerComplete?.(totalSteps, totalTools) ??
       `Agent complete (${totalSteps} steps, ${totalTools} tool calls)`;
   }
   return footer;
+}
+
+/**
+ * True when `text` is exactly the budget-exhaustion notice for some completed
+ * step count (1..maxSteps). The loop fabricates that notice by translating
+ * `content.agent.budgetReached`, so the renderer recognizes it by
+ * reconstructing the same strings instead of adding a wire-protocol field
+ * (the AGENT_* protocol is byte-locked by the golden contract test). Used to
+ * render the neutral "paused" footer instead of the green "complete" one for
+ * budget-paused loops (Issue #541).
+ *
+ * The default range allows a +2 margin over {@link INLINE_AGENT_MAX_STEPS}:
+ * the loop reports `stepIndex` (and `stepIndex + 1` on the nudge path) as the
+ * completed-round count, so the notice can exceed maxSteps by one.
+ */
+export function isInlineAgentBudgetFinalText(
+  text: string,
+  budgetNoticeForCount: (count: number) => string,
+  maxSteps: number = INLINE_AGENT_MAX_STEPS + 2,
+): boolean {
+  if (!text) return false;
+  for (let count = 1; count <= maxSteps; count += 1) {
+    if (text === budgetNoticeForCount(count)) return true;
+  }
+  return false;
 }
 
 /**
