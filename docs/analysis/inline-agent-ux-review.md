@@ -3,7 +3,7 @@
 - 日期：2026-08-05
 - 范围：DeepSeek++ 在 DeepSeek 网页（chat.deepseek.com）以 Agent 方式运行时注入的面板 UI/UX
 - 方法：3 个独立 subagent 并行审查 —— ① 现状代码级 UI/UX 审计；② Claude Code Desktop 等 8 类竞品设计语言调研；③ 自家 sidepanel 设计系统 + DeepSeek 页面视觉规范三方对照。关键论断均已在代码中复核。
-- 状态：P0 批次已完成并合入（PR [#542](https://github.com/zhu1090093659/deepseek-pp/pull/542)）；P1 批次已实现（GitHub Issue [#544](https://github.com/zhu1090093659/deepseek-pp/issues/544)，PR [#545](https://github.com/zhu1090093659/deepseek-pp/pull/545)，验证链全绿，待合入）。
+- 状态：**已全部完成并通过验收**。P0 批次合入（PR [#542](https://github.com/zhu1090093659/deepseek-pp/pull/542)，Issue #541 已关闭）；P1 批次合入（PR [#545](https://github.com/zhu1090093659/deepseek-pp/pull/545)，Issue #544 已关闭）。手动浏览器冒烟：用户以本地构建（dist/chrome-mv3）在 ego-lite 中加载扩展，于 chat.deepseek.com 专家模式实测，目视确认无问题。
 
 ## 1. 现状架构
 
