@@ -79,6 +79,7 @@ import {
   addToolResultDetailsToStep,
   createAgentFooter,
   createAgentRunningIndicator,
+  createAgentStartingElement,
   updateAgentRunningIndicator,
   isInlineAgentBudgetFinalText,
 } from '../core/inline-agent/renderer';
@@ -480,6 +481,7 @@ function getAgentRendererLabels() {
     step: (stepNumber: number) => contentT('content.agent.step', { index: stepNumber }),
     streaming: contentT('content.agent.streaming'),
     executingTools: contentT('content.agent.executingTools'),
+    starting: contentT('content.agent.starting'),
     stop: contentT('content.agent.stop'),
     process: contentT('content.agent.process'),
     tools: contentT('content.agent.tools'),
@@ -3573,7 +3575,12 @@ function startInlineAgentIfNeeded(
   const authorization = complete.requestId
     ? activeToolAuthorizations.get(complete.requestId)
     : undefined;
-  if (!authorization) return;
+  if (!authorization) {
+    // Don't fail silently: the user asked for agent work and the loop cannot
+    // start without the tool authorization grant (Issue #544).
+    showContentToast(contentT('content.agent.startFailed'), 'warning');
+    return;
+  }
 
   const payload: InlineAgentStartPayload = {
     loopId,
@@ -3610,7 +3617,12 @@ function startInlineAgentIfNeeded(
   const messages = getAssistantMessages();
   const anchorContent = getInlineAgentAnchorContent(complete);
   const target = findInlineAgentLiveTarget(complete, messages, anchorContent);
-  if (!target) return;
+  if (!target) {
+    // Don't fail silently: the anchor assistant message could not be located
+    // in the live DOM (Issue #544).
+    showContentToast(contentT('content.agent.startFailed'), 'warning');
+    return;
+  }
   const anchorMessageIndex = messages.indexOf(target);
 
   inlineAgentLoopId = loopId;
@@ -3625,6 +3637,12 @@ function startInlineAgentIfNeeded(
 
   inlineAgentContainer = container;
   mountInlineAgentContainer(target, container);
+
+  // Visible "starting" feedback for the 2.5-6.5s wait before the first model
+  // turn (Issue #544); removed when the first step renders.
+  const startingEl = createAgentStartingElement(getAgentRendererLabels());
+  container.appendChild(startingEl);
+  container.setAttribute('data-agent-starting', 'true');
 
   startOwnedInlineAgentLoop(payload);
 }
@@ -3714,6 +3732,7 @@ function teardownInlineAgentPanel(): void {
 
 function stopInlineAgent(): void {
   hideAgentRunningIndicator();
+  removeAgentStartingElement();
   const container = inlineAgentContainer;
   updateActiveInlineAgentTrace((trace) => ({
     ...trace,
@@ -3868,8 +3887,14 @@ function handleInlineAgentLoopEvent(type: string, data: unknown): void {
   }
 }
 
+function removeAgentStartingElement(): void {
+  inlineAgentContainer?.querySelector('.dpp-agent-starting')?.remove();
+  inlineAgentContainer?.removeAttribute('data-agent-starting');
+}
+
 function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): void {
   if (data.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  removeAgentStartingElement();
   showAgentRunningIndicator(data.stepIndex);
 
   const stepEl = createAgentStepElement(data.stepIndex, stopInlineAgent, getAgentRendererLabels());
@@ -3976,6 +4001,9 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
 
   const completedStep = inlineAgentCurrentStep;
   inlineAgentCapabilityScope?.setTimeout(() => {
+    // Never override a manual expand/collapse the user made while the step
+    // was finishing (Issue #544).
+    if (completedStep.getAttribute('data-user-toggled') === 'true') return;
     setAgentStepCollapsed(completedStep, true);
   }, 800);
 
@@ -3985,6 +4013,7 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
 function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
   hideAgentRunningIndicator();
+  removeAgentStartingElement();
   flushPendingInlineAgentStreamRender();
 
   try {
@@ -4134,6 +4163,7 @@ async function downloadAgentOutputArtifact(artifactId: string): Promise<void> {
 function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
   hideAgentRunningIndicator();
+  removeAgentStartingElement();
   flushPendingInlineAgentStreamRender();
 
   try {
@@ -6326,7 +6356,14 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
       addToolResultToStep(stepEl, exec.name, exec.result.ok, exec.result.summary, getAgentRendererLabels());
     }
     addToolResultDetailsToStep(stepEl, step.toolExecutions);
-    updateStepStatus(stepEl, step.status, getInlineAgentStepStatusLabel(step));
+    // A mid-flight step (streaming / executing tools) persisted by a page
+    // refresh can never resume: render it as interrupted instead of a frozen
+    // blinking state with no stop control (Issue #544).
+    if (step.status === 'streaming' || step.status === 'executing_tools') {
+      updateStepStatus(stepEl, 'interrupted', contentT('content.agent.interrupted'));
+    } else {
+      updateStepStatus(stepEl, step.status, getInlineAgentStepStatusLabel(step));
+    }
     setAgentStepCollapsed(stepEl, step.collapsed);
     container.appendChild(stepEl);
   }

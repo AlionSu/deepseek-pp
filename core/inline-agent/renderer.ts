@@ -8,6 +8,21 @@ const TOOL_SUMMARY_MAX_CHARS = 600;
 /** Distance from the bottom within which streaming output keeps auto-following. */
 const STREAM_SCROLL_FOLLOW_TOLERANCE_PX = 24;
 
+// ---------------------------------------------------------------------------
+// Inline SVG icons (fill="currentColor" so each icon inherits the themed color
+// of its container). Replaces the previous unicode glyphs (●⚙✓✗▼▸■) that
+// rendered as emoji or jagged text on some platforms (Issue #544).
+// ---------------------------------------------------------------------------
+const svgDataUri = (body: string, viewBox = '0 0 24 24'): string =>
+  `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" fill="currentColor">${body}</svg>`,
+  )}")`;
+const ICON_CHECK = svgDataUri('<path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>');
+const ICON_CROSS = svgDataUri('<path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>');
+const ICON_GEAR = svgDataUri('<path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>');
+const ICON_CHEVRON_DOWN = svgDataUri('<path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/>');
+const ICON_CHEVRON_RIGHT = svgDataUri('<path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>');
+
 let agentDomSequence = 0;
 
 function nextAgentDomId(prefix: string): string {
@@ -19,6 +34,7 @@ export interface InlineAgentRendererLabels {
   step: (stepNumber: number) => string;
   streaming: string;
   executingTools: string;
+  starting: string;
   stop: string;
   process: string;
   tools: string;
@@ -51,15 +67,15 @@ export function injectInlineAgentStyles(): void {
       position: relative;
       margin-bottom: 8px;
       border: 1px solid var(--dpp-ui-border);
-      border-radius: 6px;
+      border-radius: 12px;
       background: var(--dpp-ui-surface);
       color: var(--dpp-ui-text);
     }
     .dpp-agent-step::before {
       content: '';
       position: absolute;
-      left: -20px;
-      top: 11px;
+      left: -24px;
+      top: 13px;
       width: 7px;
       height: 7px;
       border-radius: 50%;
@@ -96,7 +112,7 @@ export function injectInlineAgentStyles(): void {
       align-items: center;
       gap: 4px;
       background: var(--dpp-ui-surface-muted);
-      border-radius: 5px 5px 0 0;
+      border-radius: 11px 11px 0 0;
     }
     .dpp-agent-step-toggle {
       flex: 1;
@@ -116,7 +132,7 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-step-toggle:focus-visible {
       outline: 2px solid var(--dpp-ui-accent);
       outline-offset: -2px;
-      border-radius: 5px 0 0 0;
+      border-radius: 11px 0 0 0;
     }
     .dpp-agent-step-indicator {
       flex: none;
@@ -125,35 +141,38 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-step-dot {
       flex: none;
-      font-size: 10px;
-      line-height: 1;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 14px 14px;
     }
-    .dpp-agent-step-dot::before {
-      content: '\\25CF';
-      color: var(--dpp-ui-text-subtle);
-    }
-    .dpp-agent-step[data-status="streaming"] .dpp-agent-step-dot::before {
-      color: var(--dpp-ui-accent);
+    .dpp-agent-step[data-status="streaming"] .dpp-agent-step-dot {
+      background-color: var(--dpp-ui-accent);
       animation: dpp-agent-step-pulse 1.1s ease-in-out infinite;
     }
-    .dpp-agent-step[data-status="executing_tools"] .dpp-agent-step-dot::before {
-      content: '\\2699';
+    .dpp-agent-step[data-status="executing_tools"] .dpp-agent-step-dot {
+      background-image: ${ICON_GEAR};
       color: var(--dpp-ui-warning);
     }
-    .dpp-agent-step[data-status="complete"] .dpp-agent-step-dot::before {
-      content: '\\2713';
+    .dpp-agent-step[data-status="complete"] .dpp-agent-step-dot {
+      background-image: ${ICON_CHECK};
       color: var(--dpp-ui-success);
     }
-    .dpp-agent-step[data-status="error"] .dpp-agent-step-dot::before {
-      content: '\\2717';
+    .dpp-agent-step[data-status="error"] .dpp-agent-step-dot {
+      background-image: ${ICON_CROSS};
       color: var(--dpp-ui-error);
+    }
+    .dpp-agent-step[data-status="interrupted"] .dpp-agent-step-dot {
+      background-color: var(--dpp-ui-text-subtle);
     }
     @keyframes dpp-agent-step-pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .dpp-agent-step[data-status="streaming"] .dpp-agent-step-dot::before {
+      .dpp-agent-step[data-status="streaming"] .dpp-agent-step-dot {
         animation: none;
       }
     }
@@ -165,7 +184,13 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-step-chevron {
       flex: none;
-      font-size: 9px;
+      width: 12px;
+      height: 12px;
+      background-image: ${ICON_CHEVRON_DOWN};
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 12px 12px;
+      color: var(--dpp-ui-text-subtle);
       transition: transform 0.2s ease;
     }
     .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-chevron {
@@ -174,10 +199,10 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-stop-btn {
       flex: none;
       margin-right: 8px;
-      padding: 2px 8px;
-      font-size: 11px;
+      padding: 3px 10px;
+      font-size: 12px;
       border: 1px solid var(--dpp-ui-error);
-      border-radius: 4px;
+      border-radius: 6px;
       background: transparent;
       color: var(--dpp-ui-error);
       cursor: pointer;
@@ -191,10 +216,10 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-step-section-label {
       padding: 8px 10px 0;
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
       letter-spacing: 0.02em;
-      color: var(--dpp-ui-text-subtle);
+      color: var(--dpp-ui-text-muted);
     }
     .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-section-label {
       display: none;
@@ -204,8 +229,8 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-step-body {
       padding: 4px 10px 8px;
-      font-size: 13px;
-      line-height: 1.5;
+      font-size: 14px;
+      line-height: 1.6;
       color: var(--dpp-ui-text);
       word-break: break-word;
       max-height: 300px;
@@ -242,7 +267,7 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-step-body code {
       padding: 1px 4px;
-      border-radius: 4px;
+      border-radius: 6px;
       background: var(--dpp-ui-code-bg);
       font-family: 'SF Mono', Monaco, Menlo, Consolas, monospace;
       font-size: 0.92em;
@@ -250,7 +275,7 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-step-body pre {
       margin: 6px 0;
       padding: 8px;
-      border-radius: 6px;
+      border-radius: 8px;
       background: var(--dpp-ui-code-bg);
       overflow-x: auto;
     }
@@ -291,7 +316,7 @@ export function injectInlineAgentStyles(): void {
       flex-direction: column;
       gap: 4px;
       padding: 4px 10px 8px;
-      font-size: 12px;
+      font-size: 13px;
       color: var(--dpp-ui-text-muted);
     }
     .dpp-agent-step-tools:empty {
@@ -299,7 +324,7 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-step-tool-item {
       border: 1px solid var(--dpp-ui-border-muted);
-      border-radius: 6px;
+      border-radius: 8px;
       background: var(--dpp-ui-surface-muted);
       overflow: hidden;
     }
@@ -311,7 +336,7 @@ export function injectInlineAgentStyles(): void {
       padding: 5px 8px;
       border: none;
       background: transparent;
-      font-size: 12px;
+      font-size: 13px;
       color: var(--dpp-ui-text);
       cursor: pointer;
       user-select: none;
@@ -323,12 +348,18 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-tool-state-icon {
       flex: none;
-      font-size: 11px;
+      width: 13px;
+      height: 13px;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 13px 13px;
     }
     .dpp-agent-step-tool-item.ok .dpp-agent-tool-state-icon {
+      background-image: ${ICON_CHECK};
       color: var(--dpp-ui-success);
     }
     .dpp-agent-step-tool-item.err .dpp-agent-tool-state-icon {
+      background-image: ${ICON_CROSS};
       color: var(--dpp-ui-error);
     }
     .dpp-agent-tool-name {
@@ -340,12 +371,17 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-tool-state {
       flex: none;
       margin-left: auto;
-      font-size: 11px;
+      font-size: 12px;
       color: var(--dpp-ui-text-muted);
     }
     .dpp-agent-tool-chevron {
       flex: none;
-      font-size: 9px;
+      width: 12px;
+      height: 12px;
+      background-image: ${ICON_CHEVRON_RIGHT};
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 12px 12px;
       color: var(--dpp-ui-text-subtle);
       transition: transform 0.15s ease;
     }
@@ -355,7 +391,7 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-tool-summary {
       padding: 6px 8px 8px;
       border-top: 1px solid var(--dpp-ui-border-muted);
-      font-size: 12px;
+      font-size: 13px;
       line-height: 1.5;
       color: var(--dpp-ui-text-muted);
       white-space: pre-wrap;
@@ -366,22 +402,39 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-step-tool-result {
       margin: 4px 0;
       border: 1px solid var(--dpp-ui-border);
-      border-radius: 5px;
+      border-radius: 8px;
       background: var(--dpp-ui-surface-muted);
-      font-size: 12px;
+      font-size: 13px;
     }
     .dpp-agent-step-tool-result summary {
-      padding: 4px 8px;
+      position: relative;
+      padding: 4px 8px 4px 24px;
       cursor: pointer;
       color: var(--dpp-ui-text);
       word-break: break-word;
+      list-style: none;
+    }
+    .dpp-agent-step-tool-result summary::-webkit-details-marker {
+      display: none;
+    }
+    .dpp-agent-step-tool-result summary::before {
+      content: '';
+      position: absolute;
+      left: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 12px;
+      height: 12px;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 12px 12px;
     }
     .dpp-agent-step-tool-result summary.ok::before {
-      content: '\\2713 ';
+      background-image: ${ICON_CHECK};
       color: var(--dpp-ui-success);
     }
     .dpp-agent-step-tool-result summary.err::before {
-      content: '\\2717 ';
+      background-image: ${ICON_CROSS};
       color: var(--dpp-ui-error);
     }
     .dpp-agent-step-tool-result-body {
@@ -397,24 +450,27 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-running-indicator {
       position: fixed;
-      top: 12px;
-      right: 12px;
+      right: 16px;
+      bottom: 16px;
       z-index: 2147483647;
       display: flex;
       align-items: center;
       gap: 10px;
       padding: 8px 12px;
       border: 1px solid var(--dpp-ui-accent);
-      border-radius: 8px;
+      border-radius: 12px;
       background: var(--dpp-ui-surface);
       color: var(--dpp-ui-text);
-      font-size: 12px;
+      font-size: 13px;
       line-height: 1.4;
       box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
     }
-    .dpp-agent-running-indicator-text::before {
-      content: '\\25CF ';
-      color: var(--dpp-ui-accent);
+    .dpp-agent-running-indicator-dot {
+      flex: none;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--dpp-ui-accent);
       animation: dpp-agent-running-pulse 1.2s ease-in-out infinite;
     }
     @keyframes dpp-agent-running-pulse {
@@ -422,31 +478,68 @@ export function injectInlineAgentStyles(): void {
       50% { opacity: 0.35; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .dpp-agent-running-indicator-text::before {
+      .dpp-agent-running-indicator-dot {
+        animation: none;
+      }
+    }
+    .dpp-agent-starting {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      color: var(--dpp-ui-text-muted);
+    }
+    .dpp-agent-starting::before {
+      content: '';
+      flex: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2px solid var(--dpp-ui-accent-panel);
+      border-top-color: var(--dpp-ui-accent);
+      animation: dpp-agent-starting-spin 0.8s linear infinite;
+    }
+    @keyframes dpp-agent-starting-spin {
+      to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .dpp-agent-starting::before {
         animation: none;
       }
     }
     .dpp-agent-footer {
       margin-top: 8px;
       padding: 6px 0;
-      font-size: 12px;
+      font-size: 13px;
       color: var(--dpp-ui-text-muted);
     }
+    .dpp-agent-footer::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      margin-right: 6px;
+      border-radius: 2px;
+      vertical-align: -1px;
+    }
     .dpp-agent-footer.complete::before {
-      content: '\\25A0 ';
-      color: var(--dpp-ui-success);
+      background: var(--dpp-ui-success);
     }
     .dpp-agent-footer.paused::before {
-      content: '\\25A0 ';
-      color: var(--dpp-ui-text-subtle);
+      background: var(--dpp-ui-text-subtle);
     }
     .dpp-agent-footer.error::before {
-      content: '\\25A0 ';
-      color: var(--dpp-ui-error);
+      background: var(--dpp-ui-error);
     }
 
-    body.dpp-theme-dark .dpp-agent-stop-btn:hover {
-      background: var(--dpp-ui-danger-panel);
+    @media (prefers-reduced-motion: reduce) {
+      .dpp-agent-step-body,
+      .dpp-agent-step-results,
+      .dpp-agent-step-chevron,
+      .dpp-agent-tool-chevron {
+        transition: none;
+      }
     }
     [data-dpp-body-text] {
       font-size: inherit;
@@ -509,12 +602,16 @@ export function createAgentStepElement(
 
   const bodyId = nextAgentDomId('dpp-agent-step-body');
   const toolsId = nextAgentDomId('dpp-agent-step-tools');
+  const resultsId = nextAgentDomId('dpp-agent-step-results');
 
   const header = document.createElement('div');
   header.className = 'dpp-agent-step-header';
   header.addEventListener('click', (event) => {
     const target = event.target as HTMLElement | null;
     if (target?.closest('.dpp-agent-stop-btn')) return;
+    // Manual toggle: later programmatic auto-collapse must not override the
+    // user's explicit choice (Issue #544).
+    step.setAttribute('data-user-toggled', 'true');
     setAgentStepCollapsed(step, step.getAttribute('data-collapsed') !== 'true');
   });
 
@@ -522,7 +619,7 @@ export function createAgentStepElement(
   toggle.type = 'button';
   toggle.className = 'dpp-agent-step-toggle';
   toggle.setAttribute('aria-expanded', 'true');
-  toggle.setAttribute('aria-controls', bodyId);
+  toggle.setAttribute('aria-controls', `${bodyId} ${toolsId} ${resultsId}`);
 
   const indicator = document.createElement('span');
   indicator.className = 'dpp-agent-step-indicator';
@@ -539,7 +636,6 @@ export function createAgentStepElement(
   const chevron = document.createElement('span');
   chevron.className = 'dpp-agent-step-chevron';
   chevron.setAttribute('aria-hidden', 'true');
-  chevron.textContent = '▼';
 
   toggle.appendChild(indicator);
   toggle.appendChild(dot);
@@ -568,12 +664,18 @@ export function createAgentStepElement(
   body.className = 'dpp-agent-step-body';
   body.id = bodyId;
 
+  const toolsLabel = document.createElement('div');
+  toolsLabel.className = 'dpp-agent-step-section-label tools';
+  toolsLabel.textContent = labels?.tools ?? 'Tool calls';
+  toolsLabel.hidden = true;
+
   const tools = document.createElement('div');
   tools.className = 'dpp-agent-step-tools';
   tools.id = toolsId;
 
   const results = document.createElement('div');
   results.className = 'dpp-agent-step-results';
+  results.id = resultsId;
 
   const resultsLabel = document.createElement('div');
   resultsLabel.className = 'dpp-agent-step-section-label results';
@@ -583,6 +685,7 @@ export function createAgentStepElement(
   step.appendChild(header);
   step.appendChild(sectionLabel);
   step.appendChild(body);
+  step.appendChild(toolsLabel);
   step.appendChild(tools);
   results.appendChild(resultsLabel);
   step.appendChild(results);
@@ -639,6 +742,11 @@ export function addToolResultToStep(
   const tools = step.querySelector('.dpp-agent-step-tools');
   if (!tools) return;
 
+  // The tools section label stays hidden until the first tool row exists
+  // (Issue #544).
+  const toolsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.tools');
+  if (toolsLabel) toolsLabel.hidden = false;
+
   const item = document.createElement('div');
   item.className = `dpp-agent-step-tool-item ${ok ? 'ok' : 'err'}`;
   item.setAttribute('data-tool-status', ok ? 'ok' : 'err');
@@ -654,7 +762,6 @@ export function addToolResultToStep(
   const icon = document.createElement('span');
   icon.className = 'dpp-agent-tool-state-icon';
   icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = ok ? '✓' : '✗';
 
   const name = document.createElement('span');
   name.className = 'dpp-agent-tool-name';
@@ -667,7 +774,6 @@ export function addToolResultToStep(
   const chevron = document.createElement('span');
   chevron.className = 'dpp-agent-tool-chevron';
   chevron.setAttribute('aria-hidden', 'true');
-  chevron.textContent = '▸';
 
   toggle.appendChild(icon);
   toggle.appendChild(name);
@@ -678,7 +784,11 @@ export function addToolResultToStep(
   detail.className = 'dpp-agent-tool-summary';
   detail.id = summaryId;
   detail.hidden = true;
-  detail.textContent = summary.slice(0, TOOL_SUMMARY_MAX_CHARS);
+  // Clamp with an explicit truncation marker so the collapsed row and the
+  // expanded result details use the same honest labeling (Issue #544).
+  detail.textContent = summary.length > TOOL_SUMMARY_MAX_CHARS
+    ? `${summary.slice(0, TOOL_SUMMARY_MAX_CHARS)}\n...[truncated]`
+    : summary;
 
   toggle.addEventListener('click', () => {
     const expanded = toggle.getAttribute('aria-expanded') === 'true';
@@ -802,18 +912,40 @@ function clampDisplayText(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}\n...[truncated]` : value;
 }
 
+/**
+ * "Starting" placeholder shown between container mount and the first step
+ * (the loop waits 2.5-6.5s for the first model turn; without this the panel
+ * appears dead) (Issue #544).
+ */
+export function createAgentStartingElement(labels?: Partial<InlineAgentRendererLabels>): HTMLElement {
+  const element = document.createElement('div');
+  element.className = 'dpp-agent-starting';
+  element.setAttribute('role', 'status');
+  element.textContent = labels?.starting ?? 'Starting…';
+  return element;
+}
+
 export function createAgentRunningIndicator(labels?: Partial<InlineAgentRendererLabels>): HTMLElement {
   const element = document.createElement('div');
   element.className = 'dpp-agent-running-indicator';
   element.setAttribute('data-dpp-agent-running', 'false');
 
+  const dot = document.createElement('span');
+  dot.className = 'dpp-agent-running-indicator-dot';
+  dot.setAttribute('aria-hidden', 'true');
+
+  // The live region lives on the text span only: a role="status" container
+  // must not wrap the interactive Stop button (Issue #544).
   const text = document.createElement('span');
   text.className = 'dpp-agent-running-indicator-text';
+  text.setAttribute('role', 'status');
+  text.setAttribute('aria-live', 'polite');
 
   const stopBtn = document.createElement('button');
   stopBtn.className = 'dpp-agent-stop-btn';
   stopBtn.textContent = labels?.stop ?? 'Stop';
 
+  element.appendChild(dot);
   element.appendChild(text);
   element.appendChild(stopBtn);
   return element;
