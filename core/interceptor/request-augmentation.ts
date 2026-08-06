@@ -14,6 +14,10 @@ import { DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS, type SkillAutoActivationSetting
 import { projectToolDescriptorsForNativeSearch } from '../tool';
 import type { Memory, ModelType, Skill, SystemPromptPreset, ToolDescriptor } from '../types';
 import { filterMemoriesByProjectScope } from '../memory/scope';
+import {
+  normalizeDeepSeekMessageId,
+  type DeepSeekAugmentableWebRoute,
+} from '../deepseek/request-codec';
 
 export interface RequestAugmentationState {
   memories: Memory[];
@@ -53,6 +57,21 @@ export interface DeepSeekRequestBody extends Record<string, unknown> {
   prompt: string;
 }
 
+export interface DeepSeekRegenerateRequestBody extends Record<string, unknown> {
+  chat_session_id: string;
+  child_message_id: number;
+}
+
+export type DecodedDeepSeekAugmentationRequest =
+  | {
+    route: 'completion' | 'editMessage';
+    body: DeepSeekRequestBody;
+  }
+  | {
+    route: 'regenerate';
+    body: DeepSeekRegenerateRequestBody;
+  };
+
 interface ResolvedSkills {
   combinedPrompt: string;
   memoryEnabled: boolean;
@@ -79,7 +98,57 @@ export function decodeAugmentableDeepSeekRequestBody(
   }
 }
 
+export function decodeAugmentableDeepSeekRequest(
+  route: DeepSeekAugmentableWebRoute,
+  bodyStr: string,
+): DecodedDeepSeekAugmentationRequest | null {
+  try {
+    return decodeDeepSeekAugmentationRequest(route, bodyStr);
+  } catch {
+    return null;
+  }
+}
+
+export function decodeDeepSeekAugmentationRequest(
+  route: DeepSeekAugmentableWebRoute,
+  bodyStr: string,
+): DecodedDeepSeekAugmentationRequest {
+  if (route === 'regenerate') {
+    return { route, body: decodeDeepSeekRegenerateRequestBody(bodyStr) };
+  }
+  return { route, body: decodeDeepSeekRequestBody(bodyStr) };
+}
+
 export function decodeDeepSeekRequestBody(bodyStr: string): DeepSeekRequestBody {
+  const body = decodeDeepSeekRequestRecord(bodyStr);
+  if (typeof body.prompt !== 'string' || body.prompt.length === 0) {
+    throw new Error('DeepSeek request prompt must be a non-empty string.');
+  }
+  return body as DeepSeekRequestBody;
+}
+
+export function decodeDeepSeekRegenerateRequestBody(
+  bodyStr: string,
+): DeepSeekRegenerateRequestBody {
+  const body = decodeDeepSeekRequestRecord(bodyStr);
+  const chatSessionId = typeof body.chat_session_id === 'string'
+    ? body.chat_session_id.trim()
+    : '';
+  if (!chatSessionId) {
+    throw new Error('DeepSeek regenerate chat_session_id must be a non-empty string.');
+  }
+  const childMessageId = normalizeDeepSeekMessageId(body.child_message_id);
+  if (childMessageId === null) {
+    throw new Error('DeepSeek regenerate child_message_id must be a valid message id.');
+  }
+  return {
+    ...body,
+    chat_session_id: chatSessionId,
+    child_message_id: childMessageId,
+  } as DeepSeekRegenerateRequestBody;
+}
+
+function decodeDeepSeekRequestRecord(bodyStr: string): Record<string, unknown> {
   let value: unknown;
   try {
     value = JSON.parse(bodyStr);
@@ -90,11 +159,7 @@ export function decodeDeepSeekRequestBody(bodyStr: string): DeepSeekRequestBody 
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('DeepSeek request body must be a plain object.');
   }
-  const body = value as Record<string, unknown>;
-  if (typeof body.prompt !== 'string' || body.prompt.length === 0) {
-    throw new Error('DeepSeek request prompt must be a non-empty string.');
-  }
-  return body as DeepSeekRequestBody;
+  return value as Record<string, unknown>;
 }
 
 export function augmentDecodedRequestBody(

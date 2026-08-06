@@ -80,6 +80,7 @@ export const LEGAL_BRIDGE_CASES = {
       type: 'AUGMENT_REQUEST_BODY',
       id: 'augment-1',
       requestId: 'request-contract-1',
+      route: 'completion',
       body: '{"prompt":"hello"}',
     },
   }],
@@ -98,8 +99,16 @@ export const LEGAL_BRIDGE_CASES = {
       ok: true,
       result: {
         body: '{"prompt":"augmented"}',
+        originalPrompt: 'hello',
         agentTaskPrompt: 'hello',
         requestId: 'request-authorized-1',
+        promptOptions: {
+          modelType: 'expert',
+          searchEnabled: false,
+          thinkingEnabled: true,
+          refFileIds: [],
+        },
+        activeLocalSkillDir: '/trusted/skill',
         toolDescriptors: [{
           id: 'mcp:browser-tools:capture_page',
           provider: TOOL_PROVIDER,
@@ -254,6 +263,7 @@ export const REJECTED_BRIDGE_CASES: ReadonlyArray<{
   { name: 'non-string id', message: { source: MAIN, type: 'AUGMENT_REQUEST_BODY', id: 7, body: '{}' } },
   { name: 'non-string body', message: { source: MAIN, type: 'AUGMENT_REQUEST_BODY', id: 'augment-1', body: {} } },
   { name: 'non-string request id', message: { source: MAIN, type: 'AUGMENT_REQUEST_BODY', id: 'augment-1', requestId: 7, body: '{}' } },
+  { name: 'invalid request route', message: { source: MAIN, type: 'AUGMENT_REQUEST_BODY', id: 'augment-1', requestId: 'request-1', route: 'history', body: '{}' } },
   { name: 'non-boolean ok', message: { source: CONTENT, type: 'AUGMENT_REQUEST_BODY_RESULT', id: 'augment-1', ok: 'yes' } },
   { name: 'non-string error', message: { source: CONTENT, type: 'AUGMENT_REQUEST_BODY_RESULT', id: 'augment-1', ok: false, error: {} } },
   { name: 'non-positive timeout', message: { source: CONTENT, type: 'AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT', id: 'augment-1', timeoutMs: 0 } },

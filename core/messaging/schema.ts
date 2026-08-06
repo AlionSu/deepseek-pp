@@ -3,6 +3,7 @@ import {
   isToolCallRestoreRecord,
   isToolDescriptorRecord,
 } from './tool-record-codec';
+import { isDeepSeekAugmentableWebRoute } from '../deepseek/request-codec';
 
 export const BRIDGE_READY_TYPE = 'DPP_BRIDGE_READY';
 
@@ -215,6 +216,7 @@ const BRIDGE_PAYLOAD_VALIDATORS: Record<
   AUGMENT_REQUEST_BODY: (message) => (
     isNonEmptyString(message.id) &&
     typeof message.body === 'string' &&
+    isDeepSeekAugmentableWebRoute(message.route) &&
     (message.requestId === undefined || isNonEmptyString(message.requestId))
   ),
   AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT: (message) => (
@@ -256,6 +258,12 @@ function isAugmentResult(message: Record<string, unknown>): boolean {
       isPlainRecord(message.result) &&
       typeof message.result.body === 'string' &&
       typeof message.result.agentTaskPrompt === 'string' &&
+      optionalString(message.result.originalPrompt) &&
+      optionalString(message.result.activeLocalSkillDir) &&
+      (
+        message.result.promptOptions === undefined ||
+        isPromptOptionsPayload(message.result.promptOptions)
+      ) &&
       (message.result.requestId === undefined || isNonEmptyString(message.result.requestId)) &&
       (
         message.result.toolDescriptors === undefined ||
@@ -287,12 +295,17 @@ function isResponseCompletePayload(value: unknown): boolean {
     isNullableString(value.chatSessionId) &&
     isNullableNumber(value.parentMessageId) &&
     isNullableNumber(value.assistantMessageId) &&
-    isNullableString(value.promptOptions.modelType) &&
-    typeof value.promptOptions.searchEnabled === 'boolean' &&
-    typeof value.promptOptions.thinkingEnabled === 'boolean' &&
-    Array.isArray(value.promptOptions.refFileIds) &&
-    value.promptOptions.refFileIds.every((id) => typeof id === 'string')
+    isPromptOptionsPayload(value.promptOptions)
   );
+}
+
+function isPromptOptionsPayload(value: unknown): boolean {
+  return isPlainRecord(value) &&
+    isNullableString(value.modelType) &&
+    typeof value.searchEnabled === 'boolean' &&
+    typeof value.thinkingEnabled === 'boolean' &&
+    Array.isArray(value.refFileIds) &&
+    value.refFileIds.every((id) => typeof id === 'string');
 }
 
 function isResponseTokenSpeedPayload(value: unknown): boolean {

@@ -8,6 +8,7 @@ import {
   updateHookState,
 } from '../core/interceptor/fetch-hook';
 import type { ToolDescriptor } from '../core/types';
+import type { DeepSeekAugmentableWebRoute } from '../core/deepseek/request-codec';
 
 describe('fetch hook request lifecycle', () => {
   const onRequestTerminal = vi.fn();
@@ -20,6 +21,7 @@ describe('fetch hook request lifecycle', () => {
   const onRequestBody = vi.fn<(
     body: string,
     requestId: string,
+    route: DeepSeekAugmentableWebRoute,
   ) => Promise<RequestBodyModification | null>>(async () => null);
 
   beforeEach(() => {
@@ -289,7 +291,7 @@ describe('fetch hook request lifecycle', () => {
       xhr.open('POST', 'https://chat.deepseek.com/api/v0/chat/completion');
 
       await vi.waitFor(() => expect(pageLoadResponse).toHaveBeenCalledOnce());
-      expect(onRequestBody).toHaveBeenCalledWith('{"prompt":"hello"}', expect.any(String));
+      expect(onRequestBody).toHaveBeenCalledWith('{"prompt":"hello"}', expect.any(String), 'completion');
       expect(onHeadersCaptured).toHaveBeenCalledWith(expect.objectContaining({
         Authorization: 'Bearer test',
       }));
@@ -392,13 +394,108 @@ describe('fetch hook request lifecycle', () => {
         body: '{"prompt":"edited prompt"}',
       });
 
-      expect(onRequestBody).toHaveBeenCalledWith('{"prompt":"edited prompt"}', expect.any(String));
+      expect(onRequestBody).toHaveBeenCalledWith(
+        '{"prompt":"edited prompt"}',
+        expect.any(String),
+        'editMessage',
+      );
       expect(fetchImpl).toHaveBeenCalledWith(
         'https://chat.deepseek.com/api/v0/chat/edit_message',
         expect.objectContaining({ body: '{"prompt":"augmented edit"}' }),
       );
     } finally {
       window.fetch = nativeFetch;
+    }
+  });
+
+  it('preserves a promptless regenerate fetch body while attaching replay context', async () => {
+    const nativeFetch = window.fetch;
+    const rawBody = '{\n  "chat_session_id": "session-1",\n  "child_message_id": 18,\n  "thinking_enabled": true\n}';
+    const fetchImpl = vi.fn(async () => new Response(
+      'data: {"p":"response/content","o":"APPEND","v":"done"}\n\n',
+    ));
+    window.fetch = fetchImpl;
+    onRequestBody.mockResolvedValueOnce({
+      body: rawBody,
+      originalPrompt: 'review the implementation',
+      agentTaskPrompt: 'review the implementation',
+      requestId: 'authorized-regenerate-fetch',
+      toolDescriptors: [makeDescriptor('request-regenerate')],
+      promptOptions: {
+        modelType: 'expert',
+        searchEnabled: false,
+        thinkingEnabled: true,
+        refFileIds: ['file-1'],
+      },
+      activeLocalSkillDir: '/trusted/skill',
+    });
+
+    try {
+      hookFetch();
+      const response = await window.fetch('https://chat.deepseek.com/api/v0/chat/regenerate', {
+        method: 'POST',
+        body: rawBody,
+      });
+      await response.text();
+
+      expect(onRequestBody).toHaveBeenCalledWith(rawBody, expect.any(String), 'regenerate');
+      expect(fetchImpl).toHaveBeenCalledWith(
+        'https://chat.deepseek.com/api/v0/chat/regenerate',
+        expect.objectContaining({ body: rawBody }),
+      );
+      expect(onResponseComplete).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'authorized-regenerate-fetch',
+        originalPrompt: 'review the implementation',
+        agentTaskPrompt: 'review the implementation',
+        promptOptions: {
+          modelType: 'expert',
+          searchEnabled: false,
+          thinkingEnabled: true,
+          refFileIds: ['file-1'],
+        },
+      }));
+    } finally {
+      window.fetch = nativeFetch;
+    }
+  });
+
+  it('preserves a promptless regenerate XHR body and route identity', async () => {
+    const nativeXMLHttpRequest = globalThis.XMLHttpRequest;
+    const rawBody = '{"chat_session_id":"session-1","child_message_id":18,"search_enabled":false}';
+    const rawWire = 'data: {"p":"response/content","o":"APPEND","v":"done"}';
+    const FakeXMLHttpRequest = createFakeXMLHttpRequest(rawWire, 200);
+    vi.stubGlobal('XMLHttpRequest', FakeXMLHttpRequest);
+    onRequestBody.mockResolvedValueOnce({
+      body: rawBody,
+      originalPrompt: 'review the implementation',
+      agentTaskPrompt: 'review the implementation',
+      requestId: 'authorized-regenerate-xhr',
+      toolDescriptors: [makeDescriptor('request-regenerate')],
+      promptOptions: {
+        modelType: 'expert',
+        searchEnabled: false,
+        thinkingEnabled: true,
+        refFileIds: [],
+      },
+      activeLocalSkillDir: '/trusted/skill',
+    });
+
+    try {
+      hookXHR();
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', 'https://chat.deepseek.com/api/v0/chat/regenerate');
+      xhr.send(rawBody);
+
+      await vi.waitFor(() => expect(onResponseComplete).toHaveBeenCalledOnce());
+      expect(onRequestBody).toHaveBeenCalledWith(rawBody, expect.any(String), 'regenerate');
+      expect((xhr as unknown as FakeXMLHttpRequestInstance).sentBody).toBe(rawBody);
+      expect(onResponseComplete).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'authorized-regenerate-xhr',
+        originalPrompt: 'review the implementation',
+        promptOptions: expect.objectContaining({ modelType: 'expert' }),
+      }));
+    } finally {
+      vi.stubGlobal('XMLHttpRequest', nativeXMLHttpRequest);
     }
   });
 

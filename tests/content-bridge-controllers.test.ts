@@ -85,7 +85,15 @@ describe('content bridge controllers', () => {
       type: BRIDGE_READY_TYPE,
     });
 
-    const pending = controller.requestAugmentedBody('{}', 'request-1');
+    const pending = controller.requestAugmentedBody('{}', 'request-1', 'completion');
+    expect(port.postMessage).toHaveBeenLastCalledWith({
+      source: BRIDGE_SOURCES.mainWorld,
+      type: 'AUGMENT_REQUEST_BODY',
+      id: 'id-2',
+      requestId: 'request-1',
+      route: 'completion',
+      body: '{}',
+    });
     const staleHandler = port.onmessage;
     await kernel.stop('pagehide');
     await expect(pending).rejects.toThrow('main/content bridge disconnected');
@@ -139,6 +147,7 @@ describe('content bridge controllers', () => {
       type: 'AUGMENT_REQUEST_BODY',
       id: 'augment-1',
       requestId: 'request-1',
+      route: 'regenerate',
       body: '{}',
     });
     await Promise.resolve();
