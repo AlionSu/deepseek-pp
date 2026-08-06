@@ -61,9 +61,14 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // Local Node-25 measurement: 376367 raw (+121) / 114583 gzip; raw baseline
 // updated again, gzip stays under the CI-derived baseline. firstChatScreen raw
 // cap raised 406502 -> 406623 by the same +121.
+// Refreshed for #544 follow-up (silent-failure feedback): content.agent.startFailed
+// in zh-CN/en was added to the shared resource tree. Local Node-25 measurement:
+// 376486 raw (+119) / 114604 gzip; raw baseline updated again, gzip stays under
+// the CI-derived baseline. firstChatScreen raw cap raised 406623 -> 406742 by
+// the same +119.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 376_367, gzip: 114_659 },
+  initialShell: { raw: 376_486, gzip: 114_659 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -110,12 +115,15 @@ const GZIP_ENCODER_VARIANCE_BYTES = 256;
 // Raised 406502 -> 406623 for #544: content.agent.starting + interrupted
 // (zh-CN/en) also land in the first-chat-screen graph (+121 raw; gzip 124601
 // stays within the 125000 cap).
+// Raised 406623 -> 406742 for the #544 follow-up: content.agent.startFailed
+// (zh-CN/en) lands in the first-chat-screen graph too (+119 raw; gzip 124622
+// stays within the 125000 cap).
 const BUDGET = Object.freeze({
   initialShell: {
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 406_623, gzip: 125_000 },
+  firstChatScreen: { raw: 406_742, gzip: 125_000 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },

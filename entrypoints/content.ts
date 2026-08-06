@@ -3575,7 +3575,12 @@ function startInlineAgentIfNeeded(
   const authorization = complete.requestId
     ? activeToolAuthorizations.get(complete.requestId)
     : undefined;
-  if (!authorization) return;
+  if (!authorization) {
+    // Don't fail silently: the user asked for agent work and the loop cannot
+    // start without the tool authorization grant (Issue #544).
+    showContentToast(contentT('content.agent.startFailed'), 'warning');
+    return;
+  }
 
   const payload: InlineAgentStartPayload = {
     loopId,
@@ -3612,7 +3617,12 @@ function startInlineAgentIfNeeded(
   const messages = getAssistantMessages();
   const anchorContent = getInlineAgentAnchorContent(complete);
   const target = findInlineAgentLiveTarget(complete, messages, anchorContent);
-  if (!target) return;
+  if (!target) {
+    // Don't fail silently: the anchor assistant message could not be located
+    // in the live DOM (Issue #544).
+    showContentToast(contentT('content.agent.startFailed'), 'warning');
+    return;
+  }
   const anchorMessageIndex = messages.indexOf(target);
 
   inlineAgentLoopId = loopId;

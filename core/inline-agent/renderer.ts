@@ -664,6 +664,11 @@ export function createAgentStepElement(
   body.className = 'dpp-agent-step-body';
   body.id = bodyId;
 
+  const toolsLabel = document.createElement('div');
+  toolsLabel.className = 'dpp-agent-step-section-label tools';
+  toolsLabel.textContent = labels?.tools ?? 'Tool calls';
+  toolsLabel.hidden = true;
+
   const tools = document.createElement('div');
   tools.className = 'dpp-agent-step-tools';
   tools.id = toolsId;
@@ -680,6 +685,7 @@ export function createAgentStepElement(
   step.appendChild(header);
   step.appendChild(sectionLabel);
   step.appendChild(body);
+  step.appendChild(toolsLabel);
   step.appendChild(tools);
   results.appendChild(resultsLabel);
   step.appendChild(results);
@@ -735,6 +741,11 @@ export function addToolResultToStep(
 ): void {
   const tools = step.querySelector('.dpp-agent-step-tools');
   if (!tools) return;
+
+  // The tools section label stays hidden until the first tool row exists
+  // (Issue #544).
+  const toolsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.tools');
+  if (toolsLabel) toolsLabel.hidden = false;
 
   const item = document.createElement('div');
   item.className = `dpp-agent-step-tool-item ${ok ? 'ok' : 'err'}`;

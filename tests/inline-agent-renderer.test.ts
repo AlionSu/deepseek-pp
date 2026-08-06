@@ -213,14 +213,20 @@ describe('inline agent renderer', () => {
   it('keeps section labels hidden until their section has content', () => {
     const step = createAgentStepElement(0);
     const processLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.process');
+    const toolsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.tools');
     const resultsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.results');
 
     expect(processLabel?.hidden).toBe(true);
+    expect(toolsLabel?.hidden).toBe(true);
     expect(resultsLabel?.hidden).toBe(true);
 
     updateStepStreamText(step, 'Working on it...');
     expect(processLabel?.hidden).toBe(false);
     expect(resultsLabel?.hidden).toBe(true);
+
+    addToolResultToStep(step, 'web_search', true, 'found 5 results');
+    expect(toolsLabel?.hidden).toBe(false);
+    expect(toolsLabel?.textContent).toBe('Tool calls');
   });
 
   it('keeps the stop control clickable without collapsing the step', () => {

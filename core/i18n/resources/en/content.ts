@@ -98,6 +98,7 @@ export const content = {
     executingTools: 'Executing tools',
     starting: 'Starting…',
     interrupted: 'Interrupted',
+    startFailed: 'Agent failed to start, please retry',
     budgetReached: 'DeepSeek++ paused after {count} automated tool-continuation rounds to avoid presenting incomplete work as a final answer. Send "continue" in this conversation to resume the remaining work.',
     error: 'Execution error',
     footerComplete: 'Agent complete ({steps} steps, {tools} tool calls)',
