@@ -4,6 +4,7 @@ import {
   addToolResultToStep,
   createAgentFooter,
   createAgentRunningIndicator,
+  createAgentStartingElement,
   createAgentStepElement,
   injectInlineAgentStyles,
   isInlineAgentBudgetFinalText,
@@ -153,14 +154,15 @@ describe('inline agent renderer', () => {
     expect(summaries[1].hidden).toBe(true);
   });
 
-  it('bounds long tool summaries instead of exposing raw output', () => {
+  it('bounds long tool summaries with an explicit truncation marker', () => {
     const step = createAgentStepElement(0, undefined, timelineLabels);
     const longSummary = 'x'.repeat(2000);
 
     addToolResultToStep(step, 'shell_exec', true, longSummary, timelineLabels);
 
     const summary = step.querySelector<HTMLElement>('.dpp-agent-tool-summary');
-    expect(summary?.textContent?.length).toBe(600);
+    expect(summary?.textContent?.startsWith('x'.repeat(600))).toBe(true);
+    expect(summary?.textContent).toContain('[truncated]');
   });
 
   it('renders collapsible tool result details per execution', () => {
@@ -338,5 +340,64 @@ describe('inline agent renderer', () => {
     expect(css).toContain('[data-status="streaming"]');
     expect(css).toContain('@keyframes dpp-agent-step-pulse');
     expect(css).toContain('prefers-reduced-motion');
+  });
+
+  it('replaces unicode status glyphs with inline SVG icons', () => {
+    injectInlineAgentStyles();
+
+    const css = document.getElementById('dpp-inline-agent-css')?.textContent ?? '';
+    expect(css).toContain('data:image/svg+xml');
+    expect(css).not.toContain('\\25CF'); // ●
+    expect(css).not.toContain('\\2699'); // ⚙
+    expect(css).not.toContain('\\2713'); // ✓
+    expect(css).not.toContain('\\2717'); // ✗
+    expect(css).not.toContain('\\25A0'); // ■
+  });
+
+  it('declares the collapse control for the body, tools, and results regions', () => {
+    const step = createAgentStepElement(0);
+    const toggle = step.querySelector<HTMLButtonElement>('.dpp-agent-step-toggle');
+    const controls = toggle?.getAttribute('aria-controls')?.split(/\s+/) ?? [];
+    expect(controls).toHaveLength(3);
+    for (const id of controls) {
+      expect(step.querySelector(`#${id}`)).not.toBeNull();
+    }
+  });
+
+  it('remembers a manual step toggle so later auto-collapse can defer to it', () => {
+    const step = createAgentStepElement(0);
+    expect(step.getAttribute('data-user-toggled')).toBeNull();
+
+    const toggle = step.querySelector<HTMLButtonElement>('.dpp-agent-step-toggle');
+    toggle?.click();
+    expect(step.getAttribute('data-user-toggled')).toBe('true');
+    expect(step.getAttribute('data-collapsed')).toBe('true');
+  });
+
+  it('renders the starting placeholder with a live status region', () => {
+    const el = createAgentStartingElement({ starting: 'Starting…' });
+    expect(el.className).toContain('dpp-agent-starting');
+    expect(el.getAttribute('role')).toBe('status');
+    expect(el.textContent).toBe('Starting…');
+  });
+
+  it('marks interrupted steps as neutral instead of frozen streaming', () => {
+    const step = createAgentStepElement(0);
+    updateStepStatus(step, 'interrupted', 'Interrupted');
+
+    expect(step.getAttribute('data-status')).toBe('interrupted');
+    expect(step.querySelector('.dpp-agent-step-status')?.textContent).toBe('Interrupted');
+
+    injectInlineAgentStyles();
+    const css = document.getElementById('dpp-inline-agent-css')?.textContent ?? '';
+    expect(css).toContain('[data-status="interrupted"]');
+  });
+
+  it('exposes the running indicator as a polite live region with a dot', () => {
+    const el = createAgentRunningIndicator({ stop: 'Stop' });
+    const text = el.querySelector<HTMLElement>('.dpp-agent-running-indicator-text');
+    expect(text?.getAttribute('role')).toBe('status');
+    expect(text?.getAttribute('aria-live')).toBe('polite');
+    expect(el.querySelector('.dpp-agent-running-indicator-dot')).not.toBeNull();
   });
 });
