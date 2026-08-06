@@ -719,6 +719,66 @@ function cloneParsedWithSanitizedInternalPrompt(parsed: any, visiblePrompt: stri
   return changed ? cloned : null;
 }
 
+function cloneParsedWithCollapsedBlankLines(parsed: any): any | null {
+  const cloned = JSON.parse(JSON.stringify(parsed));
+  let changed = false;
+
+  const apply = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+
+    if (isBatchPatch(node)) {
+      for (const item of node.v) {
+        apply(item);
+      }
+      return;
+    }
+
+    const text = getAnyDirectPatchText(node);
+    if (text === null) return;
+
+    const collapsed = collapseExcessBlankLines(text);
+    if (collapsed === text) return;
+
+    setAnyDirectPatchText(node, collapsed);
+    changed = true;
+  };
+
+  apply(cloned);
+
+  return changed ? cloned : null;
+}
+
+/**
+ * Collapses runs of 3+ newlines outside fenced code blocks down to a single
+ * paragraph break (`\n\n`). Agent-mode output often wraps tool calls in
+ * `\n\n\n`; collapsing matches how the DeepSeek page's own markdown renderer
+ * displays paragraph spacing, while blank lines inside ``` fences are kept
+ * intact for `<pre>` rendering.
+ */
+function collapseExcessBlankLines(text: string): string {
+  if (!text.includes('\n\n\n')) return text;
+  if (!text.includes('```')) return text.replace(/\n{3,}/g, '\n\n');
+
+  let output = '';
+  let inFence = false;
+  let cursor = 0;
+  while (cursor < text.length) {
+    const fenceIndex = text.indexOf('```', cursor);
+    if (fenceIndex === -1) {
+      output += inFence
+        ? text.slice(cursor)
+        : text.slice(cursor).replace(/\n{3,}/g, '\n\n');
+      break;
+    }
+    const segment = text.slice(cursor, fenceIndex);
+    output += inFence ? segment : segment.replace(/\n{3,}/g, '\n\n');
+    output += '```';
+    inFence = !inFence;
+    cursor = fenceIndex + 3;
+  }
+  return output;
+}
+
 function extractCleanResponseTextForParsing(parsed: unknown): string | null {
   const text = extractResponseTextFromParsed(parsed);
   if (!text) return text;
@@ -810,6 +870,21 @@ export class XmlToolStreamFilter {
     parsed: any;
   }> = [];
   private encoder = new TextEncoder();
+  /**
+   * True while the tail following a stripped tool-call block must have its
+   * leading blank lines removed. Model output separates tool calls with
+   * `\n\n` on both sides; stripping only the XML tags would leave
+   * `\n\n\n\n` (the "blank line between every row" rendering bug on the
+   * DeepSeek page) instead of the original single paragraph break.
+   */
+  private stripTailLeadingNewlines = false;
+  /**
+   * Whether the last emitted text ended with a newline. Needed when a tool
+   * call opens at the start of a fresh SSE frame: the text before it was
+   * already flushed, so the blank-line collapse must consult the previously
+   * emitted text instead of the (empty) current buffer.
+   */
+  private lastEmittedTextEndsWithNewline = false;
 
   constructor(descriptors: readonly ToolDescriptor[] = [], visiblePrompt: string = '') {
     this.visiblePrompt = visiblePrompt;
@@ -908,6 +983,32 @@ export class XmlToolStreamFilter {
     text: string,
     isFragmentCreation: boolean,
   ) {
+    // A tool-call block was stripped right before this text: drop its leading
+    // blank lines so the `\n\n` left by the stripped block does not stack on
+    // top of the `\n\n` the model already emitted after the closing tag
+    // (the "blank line between every row" rendering bug on the DeepSeek page).
+    if (this.stripTailLeadingNewlines) {
+      const leadingNewlines = /^\n+/.exec(text);
+      if (leadingNewlines) {
+        const modified = cloneParsedWithTextSuffix(parsed, leadingNewlines[0].length);
+        if (!modified) {
+          // The tail is nothing but blank lines: drop this frame entirely and
+          // keep the flag so the next non-blank text block still gets trimmed.
+          return;
+        }
+        const modifiedText = extractResponseTextFromParsed(modified);
+        if (!modifiedText) {
+          return;
+        }
+        parsed = modified;
+        text = modifiedText;
+        block = replaceDeepSeekSseFrameData(sourceFrame, JSON.stringify(modified));
+        this.stripTailLeadingNewlines = false;
+      } else {
+        this.stripTailLeadingNewlines = false;
+      }
+    }
+
     const previousPendingLength = this.pendingText.length;
     this.pendingText += text;
     this.pendingBlocks.push({ block, separator, sourceFrame, isFragmentCreation, parsed });
@@ -918,7 +1019,22 @@ export class XmlToolStreamFilter {
       const tailStart = closeTag ? closeTag.endIndex : -1;
       const tailOffsetInCurrentText = tailStart - previousPendingLength;
 
-      this.emitBlocksBeforeOpen(controller, found.idx);
+      // Model output separates every tool call with blank lines on both
+      // sides; remember that so the text after the stripped block has its
+      // leading blank lines removed instead of stacking `\n\n\n\n`. When the
+      // tool call opens at the start of a fresh frame, the preceding text was
+      // already flushed — fall back to the last emitted text's ending.
+      let textBeforeOpen = this.pendingText.slice(0, found.idx);
+      // Collapse excess blank lines right before the open tag down to a
+      // single paragraph break: agent-mode output often uses `\n\n\n` around
+      // tool calls, and without this the stripped text keeps a blank row.
+      const collapsedBeforeOpen = textBeforeOpen.replace(/\n{3,}$/, '\n\n');
+      const openIdx = found.idx - (textBeforeOpen.length - collapsedBeforeOpen.length);
+      textBeforeOpen = collapsedBeforeOpen;
+      this.stripTailLeadingNewlines = textBeforeOpen.length > 0
+        ? /\n$/.test(textBeforeOpen)
+        : this.lastEmittedTextEndsWithNewline;
+      this.emitBlocksBeforeOpen(controller, openIdx);
       this.pendingBlocks = [];
 
       if (!closeTag) {
@@ -958,10 +1074,36 @@ export class XmlToolStreamFilter {
 
     // Safe — flush all pending
     for (const b of this.pendingBlocks) {
-      this.emit(controller, b.block, b.separator);
+      this.emitCollapsedTrailingNewlines(controller, b);
     }
+    this.lastEmittedTextEndsWithNewline = /\n$/.test(this.pendingText);
     this.pendingBlocks = [];
     this.pendingText = '';
+  }
+
+  /**
+   * Collapses excess blank lines (3+ consecutive newlines) down to a single
+   * paragraph break (`\n\n`). Agent-mode output often wraps tool calls in
+   * `\n\n\n`; when the text around a stripped tool call has already been
+   * flushed to previous SSE frames, the blank lines can no longer be trimmed
+   * at the open/close tags, so they are collapsed here instead. Keeping at
+   * most one blank line matches how the DeepSeek page's own markdown renderer
+   * displays the same source.
+   */
+  private emitCollapsedTrailingNewlines(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    entry: { block: string; separator: string; sourceFrame: DeepSeekSseFrame; isFragmentCreation: boolean; parsed: any },
+  ) {
+    const modified = cloneParsedWithCollapsedBlankLines(entry.parsed);
+    if (modified === null) {
+      this.emit(controller, entry.block, entry.separator);
+      return;
+    }
+    this.emit(
+      controller,
+      replaceDeepSeekSseFrameData(entry.sourceFrame, JSON.stringify(modified)),
+      entry.separator,
+    );
   }
 
   private getCurrentToolTail(
@@ -1004,7 +1146,7 @@ export class XmlToolStreamFilter {
   flush(controller: ReadableStreamDefaultController<Uint8Array>) {
     // Flush any unsent pending blocks (they were buffered as potential tool start but never confirmed)
     for (const b of this.pendingBlocks) {
-      this.emit(controller, b.block, b.separator);
+      this.emitCollapsedTrailingNewlines(controller, b);
     }
     this.pendingBlocks = [];
     this.pendingText = '';
@@ -1044,16 +1186,18 @@ export class XmlToolStreamFilter {
         continue;
       }
       if (charsSeen + text.length <= idx) {
-        this.emit(controller, entry.block, entry.separator);
+        this.emitCollapsedTrailingNewlines(controller, entry);
         charsSeen += text.length;
       } else {
         const keepChars = idx - charsSeen;
         if (keepChars > 0 || entry.isFragmentCreation || isBatchPatch(entry.parsed)) {
           const modified = cloneParsedWithTextPrefix(entry.parsed, keepChars);
           if (modified) {
+            const collapsed = cloneParsedWithCollapsedBlankLines(modified);
+            const effective = collapsed ?? modified;
             this.emit(
               controller,
-              replaceDeepSeekSseFrameData(entry.sourceFrame, JSON.stringify(modified)),
+              replaceDeepSeekSseFrameData(entry.sourceFrame, JSON.stringify(effective)),
               entry.separator,
             );
           }
@@ -1061,6 +1205,11 @@ export class XmlToolStreamFilter {
         break;
       }
     }
+    // The text emitted here is everything before the tool-call open tag
+    // (plus the open tag itself when keepChars covered it). Track whether it
+    // ended on a newline so a tool call that opens at the start of the next
+    // frame can still collapse the blank lines correctly.
+    this.lastEmittedTextEndsWithNewline = /\n$/.test(this.pendingText.slice(0, idx));
   }
 }
 

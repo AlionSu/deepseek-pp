@@ -6937,10 +6937,20 @@ function stripToolCallTextNodes(root: Element) {
   }
 
   let activeTool: string | null = null;
+  // Blank-line collapse across text nodes: model output separates tool calls
+  // with `\n\n` on both sides. When the text before the open tag ended with a
+  // newline, the text after the close tag must drop its own leading newlines,
+  // otherwise stripping the XML leaves `\n\n\n\n` (the "blank line between
+  // every row" rendering bug on the DeepSeek page).
+  let stripTailLeadingNewlines = false;
+  let lastNodeEndsWithNewline = false;
 
   for (const textNode of textNodes) {
     const original = textNode.nodeValue ?? '';
-    if (!activeTool && !containsCleanableText(original)) continue;
+    if (!activeTool && !containsCleanableText(original)) {
+      lastNodeEndsWithNewline = /\n$/.test(original);
+      continue;
+    }
     const sanitizedOriginal = sanitizeRenderedControlText(
       original,
       { replaceTaskComplete: shouldReplaceRenderedTaskCompleteBlock(textNode) },
@@ -6963,24 +6973,71 @@ function stripToolCallTextNodes(root: Element) {
 
       const openMatch = toolOpenTagRe.exec(sanitizedOriginal.slice(cursor));
       if (!openMatch) {
-        next += sanitizedOriginal.slice(cursor);
+        let rest = sanitizedOriginal.slice(cursor);
+        if (stripTailLeadingNewlines) {
+          rest = rest.replace(/^\n+/, '');
+          stripTailLeadingNewlines = false;
+        }
+        next += rest;
         break;
       }
 
-      next += sanitizedOriginal.slice(cursor, cursor + openMatch.index);
+      let before = sanitizedOriginal.slice(cursor, cursor + openMatch.index);
+      if (stripTailLeadingNewlines) {
+        before = before.replace(/^\n+/, '');
+        stripTailLeadingNewlines = false;
+      }
+      // Collapse excess blank lines right before the open tag down to a
+      // single paragraph break (agent-mode output often wraps tool calls in
+      // `\n\n\n`), matching the stream filter's behavior (Issue: agent panel
+      // blank-line rendering).
+      before = collapseRenderedExcessBlankLines(before);
+      next += before;
+      stripTailLeadingNewlines = /\n$/.test(next) || lastNodeEndsWithNewline;
       activeTool = openMatch[1];
       cursor += openMatch.index + openMatch[0].length;
     }
 
+    next = collapseRenderedExcessBlankLines(next);
     if (next !== original) {
       textNode.nodeValue = next;
       if (textNode.parentElement) changedParents.add(textNode.parentElement);
     }
+    lastNodeEndsWithNewline = /\n$/.test(next);
   }
 
   for (const parent of changedParents) {
     pruneEmptyToolContainers(parent, root);
   }
+}
+
+/**
+ * Collapses runs of 3+ newlines outside fenced code blocks down to a single
+ * paragraph break (`\n\n`). Keeps blank lines inside ``` fences intact for
+ * `<pre>` rendering.
+ */
+function collapseRenderedExcessBlankLines(text: string): string {
+  if (!text.includes('\n\n\n')) return text;
+  if (!text.includes('```')) return text.replace(/\n{3,}/g, '\n\n');
+
+  let output = '';
+  let inFence = false;
+  let cursor = 0;
+  while (cursor < text.length) {
+    const fenceIndex = text.indexOf('```', cursor);
+    if (fenceIndex === -1) {
+      output += inFence
+        ? text.slice(cursor)
+        : text.slice(cursor).replace(/\n{3,}/g, '\n\n');
+      break;
+    }
+    const segment = text.slice(cursor, fenceIndex);
+    output += inFence ? segment : segment.replace(/\n{3,}/g, '\n\n');
+    output += '```';
+    inFence = !inFence;
+    cursor = fenceIndex + 3;
+  }
+  return output;
 }
 
 function sanitizeRenderedControlText(text: string, options: { replaceTaskComplete: boolean }): string {

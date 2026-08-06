@@ -3,7 +3,10 @@ const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 export function renderInlineMarkdown(text: string): string {
   try {
     const codeBlocks: string[] = [];
-    let html = escapeHtml(text);
+    // Normalize CRLF/CR line endings to LF up front so the blank-line
+    // collapse below also works when the model output uses `\r\n`
+    // (Issue: agent panel blank-line rendering).
+    let html = escapeHtml(text).replace(/\r\n?/g, '\n');
 
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
       const token = `@@DPP_CODE_BLOCK_${codeBlocks.length}@@`;
@@ -19,17 +22,34 @@ export function renderInlineMarkdown(text: string): string {
       if (!isSafeHref(decodedHref)) return `${label} (${href})`;
       return `<a href="${escapeAttribute(decodedHref)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
     });
-    html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
-    html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
-    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-    html = html.replace(/^\* (.+)$/gm, '<li>$1</li>');
+    // ATX headings, longest first so `####` is not swallowed by `##`
+    // (agent-mode output uses `####` sub-headings; the page's own markdown
+    // renderer renders them as headings, so the inline agent panel must too).
+    html = html.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+    html = html.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+    html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    // List items: unordered (`-`/`*`) and ordered (`1.`), matching how the
+    // page's markdown renderer displays them as compact rows.
+    html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    // Blockquote lines, rendered like the page's markdown renderer.
+    html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+    // Collapse runs of blank lines into a single newline before the `<br>`
+    // conversion: DeepSeek agent-mode output separates every list item or
+    // sentence with `\n\n`, and rendering each blank line as a second `<br>`
+    // produces the "blank line between every row" effect. The page's own
+    // markdown renderer shows the same source compactly, so the inline agent
+    // panel must match that (Issue: agent panel blank-line rendering).
+    html = html.replace(/\n{2,}/g, '\n');
     html = html.replace(/\n/g, '<br>');
     html = html.replace(/@@DPP_CODE_BLOCK_(\d+)@@/g, (_match, index) => codeBlocks[Number(index)] ?? '');
 
     return html;
   } catch {
-    return escapeHtml(text).replace(/\n/g, '<br>');
+    return escapeHtml(text).replace(/\r\n?/g, '\n').replace(/\n{2,}/g, '\n').replace(/\n/g, '<br>');
   }
 }
 

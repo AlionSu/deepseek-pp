@@ -450,8 +450,8 @@ export function injectInlineAgentStyles(): void {
     }
     .dpp-agent-running-indicator {
       position: fixed;
-      right: 16px;
-      bottom: 16px;
+      top: 12px;
+      right: 12px;
       z-index: 2147483647;
       display: flex;
       align-items: center;
@@ -549,9 +549,31 @@ export function injectInlineAgentStyles(): void {
       word-break: break-word;
     }
     [data-dpp-body-text] * { color: inherit; }
-    [data-dpp-body-text] h3 { font-size: 1.1em; font-weight: 600; margin: 10px 0 4px; }
+    [data-dpp-body-text] h1,
+    [data-dpp-body-text] h2,
+    [data-dpp-body-text] h3,
+    [data-dpp-body-text] h4,
+    [data-dpp-body-text] h5,
+    [data-dpp-body-text] h6 {
+      font-weight: 600;
+      margin: 10px 0 4px;
+      line-height: 1.35;
+    }
+    [data-dpp-body-text] h1 { font-size: 1.25em; }
+    [data-dpp-body-text] h2 { font-size: 1.15em; }
+    [data-dpp-body-text] h3,
+    [data-dpp-body-text] h4 { font-size: 1.05em; }
+    [data-dpp-body-text] h5,
+    [data-dpp-body-text] h6 { font-size: 1em; }
     [data-dpp-body-text] p { margin: 3px 0; }
     [data-dpp-body-text] ul, [data-dpp-body-text] ol { margin: 3px 0 3px 16px; }
+    [data-dpp-body-text] li { margin: 2px 0; }
+    [data-dpp-body-text] blockquote {
+      margin: 6px 0;
+      padding: 2px 10px;
+      border-left: 3px solid var(--dpp-ui-border);
+      color: var(--dpp-ui-text-muted);
+    }
     [data-dpp-body-text] strong { font-weight: 600; }
     [data-dpp-body-text] a { color: var(--dpp-ui-accent); text-decoration: underline; }
     [data-dpp-body-text] table {

@@ -45,9 +45,36 @@ describe('inline agent renderer', () => {
     const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
 
     expect(body?.getAttribute('data-dpp-raw-text')).toContain('| Metric | Value |');
-    expect(body?.innerHTML).toContain('<h4>Market summary</h4>');
+    // `### ` is an ATX level-3 heading (native markdown semantics).
+    expect(body?.innerHTML).toContain('<h3>Market summary</h3>');
     expect(body?.innerHTML).toContain('<table>');
     expect(body?.innerHTML).toContain('<td><strong>Average price</strong></td>');
+  });
+
+  it('renders agent-mode step text without blank rows between lines', () => {
+    // DeepSeek agent mode separates every list item / sentence with \n\n.
+    // The step body must collapse those blank lines instead of rendering a
+    // second <br> per blank line (the "blank line between every row" bug).
+    const step = createAgentStepElement(0);
+
+    updateStepStreamText(step, [
+      '现在我已经获取了足够的搜索结果。让我从这些结果中提炼出最重要的科技新闻。',
+      '',
+      '从搜索结果中，我可以看到当天有几个重大科技新闻：',
+      '',
+      '1. 远景科技集团的乌兰察布星河基地投产。',
+      '',
+      '2. 谷歌AI部门发生重大调整。',
+      '',
+      '3. 新华网报道了中国的一些科技进展。',
+    ].join('\n'));
+
+    const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
+    expect(body?.innerHTML).not.toContain('<br><br>');
+    expect(body?.innerHTML).toContain('新闻。<br>从搜索结果中');
+    // Ordered list rows render as list items (native markdown semantics).
+    expect(body?.innerHTML).toContain('<li>远景科技集团的乌兰察布星河基地投产。</li>');
+    expect(body?.innerHTML).toContain('<li>新华网报道了中国的一些科技进展。</li>');
   });
 
   it('follows the streaming step body while the reader is at the bottom', () => {
@@ -343,6 +370,8 @@ describe('inline agent renderer', () => {
     expect(css).toContain('.dpp-agent-step-section-label');
     expect(css).toContain('.dpp-agent-tool-summary');
     expect(css).toContain('.dpp-agent-running-indicator');
+    expect(css).toContain('.dpp-agent-running-indicator {\n      position: fixed;\n      top: 12px;\n      right: 12px;');
+    expect(css).not.toContain('bottom: 16px;');
     expect(css).toContain('[data-status="streaming"]');
     expect(css).toContain('@keyframes dpp-agent-step-pulse');
     expect(css).toContain('prefers-reduced-motion');

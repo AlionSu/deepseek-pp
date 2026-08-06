@@ -80,6 +80,92 @@ describe('XmlToolStreamFilter', () => {
     expect(parsed).toHaveLength(1);
     expect(extractResponseTextFromParsed(parsed[0])).toBe('Split event text');
   });
+
+  it('collapses blank lines around a stripped tool call instead of stacking \\n\\n\\n\\n', () => {
+    // DeepSeek agent-mode output separates tool calls with blank lines on
+    // both sides: `前文\n\n<tool_call>...</tool_call>\n\n后文`. Stripping only
+    // the XML tags must leave a single paragraph break (`前文\n\n后文`), not
+    // `前文\n\n\n\n后文` (the "blank line between every row" rendering bug on
+    // the DeepSeek page).
+    const payload = JSON.stringify({
+      filename: 'blank-line.html',
+      content: '<p>hi</p>',
+      language: 'html',
+    });
+    const output = runFilter([
+      sseText('现在我已经获取了足够的搜索结果。\n\n'),
+      sseText('<artifact_create>'),
+      sseText(payload),
+      sseText('</artifact_create>\n\n'),
+      sseText('从搜索结果中，我可以看到当天有几个重大科技新闻：\n\n1. 远景科技集团\n\n2. 谷歌AI部门'),
+    ]);
+
+    expect(output).not.toContain('artifact_create');
+    expect(output).not.toContain('<p>hi</p>');
+    expect(readVisibleText(output)).toBe(
+      '现在我已经获取了足够的搜索结果。\n\n' +
+      '从搜索结果中，我可以看到当天有几个重大科技新闻：\n\n' +
+      '1. 远景科技集团\n\n2. 谷歌AI部门',
+    );
+  });
+
+  it('collapses blank lines between consecutive stripped tool calls', () => {
+    const payload = JSON.stringify({ filename: 'two.html', content: '<p>x</p>', language: 'html' });
+    const output = runFilter([
+      sseText('第一段。\n\n<artifact_create>'),
+      sseText(payload),
+      sseText('</artifact_create>\n\n<artifact_create>'),
+      sseText(payload),
+      sseText('</artifact_create>\n\n第二段。\n\n第三段。'),
+    ]);
+
+    expect(readVisibleText(output)).toBe('第一段。\n\n第二段。\n\n第三段。');
+    expect(readVisibleText(output)).not.toContain('\n\n\n');
+  });
+
+  it('keeps a single blank line when only one side of the tool call is blank', () => {
+    const payload = JSON.stringify({ filename: 'one-side.html', content: '<p>x</p>', language: 'html' });
+    const output = runFilter([
+      sseText('前文。\n\n<artifact_create>'),
+      sseText(payload),
+      sseText('</artifact_create>后文。'),
+    ]);
+
+    expect(readVisibleText(output)).toBe('前文。\n\n后文。');
+  });
+
+  it('collapses excess blank lines already flushed before a tool call opens', () => {
+    // Agent-mode output often wraps tool calls in `\n\n\n`. When the text
+    // before the open tag was already flushed to a previous SSE frame, the
+    // trailing blank lines must still collapse to a single paragraph break.
+    const payload = JSON.stringify({ filename: 'flush.html', content: '<p>x</p>', language: 'html' });
+    const output = runFilter([
+      sseText('最后一步的思考。\n\n\n'),
+      sseText('<artifact_create>'),
+      sseText(payload),
+      sseText('</artifact_create>\n\n'),
+      sseText('最终答案：\n\n1. 第一点。\n\n2. 第二点。'),
+    ]);
+
+    const visible = readVisibleText(output);
+    expect(visible).toBe(
+      '最后一步的思考。\n\n' +
+      '最终答案：\n\n1. 第一点。\n\n2. 第二点。',
+    );
+    expect(visible).not.toContain('\n\n\n');
+  });
+
+  it('collapses excess blank lines in plain text while preserving fenced code blocks', () => {
+    const output = runFilter([
+      sseText('第一段。\n\n\n第二段。\n\n\n```\nline one\n\n\nline two\n```\n\n\n结束。'),
+    ]);
+
+    const visible = readVisibleText(output);
+    expect(visible).toContain('第一段。\n\n第二段。');
+    expect(visible).toContain('```\nline one\n\n\nline two\n```');
+    expect(visible).toContain('```\n\n结束。');
+    expect(visible).not.toContain('第二段。\n\n\n```');
+  });
 });
 
 function runFilter(chunks: string[]): string {
