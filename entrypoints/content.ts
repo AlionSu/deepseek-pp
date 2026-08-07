@@ -70,7 +70,11 @@ import {
   getInlineAgentAnswerText,
   getInlineAgentProcessText,
 } from '../core/inline-agent/display-text';
-import { findAssistantMessageByContentSnippet } from '../core/inline-agent/message-anchor';
+import {
+  elementHasMessageId,
+  findAssistantMessageByContentSnippet,
+  findInlineAgentRestoreTarget,
+} from '../core/inline-agent/message-anchor';
 import type {
   InlineAgentStartPayload,
   InlineAgentStreamChunkMsg,
@@ -4363,13 +4367,15 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
     );
     // Display pivot (Issue #551 follow-up): the full final-turn text is the
     // user-facing answer rendered below the console; clear it from the last
-    // step body so the deliverable is not duplicated inside the collapsed
-    // process timeline. Budget-paused runs keep the step text because their
-    // final text is only the budget notice.
-    if (!budgetPaused && finalText) {
-      const steps = inlineAgentContainer.querySelectorAll('.dpp-agent-step');
-      const lastStep = steps[steps.length - 1];
-      if (lastStep) updateStepStreamText(lastStep as HTMLElement, '');
+    // step body ONLY when the step text IS that answer (same source turn,
+    // same clamp), so the deliverable is not duplicated inside the collapsed
+    // process timeline. Budget-paused runs and legacy summary-split traces
+    // keep their step text because it differs from the rendered answer.
+    const completedSteps = inlineAgentContainer.querySelectorAll('.dpp-agent-step');
+    const lastCompletedStep = completedSteps[completedSteps.length - 1] as HTMLElement | undefined;
+    if (lastCompletedStep
+      && isInlineAgentStepTextTheFinalAnswer(getInlineAgentStepText(lastCompletedStep), finalText)) {
+      updateStepStreamText(lastCompletedStep, '');
     }
     renderTerminalAgentConsoleHeader(
       inlineAgentContainer,
@@ -5278,6 +5284,19 @@ function createInlineAgentTrace(
 function getInlineAgentStepText(step: HTMLElement): string {
   const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
   return (body?.getAttribute('data-dpp-raw-text') ?? body?.textContent ?? '').trim();
+}
+
+/**
+ * True when a step's rendered body text is exactly the run's final answer
+ * (same source turn, same clamp). Only then may the console clear the step
+ * body — the answer area below renders it in full, so keeping it inside the
+ * collapsed timeline would duplicate the deliverable. Distinct step notes
+ * (budget-paused runs, legacy summary-split traces) are never deleted
+ * (Issue #551 follow-up).
+ */
+function isInlineAgentStepTextTheFinalAnswer(stepText: string, answerText: string): boolean {
+  if (!stepText || !answerText) return false;
+  return stepText === (clampText(answerText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '');
 }
 
 function updateActiveInlineAgentTrace(
@@ -6644,63 +6663,26 @@ function findRestoredInlineAgentTarget(
   messages: Element[],
   usedMessages: Set<Element>,
 ): Element | null {
-  const anchored = findInlineAgentTargetByAnchor(trace, messages, usedMessages);
-  if (anchored) return anchored;
-
-  return null;
-}
-
-function findInlineAgentTargetByAnchor(
-  trace: InlineAgentTraceRecord,
-  messages: Element[],
-  usedMessages: Set<Element>,
-): Element | null {
-  const messageId = String(trace.anchorMessageId);
-  const byId = messages.find((message) => {
-    if (usedMessages.has(message)) return false;
-    return elementHasMessageId(message, messageId);
-  });
-  if (byId) return byId;
-
-  const byContent = findAssistantMessageByContentSnippet(messages, trace.anchorContent ?? '', usedMessages);
-  if (byContent) return byContent;
-
-  const byToolRecord = findInlineAgentTargetByToolRecord(trace, messages, usedMessages);
-  if (byToolRecord) return byToolRecord;
-
-  if (normalizeText(trace.anchorContent).length >= 12) return null;
-
-  const index = typeof trace.anchorMessageIndex === 'number' && Number.isInteger(trace.anchorMessageIndex)
-    ? trace.anchorMessageIndex
-    : null;
-  if (index === null || index < 0) return null;
-
-  const byIndex = messages[index];
-  if (!byIndex || usedMessages.has(byIndex)) return null;
-  return byIndex;
-}
-
-function findInlineAgentTargetByToolRecord(
-  trace: InlineAgentTraceRecord,
-  messages: Element[],
-  usedMessages: Set<Element>,
-): Element | null {
+  // Virtual-window-safe anchoring (Issue #551 follow-up): `messages` is only
+  // the virtual list's rendered window, so index-based fallbacks
+  // (`anchorMessageIndex`, tool-record `assistantMessageIndex`) point at the
+  // WRONG message once the window moves — restored consoles mounted under
+  // unrelated newer replies. Only DOM-id / own-text identity is trusted; when
+  // the anchor message is not rendered this returns null and the trace stays
+  // pending until its message scrolls into view (the mutation hub re-runs
+  // the render). No mount is always better than a wrong mount.
   const anchorMessageId = String(trace.anchorMessageId);
+  const toolContentHints: string[] = [];
   for (const record of restoredToolRecords.values()) {
-    const recordMessageId = getToolRecordAssistantMessageId(record);
-    if (recordMessageId !== anchorMessageId) continue;
-
-    const byContent = findAssistantMessageByContentSnippet(messages, record.content ?? '', usedMessages);
-    if (byContent) return byContent;
-
-    const byId = findRestoredToolTargetByMessageId(record, messages, usedMessages);
-    if (byId) return byId;
-
-    const byIndex = findRestoredToolTargetByAssistantIndex(record, messages, usedMessages);
-    if (byIndex) return byIndex;
+    if (getToolRecordAssistantMessageId(record) !== anchorMessageId) continue;
+    toolContentHints.push(record.content ?? '');
   }
-
-  return null;
+  return findInlineAgentRestoreTarget(
+    { anchorMessageId, anchorContent: trace.anchorContent ?? '' },
+    toolContentHints,
+    messages,
+    usedMessages,
+  );
 }
 
 function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTMLElement {
@@ -6710,15 +6692,14 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
   container.setAttribute('data-dpp-agent-loop-id', trace.loopId);
 
   // Display pivot (Issue #551 follow-up): when the run produced a real final
-  // answer it renders below the console, so the last step's text (the same
-  // final turn) is not duplicated inside the collapsed timeline. Keep it for
-  // budget-paused traces whose final text is only the budget notice.
+  // answer it renders below the console, so a last step whose text IS that
+  // answer is cleared to avoid duplicating the deliverable inside the
+  // collapsed timeline (equality check below keeps distinct step notes).
   const restoredAnswerText = getInlineAgentDisplayFinalText(trace.finalText);
   const restoredBudgetPaused = trace.status === 'complete' && isInlineAgentBudgetFinalText(
     trace.finalText,
     (count) => contentT('content.agent.budgetReached', { count }),
   );
-  const skipFinalStepText = restoredAnswerText.length > 0 && !restoredBudgetPaused;
   const sortedSteps = [...trace.steps].sort((a, b) => a.index - b.index);
   const lastStepIndex = sortedSteps.length > 0 ? sortedSteps[sortedSteps.length - 1].index : null;
 
@@ -6726,10 +6707,14 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
   for (const step of sortedSteps) {
     const stepEl = createAgentStepElement(step.index, getAgentRendererLabels());
     const stepText = getInlineAgentDisplayStepText(step.text) || step.text;
-    const renderStepText = skipFinalStepText && step.index === lastStepIndex
-      ? ''
-      : clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '';
-    updateStepStreamText(stepEl, renderStepText);
+    const renderStepText = clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '';
+    // Clear the last step's body only when it IS the restored final answer
+    // (equality, not just "has an answer"): budget notices and legacy
+    // summary-split traces keep their distinct step notes (Issue #551
+    // follow-up).
+    const stepIsFinalAnswer = step.index === lastStepIndex
+      && isInlineAgentStepTextTheFinalAnswer(renderStepText, restoredAnswerText);
+    updateStepStreamText(stepEl, stepIsFinalAnswer ? '' : renderStepText);
     for (const exec of step.toolExecutions) {
       addToolResultToStep(stepEl, exec.name, exec.result, getAgentRendererLabels());
     }
@@ -7017,24 +7002,6 @@ function findRestoredToolTargetByAssistantIndex(
 function getToolRecordAssistantMessageIndex(record: ToolCallRestoreRecord): number | null {
   const value = record.metadata?.assistantMessageIndex;
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
-}
-
-function elementHasMessageId(element: Element, messageId: string): boolean {
-  const candidates = [
-    element,
-    ...Array.from(element.querySelectorAll('[data-message-id], [data-messageid], [data-id], [data-ds-message-id], [id]')),
-  ];
-
-  return candidates.some((candidate) => {
-    const attributes = [
-      candidate.getAttribute('data-message-id'),
-      candidate.getAttribute('data-messageid'),
-      candidate.getAttribute('data-id'),
-      candidate.getAttribute('data-ds-message-id'),
-      candidate.getAttribute('id'),
-    ];
-    return attributes.some((value) => value === messageId || value?.endsWith(`-${messageId}`));
-  });
 }
 
 function startRenderedToolCallCleaner(

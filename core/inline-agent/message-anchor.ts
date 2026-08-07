@@ -65,3 +65,74 @@ export function findAssistantMessageByContentSnippet(
   }
   return null;
 }
+
+/**
+ * True when the element or one of its descendants exposes the given DeepSeek
+ * message id through a data attribute or an id suffix.
+ */
+export function elementHasMessageId(element: Element, messageId: string): boolean {
+  const candidates = [
+    element,
+    ...Array.from(element.querySelectorAll('[data-message-id], [data-messageid], [data-id], [data-ds-message-id], [id]')),
+  ];
+
+  return candidates.some((candidate) => {
+    const attributes = [
+      candidate.getAttribute('data-message-id'),
+      candidate.getAttribute('data-messageid'),
+      candidate.getAttribute('data-id'),
+      candidate.getAttribute('data-ds-message-id'),
+      candidate.getAttribute('id'),
+    ];
+    return attributes.some((value) => value === messageId || value?.endsWith(`-${messageId}`));
+  });
+}
+
+export interface InlineAgentRestoreAnchor {
+  readonly anchorMessageId: string;
+  readonly anchorContent: string;
+}
+
+/**
+ * Virtual-window-safe restore targeting for persisted agent traces (Issue
+ * #551 follow-up, restored-console mis-anchor fix).
+ *
+ * DeepSeek renders chat history through a virtual list, so `messages` is only
+ * the currently rendered window and array positions are window-relative: an
+ * index captured at run time (`anchorMessageIndex`) or a global assistant
+ * ordinal from history metadata (`assistantMessageIndex`) points at the WRONG
+ * message once the window moves. Restored consoles anchored through such
+ * indices mounted under unrelated newer messages — a restored run's console
+ * appeared inside the newest reply.
+ *
+ * Anchoring therefore trusts only identity signals: the DOM message id and
+ * the message's own visible text (plus the own text of persisted tool records
+ * from the same anchor message). When the anchor message is not rendered the
+ * function returns null and the trace stays pending; the mutation-driven
+ * re-render mounts it as soon as its message scrolls into view. No mount is
+ * always better than a wrong mount.
+ */
+export function findInlineAgentRestoreTarget(
+  anchor: InlineAgentRestoreAnchor,
+  toolContentHints: readonly string[],
+  messages: Element[],
+  usedMessages: Set<Element>,
+): Element | null {
+  if (anchor.anchorMessageId) {
+    const byId = messages.find((message) => {
+      if (usedMessages.has(message)) return false;
+      return elementHasMessageId(message, anchor.anchorMessageId);
+    });
+    if (byId) return byId;
+  }
+
+  const byContent = findAssistantMessageByContentSnippet(messages, anchor.anchorContent, usedMessages);
+  if (byContent) return byContent;
+
+  for (const hint of toolContentHints) {
+    const byHint = findAssistantMessageByContentSnippet(messages, hint, usedMessages);
+    if (byHint) return byHint;
+  }
+
+  return null;
+}

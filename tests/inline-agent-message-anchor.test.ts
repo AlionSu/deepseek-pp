@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  elementHasMessageId,
   findAssistantMessageByContentSnippet,
+  findInlineAgentRestoreTarget,
   getAssistantMessageOwnText,
 } from '../core/inline-agent/message-anchor';
 
@@ -78,5 +80,100 @@ describe('getAssistantMessageOwnText', () => {
     expect(ownText).not.toContain('最终答案区');
     expect(ownText).not.toContain('已执行工具');
     expect(ownText).not.toContain('已自动保存');
+  });
+});
+
+describe('findInlineAgentRestoreTarget (Issue #551 follow-up: virtual-window-safe restore)', () => {
+  // DeepSeek renders chat through a virtual list: the messages array is only
+  // the currently rendered window. A restored trace whose anchor message is
+  // scrolled out must stay pending — never mount onto an unrelated message
+  // that happens to sit at a colliding window position.
+
+  const oldAnchorText = '旧一轮 agent 运行所在的助手消息正文，包含 Anthropic ARR 月度增长的搜索结果。';
+  const newAnchorText = '用户要的是「重新绘制一版」折线图，我先获取最新数据再渲染。';
+
+  function buildMessageWithId(ownText: string, messageId?: string): HTMLElement {
+    const message = buildMessage(ownText);
+    if (messageId) message.setAttribute('data-message-id', messageId);
+    return message;
+  }
+
+  it('anchors by DOM message id when the anchor message is rendered', () => {
+    const other = buildMessageWithId(newAnchorText, '222');
+    const anchor = buildMessageWithId(oldAnchorText, '111');
+    expect(findInlineAgentRestoreTarget(
+      { anchorMessageId: '111', anchorContent: '' },
+      [],
+      [other, anchor],
+      new Set(),
+    )).toBe(anchor);
+  });
+
+  it('anchors by anchor content when no id matches', () => {
+    const other = buildMessageWithId(newAnchorText, '222');
+    const anchor = buildMessageWithId(oldAnchorText, '333');
+    expect(findInlineAgentRestoreTarget(
+      { anchorMessageId: '111', anchorContent: oldAnchorText },
+      [],
+      [other, anchor],
+      new Set(),
+    )).toBe(anchor);
+  });
+
+  it('anchors by a persisted tool record content hint from the same message', () => {
+    const other = buildMessageWithId(newAnchorText, '222');
+    const anchor = buildMessageWithId(oldAnchorText, '333');
+    expect(findInlineAgentRestoreTarget(
+      { anchorMessageId: '111', anchorContent: '' },
+      ['tool record content that does not match', oldAnchorText],
+      [other, anchor],
+      new Set(),
+    )).toBe(anchor);
+  });
+
+  it('returns null when the anchor message is scrolled out of the virtual window', () => {
+    // Regression: the old run's console mounted onto the newest message
+    // through a stale window index. Only the new run's message is rendered.
+    const newRunMessage = buildMessageWithId(newAnchorText, '222');
+    const messages = [newRunMessage];
+    const used = new Set<Element>();
+    expect(findInlineAgentRestoreTarget(
+      { anchorMessageId: '111', anchorContent: oldAnchorText },
+      [oldAnchorText],
+      messages,
+      used,
+    )).toBeNull();
+    // ...while the new run's own trace still anchors correctly.
+    expect(findInlineAgentRestoreTarget(
+      { anchorMessageId: '222', anchorContent: newAnchorText },
+      [],
+      messages,
+      used,
+    )).toBe(newRunMessage);
+  });
+
+  it('never claims a message already used by another restored trace', () => {
+    const anchor = buildMessageWithId(oldAnchorText, '111');
+    expect(findInlineAgentRestoreTarget(
+      { anchorMessageId: '111', anchorContent: oldAnchorText },
+      [],
+      [anchor],
+      new Set([anchor]),
+    )).toBeNull();
+  });
+});
+
+describe('elementHasMessageId', () => {
+  it('matches direct attributes and descendant id suffixes', () => {
+    const direct = document.createElement('div');
+    direct.setAttribute('data-message-id', '42');
+    expect(elementHasMessageId(direct, '42')).toBe(true);
+
+    const nested = document.createElement('div');
+    const child = document.createElement('div');
+    child.id = 'ds-message-42';
+    nested.appendChild(child);
+    expect(elementHasMessageId(nested, '42')).toBe(true);
+    expect(elementHasMessageId(nested, '43')).toBe(false);
   });
 });
