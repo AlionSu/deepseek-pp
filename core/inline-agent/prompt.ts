@@ -5,7 +5,7 @@ const PENDING_ACTION_RE = /(?:我(?:将|会|想|要|先|直接|现在|继续|尝
 const NUDGE_DECISION_TAIL_MAX_CHARS = 600;
 const PENDING_ACTION_AFTER_MAX_CHARS = 80;
 const TASK_COMPLETE_RE = /<task_complete>\s*([\s\S]*?)\s*<\/task_complete>/;
-const TASK_COMPLETE_BLOCK_RE = /<task_complete>\s*([\s\S]*?)\s*<\/task_complete>/g;
+export const TASK_COMPLETE_BLOCK_RE = /<task_complete>\s*([\s\S]*?)\s*<\/task_complete>/g;
 
 // Keep the persisted continuation turn non-empty so DeepSeek retains its
 // parent/child message chain, while making the internal marker invisible even
@@ -95,7 +95,7 @@ function getTaskCompleteSummary(body: string): string {
   }
 }
 
-function stripDanglingLeadingPunctuation(text: string): string {
+export function stripDanglingLeadingPunctuation(text: string): string {
   return text.replace(/^[\s\u3000]*(?:[，,、。．.;；:：]\s*)+/, '').trimStart();
 }
 
@@ -136,6 +136,7 @@ export function buildContinuationPrompt(
   return [
     translate(locale, 'prompt.inlineAgent.continuationIntro'),
     translate(locale, 'prompt.inlineAgent.continuationEnough'),
+    translate(locale, 'prompt.inlineAgent.finalAnswerContract'),
     translate(locale, 'prompt.inlineAgent.continuationNoPseudo'),
     '',
     '<original_task>',
@@ -165,6 +166,7 @@ export function buildNudgePrompt(
     translate(locale, 'prompt.inlineAgent.nudgeChoice'),
     translate(locale, 'prompt.inlineAgent.nudgeNextTool'),
     translate(locale, 'prompt.inlineAgent.nudgeComplete'),
+    translate(locale, 'prompt.inlineAgent.finalAnswerContract'),
     translate(locale, 'prompt.inlineAgent.nudgeCount', { count: nudgeCount }),
     '',
     '<original_task>',

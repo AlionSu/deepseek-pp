@@ -9,6 +9,10 @@ import {
   INLINE_AGENT_FULL_TOOL_RESULT_WINDOW,
   shouldNudge,
 } from '../core/inline-agent/prompt';
+import {
+  getInlineAgentAnswerText,
+  getInlineAgentProcessText,
+} from '../core/inline-agent/display-text';
 import { buildAutomationToolContinuationPrompt } from '../core/automation/runner';
 import type { ToolExecutionRecord } from '../core/types';
 
@@ -75,6 +79,54 @@ describe('inline-agent model prompts', () => {
     expect(nudge).toContain('did not include executable tool XML');
     expect(nudge).toContain('<task_complete>{"summary":"..."}</task_complete>');
     expect(nudge).toContain('<tool_results_so_far>');
+  });
+
+  it('enforces the final-answer contract in both continuation and nudge prompts', () => {
+    const continuation = buildContinuationPrompt('查行情', [SUCCESS_EXECUTION], 'zh-CN');
+    expect(continuation).toContain('完整最终答案');
+    expect(continuation).toContain('<task_complete>');
+
+    const nudge = buildNudgePrompt('查行情', '我会继续。', [SUCCESS_EXECUTION], 1, 'zh-CN');
+    expect(nudge).toContain('完整最终答案');
+    expect(nudge).toContain('<task_complete>');
+
+    const enContinuation = buildContinuationPrompt('Research docs', [SUCCESS_EXECUTION], 'en');
+    expect(enContinuation).toContain('complete final answer for the user');
+  });
+
+  it('extracts the task_complete summary as the sole user-facing answer', () => {
+    const text = [
+      '我先整理一下刚才获取的信息。',
+      '',
+      '<task_complete>{"summary":"最终答案：任务已经完成。","artifacts":["demo.html"]}</task_complete>',
+    ].join('\n');
+
+    expect(getInlineAgentAnswerText(text)).toBe('最终答案：任务已经完成。');
+  });
+
+  it('falls back to the full normalized text when the summary is empty', () => {
+    const text = [
+      '我先整理一下刚才获取的信息。',
+      '<task_complete>{"summary":""}</task_complete>',
+    ].join('\n');
+
+    expect(getInlineAgentAnswerText(text)).toBe('我先整理一下刚才获取的信息。');
+  });
+
+  it('falls back to the full text when no task_complete signal exists', () => {
+    expect(getInlineAgentAnswerText('正常回答内容。')).toBe('正常回答内容。');
+    expect(getInlineAgentAnswerText('，用户想了解港股的走势。')).toBe('用户想了解港股的走势。');
+  });
+
+  it('keeps working notes in process text without the control block', () => {
+    const text = [
+      '我先整理一下刚才获取的信息。',
+      '',
+      '<task_complete>{"summary":"最终答案"}</task_complete>',
+    ].join('\n');
+
+    expect(getInlineAgentProcessText(text)).toBe('我先整理一下刚才获取的信息。');
+    expect(getInlineAgentProcessText('普通过程文本。')).toBe('普通过程文本。');
   });
 
   it('bounds error payloads in windowed and full tool results', () => {

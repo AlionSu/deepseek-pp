@@ -66,9 +66,16 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // 376486 raw (+119) / 114604 gzip; raw baseline updated again, gzip stays under
 // the CI-derived baseline. firstChatScreen raw cap raised 406623 -> 406742 by
 // the same +119.
+// Refreshed for #551 (inline-agent console IA): content.agent.running gained an
+// elapsed-seconds param and footerComplete/footerPaused/footerError were replaced
+// by consoleComplete/consolePaused/consoleError (zh-CN/en), and
+// prompt.inlineAgent.finalAnswerContract (zh-CN/en) joined the shared resource
+// tree. Local Node-25 measurement: 377291 raw (+805) / 114864 gzip (stays under
+// the CI-derived gzip baseline); firstChatScreen raw cap raised 406742 -> 407547
+// by the same +805.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 376_486, gzip: 114_659 },
+  initialShell: { raw: 377_291, gzip: 114_659 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -118,12 +125,16 @@ const GZIP_ENCODER_VARIANCE_BYTES = 256;
 // Raised 406623 -> 406742 for the #544 follow-up: content.agent.startFailed
 // (zh-CN/en) lands in the first-chat-screen graph too (+119 raw; gzip 124622
 // stays within the 125000 cap).
+// Raised 406742 -> 407547 for #551: the inline-agent console i18n changes
+// (content.agent.running/console* + prompt.inlineAgent.finalAnswerContract,
+// zh-CN/en) land in the first-chat-screen graph too (+805 raw; gzip 124884
+// stays within the 125000 cap).
 const BUDGET = Object.freeze({
   initialShell: {
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 406_742, gzip: 125_000 },
+  firstChatScreen: { raw: 407_547, gzip: 125_000 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },

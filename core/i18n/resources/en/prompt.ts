@@ -13,6 +13,7 @@ export const prompt = {
   inlineAgent: {
     continuationIntro: 'These are the tool results just executed for the tool-continuation task. Continue like a real agent, using the original task and these tool results to move the work forward.',
     continuationEnough: 'If the results are enough, output the final answer. Only call more tools when more information, verification, or file changes are truly needed.',
+    finalAnswerContract: 'When the task is complete, you MUST put the complete final answer for the user into the summary field of <task_complete>; text before the signal may only be brief working notes and must not contain the final answer.',
     continuationNoPseudo: 'Do not ask the user to click continue, and do not output pseudo tool-call JSON. When more action is needed, output only executable XML tool tags.',
     failureRecovery: 'At least one tool failed. Do not stop because of a recoverable error; read summary/detail/error, fix the parameters or choose a suitable next step, and continue completing the task.',
     nudgeNoTools: 'The previous reply did not include executable tool XML, so the automated continuation cannot proceed.',

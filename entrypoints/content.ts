@@ -64,9 +64,12 @@ import {
   INLINE_AGENT_CONTINUATION_PLACEHOLDER,
   isInlineAgentContinuationRequest,
   isInlineAgentContinuationStructure,
-  normalizeInlineAgentFinalAnswerText,
   replaceTaskCompleteBlocks,
 } from '../core/inline-agent/prompt';
+import {
+  getInlineAgentAnswerText,
+  getInlineAgentProcessText,
+} from '../core/inline-agent/display-text';
 import type {
   InlineAgentStartPayload,
   InlineAgentStreamChunkMsg,
@@ -87,11 +90,13 @@ import {
   updateStepStatus,
   addToolResultToStep,
   addToolResultDetailsToStep,
-  createAgentFooter,
-  createAgentRunningIndicator,
+  adoptReasoningBlock,
+  getAgentConsoleBody,
+  setAgentConsoleCollapsed,
+  updateAgentConsoleHeader,
   createAgentStartingElement,
-  updateAgentRunningIndicator,
   isInlineAgentBudgetFinalText,
+  type AgentConsolePhase,
 } from '../core/inline-agent/renderer';
 import { renderInlineMarkdown } from '../core/inline-agent/markdown';
 import {
@@ -444,8 +449,10 @@ let currentToolDescriptors: ToolDescriptor[] = [];
 const toolDescriptorSyncGate = createLatestSyncGate();
 let currentRequestMessageCount = 0;
 let activeAgentAbort: AbortController | null = null;
-let agentRunningIndicator: HTMLElement | null = null;
 let agentRunningToolCount = 0;
+let agentConsoleStartedAt = 0;
+let agentConsoleElapsedSeconds = 0;
+let agentConsoleTimer: ReturnType<typeof setInterval> | null = null;
 const pendingInlineAgentLoopTasks = new Set<Promise<void>>();
 let toolOpenTagRe = buildToolOpenTagRegex(currentToolDescriptors);
 let toolMarkerRe = buildToolMarkerRegex(currentToolDescriptors);
@@ -507,47 +514,80 @@ function getAgentRendererLabels() {
     process: contentT('content.agent.process'),
     tools: contentT('content.agent.tools'),
     results: contentT('content.agent.results'),
-    running: (stepNumber: number, toolCount: number) =>
-      contentT('content.agent.running', { step: stepNumber + 1, tools: toolCount }),
+    running: (stepNumber: number, toolCount: number, elapsedSeconds: number) =>
+      contentT('content.agent.running', { step: stepNumber + 1, tools: toolCount, seconds: elapsedSeconds }),
     toolOk: contentT('content.toolBlock.summaries.executed'),
     toolError: contentT('content.toolBlock.summaries.failed'),
-    footerComplete: (totalSteps: number, totalTools: number) =>
-      contentT('content.agent.footerComplete', { steps: totalSteps, tools: totalTools }),
-    footerPaused: (totalSteps: number, totalTools: number) =>
-      contentT('content.agent.footerPaused', { steps: totalSteps, tools: totalTools }),
-    footerError: (totalSteps: number, totalTools: number) =>
-      contentT('content.agent.footerError', { steps: totalSteps, tools: totalTools }),
+    consoleComplete: (totalSteps: number, totalTools: number, elapsedSeconds: number) =>
+      contentT('content.agent.consoleComplete', { steps: totalSteps, tools: totalTools, seconds: elapsedSeconds }),
+    consolePaused: (totalSteps: number, totalTools: number, elapsedSeconds: number) =>
+      contentT('content.agent.consolePaused', { steps: totalSteps, tools: totalTools, seconds: elapsedSeconds }),
+    consoleError: (totalSteps: number, totalTools: number, elapsedSeconds: number) =>
+      contentT('content.agent.consoleError', { steps: totalSteps, tools: totalTools, seconds: elapsedSeconds }),
   };
 }
 
-function ensureAgentRunningIndicator(): HTMLElement {
-  if (agentRunningIndicator?.isConnected) return agentRunningIndicator;
-  agentRunningIndicator = createAgentRunningIndicator(getAgentRendererLabels());
-  agentRunningIndicator.querySelector('.dpp-agent-stop-btn')?.addEventListener('click', () => stopInlineAgent());
-  document.body.appendChild(agentRunningIndicator);
-  return agentRunningIndicator;
+/**
+ * Agent console timing (Issue #551): a low-frequency 1s tick drives the
+ * elapsed-seconds counter in the console header. Explicit start/stop
+ * lifecycle, always released through the capability scope.
+ */
+function startAgentConsoleTimer(): void {
+  stopAgentConsoleTimer();
+  agentConsoleStartedAt = Date.now();
+  agentConsoleElapsedSeconds = 0;
+  if (!inlineAgentContainer || !inlineAgentCapabilityScope) return;
+  agentConsoleTimer = inlineAgentCapabilityScope.setInterval(() => {
+    agentConsoleElapsedSeconds = getAgentConsoleElapsedSeconds();
+    renderRunningAgentConsoleHeader();
+  }, 1000);
 }
 
-function showAgentRunningIndicator(stepNumber: number): void {
-  updateAgentRunningIndicator(
-    ensureAgentRunningIndicator(),
-    { running: true, stepNumber, toolCount: agentRunningToolCount },
-    getAgentRendererLabels(),
-  );
+function stopAgentConsoleTimer(): void {
+  if (agentConsoleTimer !== null) {
+    inlineAgentCapabilityScope?.clearInterval(agentConsoleTimer);
+    agentConsoleTimer = null;
+  }
 }
 
-function hideAgentRunningIndicator(): void {
-  if (!agentRunningIndicator) return;
-  updateAgentRunningIndicator(
-    agentRunningIndicator,
-    { running: false, stepNumber: 0, toolCount: 0 },
-    getAgentRendererLabels(),
-  );
+function getAgentConsoleElapsedSeconds(): number {
+  return agentConsoleStartedAt > 0
+    ? Math.floor((Date.now() - agentConsoleStartedAt) / 1000)
+    : 0;
 }
 
-function removeAgentRunningIndicator(): void {
-  agentRunningIndicator?.remove();
-  agentRunningIndicator = null;
+function renderRunningAgentConsoleHeader(): void {
+  const container = inlineAgentContainer;
+  if (!container) return;
+  updateAgentConsoleHeader(container, {
+    phase: 'running',
+    stepNumber: inlineAgentCurrentStep
+      ? Number(inlineAgentCurrentStep.getAttribute('data-step-index') ?? 0)
+      : 0,
+    toolCount: agentRunningToolCount,
+    totalSteps: 0,
+    totalTools: 0,
+    elapsedSeconds: agentConsoleElapsedSeconds,
+  }, getAgentRendererLabels());
+}
+
+function renderTerminalAgentConsoleHeader(
+  container: HTMLElement,
+  phase: Exclude<AgentConsolePhase, 'starting' | 'running'>,
+  totalSteps: number,
+  totalTools: number,
+  labelOverride?: string,
+  elapsedSeconds: number = getAgentConsoleElapsedSeconds(),
+): void {
+  updateAgentConsoleHeader(container, {
+    phase,
+    stepNumber: 0,
+    toolCount: agentRunningToolCount,
+    totalSteps,
+    totalTools,
+    elapsedSeconds,
+    labelOverride,
+  }, getAgentRendererLabels());
 }
 
 function getHistoryOrganizerLabels() {
@@ -873,7 +913,7 @@ async function stopInlineAgentCapability(): Promise<void> {
   pendingRestoredInlineAgentTraceIds.clear();
   restoredInlineAgentRenderAttempts = 0;
   document.querySelectorAll('.dpp-agent-container').forEach((node) => node.remove());
-  removeAgentRunningIndicator();
+  stopAgentConsoleTimer();
   removeInlineAgentStyles();
   if (contentToastTimer) {
     clearTimeout(contentToastTimer);
@@ -3657,7 +3697,7 @@ function observeThemeHost(element: Element | null) {
   if (!element || !themeObserver) return;
   themeObserver.observe(element, {
     attributes: true,
-    attributeFilter: ['class', 'style', 'data-theme', 'data-color-mode', 'data-mode', 'color-scheme'],
+    attributeFilter: ['class', 'style', 'data-theme', 'data-color-mode', 'data-mode', 'color-scheme', 'data-ds-dark-theme'],
   });
 }
 
@@ -3714,6 +3754,10 @@ function detectExplicitTheme(): DeepSeekTheme | null {
   const attributeNames = ['data-theme', 'data-color-mode', 'data-mode', 'color-scheme'];
 
   for (const host of hosts) {
+    // DeepSeek toggles its theme with a boolean `data-ds-dark-theme` marker;
+    // honor it directly so injected UI follows the host instead of the OS
+    // prefers-color-scheme (Issue #551).
+    if (host.hasAttribute('data-ds-dark-theme')) return 'dark';
     for (const name of attributeNames) {
       const theme = parseThemeText(host.getAttribute(name));
       if (theme) return theme;
@@ -3858,7 +3902,7 @@ function startInlineAgentIfNeeded(
   };
 
   injectInlineAgentStyles();
-  const container = createAgentContainer();
+  const container = createAgentContainer(stopInlineAgent, getAgentRendererLabels());
   container.setAttribute('data-dpp-agent-loop-id', loopId);
 
   const messages = getAssistantMessages();
@@ -3886,11 +3930,13 @@ function startInlineAgentIfNeeded(
   mountInlineAgentContainer(target, container);
 
   // Visible "starting" feedback for the 2.5-6.5s wait before the first model
-  // turn (Issue #544); removed when the first step renders.
+  // turn (Issue #544); removed when the first step renders. The console
+  // header carries the phase + stop control (Issue #551).
   const startingEl = createAgentStartingElement(getAgentRendererLabels());
-  container.appendChild(startingEl);
+  getAgentConsoleBody(container)?.appendChild(startingEl);
   container.setAttribute('data-agent-starting', 'true');
 
+  startAgentConsoleTimer();
   startOwnedInlineAgentLoop(payload);
 }
 
@@ -3908,8 +3954,21 @@ function isInlineAgentResponseComplete(complete: ResponseCompletePayload): boole
   return isInlineAgentContinuationRequest(complete.originalPrompt, complete.agentTaskPrompt);
 }
 
+/**
+ * Visually adopts the message's native DeepSeek reasoning host into the agent
+ * console timeline. CSS-only (Issue #551): the host DOM is never moved, and
+ * class application is idempotent so it is safe to run from the container
+ * placement observer while DeepSeek streams the reasoning content in.
+ */
+function adoptMessageReasoningBlocks(message: Element): void {
+  for (const host of getAssistantContentHosts(message)) {
+    if (looksLikeReasoningContentHost(host)) adoptReasoningBlock(host);
+  }
+}
+
 function mountInlineAgentContainer(message: Element, container: HTMLElement): void {
   const placeContainer = () => {
+    adoptMessageReasoningBlocks(message);
     const responseHost = getAssistantResponseHost(message);
     if (container.parentElement !== responseHost) {
       responseHost.appendChild(container);
@@ -3965,7 +4024,7 @@ function isInlineAgentRunning(): boolean {
  */
 function teardownInlineAgentPanel(): void {
   flushPendingInlineAgentStreamRender();
-  hideAgentRunningIndicator();
+  stopAgentConsoleTimer();
   if (inlineAgentContainer) {
     inlineAgentContainer.remove();
   }
@@ -3978,7 +4037,7 @@ function teardownInlineAgentPanel(): void {
 }
 
 function stopInlineAgent(): void {
-  hideAgentRunningIndicator();
+  stopAgentConsoleTimer();
   removeAgentStartingElement();
   const container = inlineAgentContainer;
   updateActiveInlineAgentTrace((trace) => ({
@@ -3987,7 +4046,8 @@ function stopInlineAgent(): void {
     error: contentT('content.agent.stopped'),
   }), { immediate: true });
   // Reset module state (DOM bookkeeping + observers). The container itself is
-  // retained momentarily to append the "stopped" footer, then detached.
+  // retained momentarily so its header can switch to the neutral paused state,
+  // then detached once the aborted loop settles.
   flushPendingInlineAgentStreamRender();
   inlineAgentLoopId = null;
   inlineAgentContainer = null;
@@ -3998,8 +4058,8 @@ function stopInlineAgent(): void {
   activeAgentAbort?.abort();
   activeAgentAbort = null;
   if (container) {
-    const footer = createAgentFooter(0, 0, 'paused', contentT('content.agent.stopped'), getAgentRendererLabels());
-    container.appendChild(footer);
+    renderTerminalAgentConsoleHeader(container, 'paused', 0, 0, contentT('content.agent.stopped'));
+    setAgentConsoleCollapsed(container, true);
   }
 }
 
@@ -4142,11 +4202,18 @@ function removeAgentStartingElement(): void {
 function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): void {
   if (data.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
   removeAgentStartingElement();
-  showAgentRunningIndicator(data.stepIndex);
 
-  const stepEl = createAgentStepElement(data.stepIndex, stopInlineAgent, getAgentRendererLabels());
+  const stepEl = createAgentStepElement(data.stepIndex, getAgentRendererLabels());
   inlineAgentCurrentStep = stepEl;
-  inlineAgentContainer.appendChild(stepEl);
+  getAgentConsoleBody(inlineAgentContainer)?.appendChild(stepEl);
+  updateAgentConsoleHeader(inlineAgentContainer, {
+    phase: 'running',
+    stepNumber: data.stepIndex,
+    toolCount: agentRunningToolCount,
+    totalSteps: 0,
+    totalTools: 0,
+    elapsedSeconds: getAgentConsoleElapsedSeconds(),
+  }, getAgentRendererLabels());
   updateActiveInlineAgentTrace((trace) => upsertInlineAgentTraceStep(trace, {
     index: data.stepIndex,
     status: 'streaming',
@@ -4173,7 +4240,6 @@ function handleAgentToolDetected(msg: InlineAgentToolDetectedMsg): void {
 
 function handleAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
-  showAgentRunningIndicator(msg.stepIndex);
   pendingInlineAgentStreamChunk = msg;
   if (inlineAgentStreamRenderFrame !== null) return;
 
@@ -4196,10 +4262,10 @@ function renderInlineAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   if (nextText && step.getAttribute('data-status') === 'executing_tools') {
     updateStepStatus(step, 'streaming', getAgentRendererLabels().streaming);
   }
+  // Never force-expand a step the user collapsed mid-stream (Issue #551).
   updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
     text: nextText,
     ...(nextText ? { status: 'streaming' as const } : {}),
-    collapsed: false,
   }));
 }
 
@@ -4223,7 +4289,7 @@ function cancelPendingInlineAgentStreamRender(): void {
 }
 
 function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
-  if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
+  if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep || !inlineAgentContainer) return;
   flushPendingInlineAgentStreamRender();
 
   for (const exec of msg.toolExecutions) {
@@ -4231,7 +4297,14 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
   }
   addToolResultDetailsToStep(inlineAgentCurrentStep, msg.toolExecutions);
   agentRunningToolCount += msg.toolExecutions.length;
-  showAgentRunningIndicator(msg.stepIndex);
+  updateAgentConsoleHeader(inlineAgentContainer, {
+    phase: 'running',
+    stepNumber: msg.stepIndex,
+    toolCount: agentRunningToolCount,
+    totalSteps: 0,
+    totalTools: 0,
+    elapsedSeconds: getAgentConsoleElapsedSeconds(),
+  }, getAgentRendererLabels());
 
   const label = msg.toolExecutions.length > 0
     ? contentT('content.agent.completeWithTools', { count: msg.toolExecutions.length })
@@ -4246,20 +4319,19 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
     collapsed: true,
   }), { immediate: true });
 
+  // Collapse the finished step immediately so only the current step stays
+  // expanded; a manual expand is never overridden afterwards (Issue #551).
   const completedStep = inlineAgentCurrentStep;
-  inlineAgentCapabilityScope?.setTimeout(() => {
-    // Never override a manual expand/collapse the user made while the step
-    // was finishing (Issue #544).
-    if (completedStep.getAttribute('data-user-toggled') === 'true') return;
+  if (completedStep.getAttribute('data-user-toggled') !== 'true') {
     setAgentStepCollapsed(completedStep, true);
-  }, 800);
+  }
 
   inlineAgentCurrentStep = null;
 }
 
 function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
-  hideAgentRunningIndicator();
+  stopAgentConsoleTimer();
   removeAgentStartingElement();
   flushPendingInlineAgentStreamRender();
 
@@ -4271,20 +4343,21 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
     appendInlineAgentFinalAnswer(inlineAgentContainer, finalText, msg.loopId);
 
     // Budget-exhausted loops end with the budget notice as their final text;
-    // they are paused, not complete, so the footer must not claim success
-    // (Issue #541).
+    // they are paused, not complete, so the console header must not claim
+    // success (Issue #541).
     const budgetPaused = isInlineAgentBudgetFinalText(
       msg.finalText,
       (count) => contentT('content.agent.budgetReached', { count }),
     );
-    const footer = createAgentFooter(
+    renderTerminalAgentConsoleHeader(
+      inlineAgentContainer,
+      budgetPaused ? 'paused' : 'complete',
       msg.totalSteps,
       msg.totalTools,
-      budgetPaused ? 'paused' : 'complete',
-      undefined,
-      getAgentRendererLabels(),
     );
-    inlineAgentContainer.appendChild(footer);
+    // The finished console collapses to its one-line status summary; the
+    // timeline stays one click away (Issue #551).
+    setAgentConsoleCollapsed(inlineAgentContainer, true);
 
     const executedToolNames = collectInlineAgentExecutedToolNames();
     if (shouldAutoSaveAgentOutput(finalText, executedToolNames)) {
@@ -4302,6 +4375,7 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
   } finally {
     // ALWAYS clean up state — even if rendering throws, the next agent loop
     // must start fresh. Otherwise subsequent searches silently fail.
+    stopAgentConsoleTimer();
     inlineAgentLoopId = null;
     inlineAgentContainer = null;
     inlineAgentCurrentStep = null;
@@ -4315,13 +4389,25 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
   }
 }
 
+/**
+ * Issue #551 answer separation: the final answer area renders ONLY the
+ * `<task_complete>` summary when the model closed with a non-empty signal,
+ * and falls back to the full normalized text otherwise (malformed runs never
+ * hide the answer). Working notes stay in the step timeline.
+ */
 function getInlineAgentDisplayFinalText(text: string): string {
   const withoutToolCalls = stripToolCalls(text, { descriptors: currentToolDescriptors });
-  return normalizeInlineAgentFinalAnswerText(withoutToolCalls);
+  return getInlineAgentAnswerText(withoutToolCalls);
 }
 
+/**
+ * Issue #551 process separation: step bodies show the model's working notes
+ * with the internal `<task_complete>` control block removed, so the answer
+ * summary is not duplicated into the timeline.
+ */
 function getInlineAgentDisplayStepText(text: string): string {
-  return getInlineAgentDisplayFinalText(text);
+  const withoutToolCalls = stripToolCalls(text, { descriptors: currentToolDescriptors });
+  return getInlineAgentProcessText(withoutToolCalls);
 }
 
 function appendInlineAgentFinalAnswer(container: HTMLElement, text: string, loopId: string): void {
@@ -4404,7 +4490,7 @@ async function downloadAgentOutputArtifact(artifactId: string): Promise<void> {
 
 function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
-  hideAgentRunningIndicator();
+  stopAgentConsoleTimer();
   removeAgentStartingElement();
   flushPendingInlineAgentStreamRender();
 
@@ -4413,8 +4499,14 @@ function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
       updateStepStatus(inlineAgentCurrentStep, 'error', msg.error);
     }
 
-    const footer = createAgentFooter(msg.stepIndex, msg.totalTools, 'error', msg.error, getAgentRendererLabels());
-    inlineAgentContainer.appendChild(footer);
+    renderTerminalAgentConsoleHeader(
+      inlineAgentContainer,
+      'error',
+      msg.stepIndex,
+      msg.totalTools,
+      msg.error,
+    );
+    setAgentConsoleCollapsed(inlineAgentContainer, true);
     updateActiveInlineAgentTrace((trace) => ({
       ...trace,
       status: 'error',
@@ -4424,6 +4516,7 @@ function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
   } catch (err) {
     console.error('[DeepSeek++] handleAgentLoopError:', err);
   } finally {
+    stopAgentConsoleTimer();
     inlineAgentLoopId = null;
     inlineAgentContainer = null;
     inlineAgentCurrentStep = null;
@@ -6003,6 +6096,11 @@ function injectToolBlockStyles() {
     .dpp-tool-block {
       margin-top: 8px;
     }
+    .dpp-tool-block:has(~ .dpp-agent-container) {
+      margin-left: 16px;
+      padding-left: 16px;
+      border-left: 1px solid var(--dpp-ui-border);
+    }
     .dpp-artifact-results {
       margin-top: 10px;
       display: flex;
@@ -6019,8 +6117,8 @@ function injectToolBlockStyles() {
       cursor: pointer;
       user-select: none;
       color: var(--dpp-ui-text-muted);
-      font-size: 14px;
-      line-height: 20px;
+      font-size: 12px;
+      line-height: 18px;
     }
     .dpp-tool-block-header:hover {
       color: var(--dpp-ui-text);
@@ -6060,20 +6158,23 @@ function injectToolBlockStyles() {
     }
     .dpp-tool-block-item {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 8px;
-      padding: 3px 0;
+      padding: 5px 8px;
+      margin: 2px 0;
+      border: 1px solid var(--dpp-ui-border-muted);
+      border-radius: 8px;
+      background: var(--dpp-ui-surface-muted);
       font-size: 13px;
       color: var(--dpp-ui-text);
       line-height: 1.5;
     }
     .dpp-tool-block-dot {
+      flex: none;
       width: 6px;
       height: 6px;
       border-radius: 50%;
       background: var(--dpp-ui-accent);
-      flex-shrink: 0;
-      margin-top: 7px;
     }
     .dpp-tool-block-item-text {
       flex: 1;
@@ -6095,7 +6196,7 @@ function injectToolBlockStyles() {
       margin-top: 4px;
       padding: 6px 8px;
       max-height: min(52vh, 420px);
-      border-radius: 6px;
+      border-radius: 8px;
       background: var(--dpp-ui-accent-panel);
       color: var(--dpp-ui-text-muted);
       font-family: 'SF Mono', Monaco, Menlo, Consolas, monospace;
@@ -6595,14 +6696,15 @@ function findAssistantMessageByContentSnippet(
 }
 
 function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTMLElement {
-  const container = createAgentContainer();
+  const container = createAgentContainer(undefined, getAgentRendererLabels());
   container.setAttribute('data-restored', 'true');
   container.setAttribute('data-dpp-agent-trace-key', trace.id);
   container.setAttribute('data-dpp-agent-loop-id', trace.loopId);
 
+  const consoleBody = getAgentConsoleBody(container);
   for (const step of [...trace.steps].sort((a, b) => a.index - b.index)) {
-    const stepEl = createAgentStepElement(step.index, undefined, getAgentRendererLabels());
-    const stepText = getInlineAgentDisplayFinalText(step.text) || step.text;
+    const stepEl = createAgentStepElement(step.index, getAgentRendererLabels());
+    const stepText = getInlineAgentDisplayStepText(step.text) || step.text;
     updateStepStreamText(stepEl, clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '');
     for (const exec of step.toolExecutions) {
       addToolResultToStep(stepEl, exec.name, exec.result, getAgentRendererLabels());
@@ -6617,9 +6719,10 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
       updateStepStatus(stepEl, step.status, getInlineAgentStepStatusLabel(step));
     }
     setAgentStepCollapsed(stepEl, step.collapsed);
-    container.appendChild(stepEl);
+    consoleBody?.appendChild(stepEl);
   }
 
+  const elapsedSeconds = Math.max(0, Math.floor((trace.updatedAt - trace.createdAt) / 1000));
   if (trace.status === 'complete') {
     // A budget-paused trace persists status 'complete' with the budget notice
     // as its final text; restore it as paused, not as a success (Issue #541).
@@ -6627,24 +6730,20 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
       trace.finalText,
       (count) => contentT('content.agent.budgetReached', { count }),
     );
-    container.appendChild(createAgentFooter(
-      trace.totalSteps,
-      trace.totalTools,
-      budgetPaused ? 'paused' : 'complete',
-      undefined,
-      getAgentRendererLabels(),
-    ));
+    renderTerminalAgentConsoleHeader(container, budgetPaused ? 'paused' : 'complete', trace.totalSteps, trace.totalTools, undefined, elapsedSeconds);
   } else if (trace.status === 'error') {
-    container.appendChild(createAgentFooter(trace.totalSteps, trace.totalTools, 'error', trace.error, getAgentRendererLabels()));
+    renderTerminalAgentConsoleHeader(container, 'error', trace.totalSteps, trace.totalTools, trace.error, elapsedSeconds);
   } else if (trace.status === 'stopping') {
-    container.appendChild(createAgentFooter(
+    renderTerminalAgentConsoleHeader(
+      container,
+      'paused',
       trace.totalSteps,
       trace.totalTools,
-      'paused',
       trace.error ?? contentT('content.agent.stopped'),
-      getAgentRendererLabels(),
-    ));
+      elapsedSeconds,
+    );
   }
+  setAgentConsoleCollapsed(container, true);
 
   return container;
 }
@@ -6665,6 +6764,7 @@ function mountRestoredInlineAgentContainer(
   container: HTMLElement,
   trace: InlineAgentTraceRecord,
 ): void {
+  adoptMessageReasoningBlocks(message);
   const host = getAssistantResponseHost(message);
   host.appendChild(container);
   appendInlineAgentFinalAnswer(container, getInlineAgentDisplayFinalText(trace.finalText), trace.loopId);

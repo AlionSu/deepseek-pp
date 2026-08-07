@@ -39,12 +39,12 @@ export interface InlineAgentRendererLabels {
   process: string;
   tools: string;
   results: string;
-  running: (stepNumber: number, toolCount: number) => string;
+  running: (stepNumber: number, toolCount: number, elapsedSeconds: number) => string;
   toolOk: string;
   toolError: string;
-  footerComplete: (totalSteps: number, totalTools: number) => string;
-  footerPaused: (totalSteps: number, totalTools: number) => string;
-  footerError: (totalSteps: number, totalTools: number) => string;
+  consoleComplete: (totalSteps: number, totalTools: number, elapsedSeconds: number) => string;
+  consolePaused: (totalSteps: number, totalTools: number, elapsedSeconds: number) => string;
+  consoleError: (totalSteps: number, totalTools: number, elapsedSeconds: number) => string;
 }
 
 export function injectInlineAgentStyles(): void {
@@ -57,11 +57,111 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-container {
       position: relative;
       margin-top: 12px;
-      padding-left: 16px;
-      border-left: 1px solid var(--dpp-ui-border);
+      padding-left: 36px;
+      border: 1px solid var(--dpp-ui-border);
+      border-radius: 12px;
+      background: var(--dpp-ui-surface);
+      color: var(--dpp-ui-text);
+    }
+    .dpp-agent-container::before {
+      content: '';
+      position: absolute;
+      left: 16px;
+      top: 12px;
+      bottom: 12px;
+      width: 1px;
+      background: var(--dpp-ui-border);
     }
     .dpp-agent-container[data-restored="true"] {
       margin-bottom: 12px;
+    }
+    .dpp-agent-console-header {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      border-bottom: 1px solid var(--dpp-ui-border);
+      border-radius: 11px 11px 0 0;
+      background: var(--dpp-ui-surface-muted);
+    }
+    .dpp-agent-console-toggle {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      padding: 8px 10px;
+      border: none;
+      background: transparent;
+      font-size: 12px;
+      color: var(--dpp-ui-text-muted);
+      cursor: pointer;
+      user-select: none;
+      text-align: left;
+    }
+    .dpp-agent-console-toggle:focus-visible {
+      outline: 2px solid var(--dpp-ui-accent);
+      outline-offset: -2px;
+      border-radius: 11px 0 0 0;
+    }
+    .dpp-agent-console-dot {
+      flex: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 14px 14px;
+    }
+    .dpp-agent-container[data-console-phase="starting"] .dpp-agent-console-dot,
+    .dpp-agent-container[data-console-phase="running"] .dpp-agent-console-dot {
+      background-color: var(--dpp-ui-accent);
+      animation: dpp-agent-console-pulse 1.1s ease-in-out infinite;
+    }
+    .dpp-agent-container[data-console-phase="complete"] .dpp-agent-console-dot {
+      background-image: ${ICON_CHECK};
+      color: var(--dpp-ui-success);
+    }
+    .dpp-agent-container[data-console-phase="paused"] .dpp-agent-console-dot {
+      background-color: var(--dpp-ui-text-subtle);
+    }
+    .dpp-agent-container[data-console-phase="error"] .dpp-agent-console-dot {
+      background-image: ${ICON_CROSS};
+      color: var(--dpp-ui-error);
+    }
+    @keyframes dpp-agent-console-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .dpp-agent-console-status {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dpp-agent-console-chevron {
+      flex: none;
+      width: 12px;
+      height: 12px;
+      background-image: ${ICON_CHEVRON_DOWN};
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 12px 12px;
+      color: var(--dpp-ui-text-subtle);
+      transition: transform 0.2s ease;
+    }
+    .dpp-agent-container[data-console-collapsed="true"] .dpp-agent-console-chevron {
+      transform: rotate(-90deg);
+    }
+    .dpp-agent-console-body {
+      padding: 4px 0 8px;
+    }
+    .dpp-agent-container[data-console-collapsed="true"] .dpp-agent-console-body {
+      display: none;
+    }
+    .dpp-agent-reasoning-adopted {
+      margin-left: 16px;
+      border-left: 1px solid var(--dpp-ui-border);
+      padding-left: 16px;
     }
     .dpp-agent-step {
       position: relative;
@@ -448,40 +548,6 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-step-tool-result-body .dpp-tool-result-line {
       margin: 2px 0;
     }
-    .dpp-agent-running-indicator {
-      position: fixed;
-      top: 12px;
-      right: 12px;
-      z-index: 2147483647;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 12px;
-      border: 1px solid var(--dpp-ui-accent);
-      border-radius: 12px;
-      background: var(--dpp-ui-surface);
-      color: var(--dpp-ui-text);
-      font-size: 13px;
-      line-height: 1.4;
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
-    }
-    .dpp-agent-running-indicator-dot {
-      flex: none;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--dpp-ui-accent);
-      animation: dpp-agent-running-pulse 1.2s ease-in-out infinite;
-    }
-    @keyframes dpp-agent-running-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.35; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .dpp-agent-running-indicator-dot {
-        animation: none;
-      }
-    }
     .dpp-agent-starting {
       display: flex;
       align-items: center;
@@ -508,37 +574,17 @@ export function injectInlineAgentStyles(): void {
         animation: none;
       }
     }
-    .dpp-agent-footer {
-      margin-top: 8px;
-      padding: 6px 0;
-      font-size: 13px;
-      color: var(--dpp-ui-text-muted);
-    }
-    .dpp-agent-footer::before {
-      content: '';
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      margin-right: 6px;
-      border-radius: 2px;
-      vertical-align: -1px;
-    }
-    .dpp-agent-footer.complete::before {
-      background: var(--dpp-ui-success);
-    }
-    .dpp-agent-footer.paused::before {
-      background: var(--dpp-ui-text-subtle);
-    }
-    .dpp-agent-footer.error::before {
-      background: var(--dpp-ui-error);
-    }
-
     @media (prefers-reduced-motion: reduce) {
       .dpp-agent-step-body,
       .dpp-agent-step-results,
       .dpp-agent-step-chevron,
-      .dpp-agent-tool-chevron {
+      .dpp-agent-tool-chevron,
+      .dpp-agent-console-chevron {
         transition: none;
+      }
+      .dpp-agent-container[data-console-phase="starting"] .dpp-agent-console-dot,
+      .dpp-agent-container[data-console-phase="running"] .dpp-agent-console-dot {
+        animation: none;
       }
     }
     [data-dpp-body-text] {
@@ -598,11 +644,135 @@ export function removeInlineAgentStyles(): void {
   document.getElementById(AGENT_STEP_STYLE_ID)?.remove();
 }
 
-export function createAgentContainer(): HTMLElement {
+export function createAgentContainer(
+  onStop?: () => void,
+  labels?: Partial<InlineAgentRendererLabels>,
+): HTMLElement {
   const container = document.createElement('div');
   container.className = 'dpp-agent-container';
   container.setAttribute('data-dpp-agent', 'true');
+  container.setAttribute('data-console-phase', 'starting');
+  container.setAttribute('data-console-collapsed', 'false');
+
+  const header = document.createElement('div');
+  header.className = 'dpp-agent-console-header';
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'dpp-agent-console-toggle';
+  toggle.setAttribute('aria-expanded', 'true');
+  toggle.addEventListener('click', () => {
+    setAgentConsoleCollapsed(container, container.getAttribute('data-console-collapsed') !== 'true');
+  });
+
+  const dot = document.createElement('span');
+  dot.className = 'dpp-agent-console-dot';
+  dot.setAttribute('aria-hidden', 'true');
+
+  const status = document.createElement('span');
+  status.className = 'dpp-agent-console-status';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.textContent = labels?.starting ?? 'Starting…';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'dpp-agent-console-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+
+  toggle.appendChild(dot);
+  toggle.appendChild(status);
+  toggle.appendChild(chevron);
+  header.appendChild(toggle);
+
+  if (onStop) {
+    const stopBtn = document.createElement('button');
+    stopBtn.type = 'button';
+    stopBtn.className = 'dpp-agent-stop-btn';
+    stopBtn.textContent = labels?.stop ?? 'Stop';
+    stopBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      onStop();
+    });
+    header.appendChild(stopBtn);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'dpp-agent-console-body';
+
+  container.appendChild(header);
+  container.appendChild(body);
   return container;
+}
+
+export function getAgentConsoleBody(container: HTMLElement): HTMLElement | null {
+  return container.querySelector<HTMLElement>('.dpp-agent-console-body');
+}
+
+export function setAgentConsoleCollapsed(container: HTMLElement, collapsed: boolean): void {
+  container.setAttribute('data-console-collapsed', collapsed ? 'true' : 'false');
+  const toggle = container.querySelector('.dpp-agent-console-toggle');
+  toggle?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+export type AgentConsolePhase = 'starting' | 'running' | 'complete' | 'paused' | 'error';
+
+export interface AgentConsoleState {
+  phase: AgentConsolePhase;
+  /** 0-based current step number while running. */
+  stepNumber: number;
+  toolCount: number;
+  totalSteps: number;
+  totalTools: number;
+  elapsedSeconds: number;
+  /** Overrides the phase default text (e.g. the explicit stopped/error label). */
+  labelOverride?: string;
+}
+
+export function updateAgentConsoleHeader(
+  container: HTMLElement,
+  state: AgentConsoleState,
+  labels?: Partial<InlineAgentRendererLabels>,
+): void {
+  container.setAttribute('data-console-phase', state.phase);
+  const status = container.querySelector<HTMLElement>('.dpp-agent-console-status');
+  if (status) status.textContent = getAgentConsoleStatusText(state, labels);
+  const stopBtn = container.querySelector<HTMLElement>('.dpp-agent-stop-btn');
+  if (stopBtn) stopBtn.hidden = state.phase !== 'starting' && state.phase !== 'running';
+}
+
+function getAgentConsoleStatusText(
+  state: AgentConsoleState,
+  labels?: Partial<InlineAgentRendererLabels>,
+): string {
+  if (state.labelOverride) return state.labelOverride;
+  switch (state.phase) {
+    case 'starting':
+      return labels?.starting ?? 'Starting…';
+    case 'running':
+      return labels?.running?.(state.stepNumber, state.toolCount, state.elapsedSeconds)
+        ?? `Agent running (step ${state.stepNumber + 1}, ${state.toolCount} tool calls, ${state.elapsedSeconds}s)`;
+    case 'complete':
+      return labels?.consoleComplete?.(state.totalSteps, state.totalTools, state.elapsedSeconds)
+        ?? `Agent complete (${state.totalSteps} steps, ${state.totalTools} tool calls, ${state.elapsedSeconds}s)`;
+    case 'paused':
+      return labels?.consolePaused?.(state.totalSteps, state.totalTools, state.elapsedSeconds)
+        ?? `Agent paused (${state.totalSteps} steps, ${state.totalTools} tool calls, ${state.elapsedSeconds}s)`;
+    case 'error':
+      return labels?.consoleError?.(state.totalSteps, state.totalTools, state.elapsedSeconds)
+        ?? `Agent error (${state.totalSteps} steps, ${state.totalTools} tool calls, ${state.elapsedSeconds}s)`;
+  }
+}
+
+/**
+ * Visually adopts a native DeepSeek reasoning block into the agent console
+ * timeline (Issue #551). CSS-only: the host DOM is never moved or re-parented,
+ * so host React re-renders cannot lose extension state. Returns true when the
+ * class was newly applied (idempotent, safe to call on every mutation).
+ */
+export function adoptReasoningBlock(host: HTMLElement): boolean {
+  if (host.classList.contains('dpp-agent-reasoning-adopted')) return false;
+  host.classList.add('dpp-agent-reasoning-adopted');
+  return true;
 }
 
 export function setAgentStepCollapsed(step: HTMLElement, collapsed: boolean): void {
@@ -613,7 +783,6 @@ export function setAgentStepCollapsed(step: HTMLElement, collapsed: boolean): vo
 
 export function createAgentStepElement(
   stepIndex: number,
-  onStop?: () => void,
   labels?: Partial<InlineAgentRendererLabels>,
 ): HTMLElement {
   const step = document.createElement('div');
@@ -664,18 +833,6 @@ export function createAgentStepElement(
   toggle.appendChild(status);
   toggle.appendChild(chevron);
   header.appendChild(toggle);
-
-  if (onStop) {
-    const stopBtn = document.createElement('button');
-    stopBtn.type = 'button';
-    stopBtn.className = 'dpp-agent-stop-btn';
-    stopBtn.textContent = labels?.stop ?? 'Stop';
-    stopBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      onStop();
-    });
-    header.appendChild(stopBtn);
-  }
 
   const sectionLabel = document.createElement('div');
   sectionLabel.className = 'dpp-agent-step-section-label process';
@@ -748,10 +905,6 @@ export function updateStepStatus(step: HTMLElement, status: string, label?: stri
   step.setAttribute('data-status', status);
   const statusEl = step.querySelector('.dpp-agent-step-status');
   if (statusEl && label) statusEl.textContent = label;
-  if (status === 'complete' || status === 'error') {
-    const stopBtn = step.querySelector('.dpp-agent-stop-btn');
-    stopBtn?.remove();
-  }
 }
 
 export function addToolResultToStep(
@@ -829,37 +982,6 @@ function getToolRowSummary(result: Pick<ToolResult, 'ok' | 'summary' | 'detail' 
   const reason = result.detail?.trim() || result.error?.message.trim() || '';
   if (!reason || reason === result.summary.trim()) return result.summary;
   return `${result.summary}\n${reason}`;
-}
-
-export type AgentFooterVariant = 'complete' | 'error' | 'paused';
-
-/**
- * Footer for the finished agent panel. `'paused'` covers both the
- * user-stopped and budget-exhausted ends (Issue #541): neither is a success
- * nor an error, so it must not reuse the green "complete" styling.
- */
-export function createAgentFooter(
-  totalSteps: number,
-  totalTools: number,
-  variant: AgentFooterVariant,
-  labelOverride?: string,
-  labels?: Partial<InlineAgentRendererLabels>,
-): HTMLElement {
-  const footer = document.createElement('div');
-  footer.className = `dpp-agent-footer ${variant}`;
-  if (labelOverride) {
-    footer.textContent = labelOverride;
-  } else if (variant === 'error') {
-    footer.textContent = labels?.footerError?.(totalSteps, totalTools) ??
-      `Agent error (${totalSteps} steps, ${totalTools} tool calls)`;
-  } else if (variant === 'paused') {
-    footer.textContent = labels?.footerPaused?.(totalSteps, totalTools) ??
-      `Agent paused (${totalSteps} steps, ${totalTools} tool calls)`;
-  } else {
-    footer.textContent = labels?.footerComplete?.(totalSteps, totalTools) ??
-      `Agent complete (${totalSteps} steps, ${totalTools} tool calls)`;
-  }
-  return footer;
 }
 
 /**
@@ -953,45 +1075,4 @@ export function createAgentStartingElement(labels?: Partial<InlineAgentRendererL
   element.setAttribute('role', 'status');
   element.textContent = labels?.starting ?? 'Starting…';
   return element;
-}
-
-export function createAgentRunningIndicator(labels?: Partial<InlineAgentRendererLabels>): HTMLElement {
-  const element = document.createElement('div');
-  element.className = 'dpp-agent-running-indicator';
-  element.setAttribute('data-dpp-agent-running', 'false');
-
-  const dot = document.createElement('span');
-  dot.className = 'dpp-agent-running-indicator-dot';
-  dot.setAttribute('aria-hidden', 'true');
-
-  // The live region lives on the text span only: a role="status" container
-  // must not wrap the interactive Stop button (Issue #544).
-  const text = document.createElement('span');
-  text.className = 'dpp-agent-running-indicator-text';
-  text.setAttribute('role', 'status');
-  text.setAttribute('aria-live', 'polite');
-
-  const stopBtn = document.createElement('button');
-  stopBtn.className = 'dpp-agent-stop-btn';
-  stopBtn.textContent = labels?.stop ?? 'Stop';
-
-  element.appendChild(dot);
-  element.appendChild(text);
-  element.appendChild(stopBtn);
-  return element;
-}
-
-export function updateAgentRunningIndicator(
-  element: HTMLElement,
-  state: { running: boolean; stepNumber: number; toolCount: number },
-  labels?: Partial<InlineAgentRendererLabels>,
-): void {
-  element.setAttribute('data-dpp-agent-running', state.running ? 'true' : 'false');
-  element.style.display = state.running ? '' : 'none';
-  const text = element.querySelector<HTMLElement>('.dpp-agent-running-indicator-text');
-  if (!text) return;
-  text.textContent = state.running
-    ? labels?.running?.(state.stepNumber, state.toolCount)
-      ?? `Agent running (step ${state.stepNumber + 1}, ${state.toolCount} tool calls)`
-    : '';
 }

@@ -2,16 +2,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   addToolResultDetailsToStep,
   addToolResultToStep,
-  createAgentFooter,
-  createAgentRunningIndicator,
+  adoptReasoningBlock,
+  createAgentContainer,
   createAgentStartingElement,
   createAgentStepElement,
+  getAgentConsoleBody,
   injectInlineAgentStyles,
   isInlineAgentBudgetFinalText,
+  setAgentConsoleCollapsed,
   setAgentStepCollapsed,
-  updateAgentRunningIndicator,
+  updateAgentConsoleHeader,
   updateStepStatus,
   updateStepStreamText,
+  type AgentConsoleState,
   type InlineAgentRendererLabels,
 } from '../core/inline-agent/renderer';
 import type { ToolExecutionRecord } from '../core/types';
@@ -104,23 +107,84 @@ describe('inline agent renderer', () => {
     expect(body?.scrollTop).toBe(100);
   });
 
-  it('renders paused footers as neutral, distinct from complete and error', () => {
-    const complete = createAgentFooter(2, 3, 'complete');
-    expect(complete.className).toContain('complete');
-    expect(complete.className).not.toContain('paused');
-    expect(complete.textContent).toBe('Agent complete (2 steps, 3 tool calls)');
+  it('renders console header terminal states as distinct complete/paused/error', () => {
+    const complete = createAgentContainer();
+    updateAgentConsoleHeader(complete, {
+      phase: 'complete',
+      stepNumber: 0,
+      toolCount: 0,
+      totalSteps: 2,
+      totalTools: 3,
+      elapsedSeconds: 7,
+    });
+    expect(complete.getAttribute('data-console-phase')).toBe('complete');
+    expect(complete.querySelector('.dpp-agent-console-status')?.textContent)
+      .toBe('Agent complete (2 steps, 3 tool calls, 7s)');
+    expect(complete.querySelector('.dpp-agent-console-dot')).not.toBeNull();
 
-    const paused = createAgentFooter(2, 3, 'paused');
-    expect(paused.className).toContain('paused');
-    expect(paused.className).not.toContain('complete');
-    expect(paused.className).not.toContain('error');
-    expect(paused.textContent).toBe('Agent paused (2 steps, 3 tool calls)');
+    const paused = createAgentContainer();
+    updateAgentConsoleHeader(paused, {
+      phase: 'paused',
+      stepNumber: 0,
+      toolCount: 0,
+      totalSteps: 2,
+      totalTools: 3,
+      elapsedSeconds: 7,
+    });
+    expect(paused.getAttribute('data-console-phase')).toBe('paused');
+    expect(paused.querySelector('.dpp-agent-console-status')?.textContent)
+      .toBe('Agent paused (2 steps, 3 tool calls, 7s)');
 
-    const stopped = createAgentFooter(0, 0, 'paused', 'Stopped');
-    expect(stopped.textContent).toBe('Stopped');
+    const stopped = createAgentContainer();
+    updateAgentConsoleHeader(stopped, {
+      phase: 'paused',
+      stepNumber: 0,
+      toolCount: 0,
+      totalSteps: 0,
+      totalTools: 0,
+      elapsedSeconds: 7,
+      labelOverride: 'Stopped',
+    });
+    expect(stopped.querySelector('.dpp-agent-console-status')?.textContent).toBe('Stopped');
 
-    const error = createAgentFooter(2, 3, 'error');
-    expect(error.className).toContain('error');
+    const error = createAgentContainer();
+    updateAgentConsoleHeader(error, {
+      phase: 'error',
+      stepNumber: 0,
+      toolCount: 0,
+      totalSteps: 2,
+      totalTools: 3,
+      elapsedSeconds: 7,
+      labelOverride: 'boom',
+    });
+    expect(error.getAttribute('data-console-phase')).toBe('error');
+    expect(error.querySelector('.dpp-agent-console-status')?.textContent).toBe('boom');
+  });
+
+  it('hides the console stop control in terminal states', () => {
+    const container = createAgentContainer(() => undefined, { stop: 'Stop' });
+    const stopBtn = container.querySelector<HTMLButtonElement>('.dpp-agent-stop-btn');
+    expect(stopBtn?.hidden).toBe(false);
+
+    updateAgentConsoleHeader(container, {
+      phase: 'running',
+      stepNumber: 0,
+      toolCount: 1,
+      totalSteps: 0,
+      totalTools: 0,
+      elapsedSeconds: 2,
+    });
+    expect(stopBtn?.hidden).toBe(false);
+
+    updateAgentConsoleHeader(container, {
+      phase: 'complete',
+      stepNumber: 0,
+      toolCount: 0,
+      totalSteps: 1,
+      totalTools: 1,
+      elapsedSeconds: 2,
+    });
+    expect(stopBtn?.hidden).toBe(true);
   });
 
   it('recognizes the exact budget-exhaustion notice as a paused final text', () => {
@@ -134,7 +198,7 @@ describe('inline agent renderer', () => {
   });
 
   it('labels the streamed model output as process text separate from the answer', () => {
-    const step = createAgentStepElement(0, undefined, timelineLabels);
+    const step = createAgentStepElement(0, timelineLabels);
     const sectionLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label');
 
     expect(sectionLabel?.textContent).toBe('Process');
@@ -149,7 +213,7 @@ describe('inline agent renderer', () => {
   });
 
   it('renders each tool execution as an independently collapsible row', () => {
-    const step = createAgentStepElement(0, undefined, timelineLabels);
+    const step = createAgentStepElement(0, timelineLabels);
 
     addToolResultToStep(step, 'web_search', { ok: true, summary: 'found 5 results' }, timelineLabels);
     addToolResultToStep(step, 'web_fetch', { ok: false, summary: 'request failed: 403' }, timelineLabels);
@@ -184,7 +248,7 @@ describe('inline agent renderer', () => {
   });
 
   it('bounds long tool summaries with an explicit truncation marker', () => {
-    const step = createAgentStepElement(0, undefined, timelineLabels);
+    const step = createAgentStepElement(0, timelineLabels);
     const longSummary = 'x'.repeat(2000);
 
     addToolResultToStep(step, 'shell_exec', { ok: true, summary: longSummary }, timelineLabels);
@@ -195,7 +259,7 @@ describe('inline agent renderer', () => {
   });
 
   it('shows the concrete rejection reason in the matching failed tool row', () => {
-    const step = createAgentStepElement(0, undefined, timelineLabels);
+    const step = createAgentStepElement(0, timelineLabels);
 
     addToolResultToStep(step, 'shell_exec', {
       ok: false,
@@ -279,26 +343,69 @@ describe('inline agent renderer', () => {
     expect(toolsLabel?.textContent).toBe('Tool calls');
   });
 
-  it('keeps the stop control clickable without collapsing the step', () => {
+  it('keeps the console stop control clickable without collapsing the console', () => {
     const onStop = vi.fn();
-    const step = createAgentStepElement(0, onStop, timelineLabels);
+    const container = createAgentContainer(onStop, timelineLabels);
 
-    const stopBtn = step.querySelector<HTMLButtonElement>('.dpp-agent-stop-btn');
+    const stopBtn = container.querySelector<HTMLButtonElement>('.dpp-agent-stop-btn');
     stopBtn?.click();
 
     expect(onStop).toHaveBeenCalledTimes(1);
-    expect(step.getAttribute('data-collapsed')).toBe('false');
+    expect(container.getAttribute('data-console-collapsed')).toBe('false');
 
-    const toggle = step.querySelector<HTMLButtonElement>('.dpp-agent-step-toggle');
+    const toggle = container.querySelector<HTMLButtonElement>('.dpp-agent-console-toggle');
     toggle?.click();
 
-    expect(step.getAttribute('data-collapsed')).toBe('true');
+    expect(container.getAttribute('data-console-collapsed')).toBe('true');
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(onStop).toHaveBeenCalledTimes(1);
   });
 
+  it('collapses and expands the whole console through the header toggle', () => {
+    const container = createAgentContainer();
+    const toggle = container.querySelector<HTMLButtonElement>('.dpp-agent-console-toggle');
+    const body = getAgentConsoleBody(container);
+
+    expect(body).not.toBeNull();
+    expect(container.getAttribute('data-console-collapsed')).toBe('false');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+
+    setAgentConsoleCollapsed(container, true);
+    expect(container.getAttribute('data-console-collapsed')).toBe('true');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+
+    setAgentConsoleCollapsed(container, false);
+    expect(container.getAttribute('data-console-collapsed')).toBe('false');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('renders steps inside the console body with an initial starting header', () => {
+    const container = createAgentContainer(undefined, { starting: 'Starting…' });
+    expect(container.getAttribute('data-console-phase')).toBe('starting');
+    expect(container.querySelector('.dpp-agent-console-status')?.textContent).toBe('Starting…');
+
+    const step = createAgentStepElement(0, timelineLabels);
+    getAgentConsoleBody(container)?.appendChild(step);
+
+    expect(container.querySelector('.dpp-agent-console-body .dpp-agent-step')).toBe(step);
+    // The header collapse never hides the interactive stop control.
+    setAgentConsoleCollapsed(container, true);
+    expect(container.querySelector('.dpp-agent-console-body')).not.toBeNull();
+  });
+
+  it('adopts native reasoning hosts idempotently without moving them', () => {
+    const host = document.createElement('div');
+    expect(host.parentElement).toBeNull();
+
+    expect(adoptReasoningBlock(host)).toBe(true);
+    expect(host.classList.contains('dpp-agent-reasoning-adopted')).toBe(true);
+    expect(host.parentElement).toBeNull();
+
+    expect(adoptReasoningBlock(host)).toBe(false);
+  });
+
   it('restores the same collapsed timeline structure from persisted trace data', () => {
-    const step = createAgentStepElement(1, undefined, timelineLabels);
+    const step = createAgentStepElement(1, timelineLabels);
     updateStepStreamText(step, 'process text');
     addToolResultToStep(step, 'web_search', { ok: true, summary: 'summary' }, timelineLabels);
     updateStepStatus(step, 'complete', 'Complete (1 tools)');
@@ -320,7 +427,7 @@ describe('inline agent renderer', () => {
   it('keeps tool rows visible and independently expandable in a collapsed step', () => {
     injectInlineAgentStyles();
 
-    const step = createAgentStepElement(0, undefined, timelineLabels);
+    const step = createAgentStepElement(0, timelineLabels);
     updateStepStreamText(step, 'process text');
     addToolResultToStep(step, 'web_search', { ok: true, summary: 'found 5 results' }, timelineLabels);
     addToolResultToStep(step, 'web_fetch', { ok: false, summary: 'request failed: 403' }, timelineLabels);
@@ -354,23 +461,26 @@ describe('inline agent renderer', () => {
     expect(summaries[0]?.hidden).toBe(false);
   });
 
-  it('shows and hides the global running indicator with live counts', () => {
+  it('renders the console header running state with live counts and elapsed time', () => {
     const labels = {
-      running: (stepNumber: number, toolCount: number) => `RUN ${stepNumber}/${toolCount}`,
+      running: (stepNumber: number, toolCount: number, elapsedSeconds: number) =>
+        `RUN ${stepNumber + 1}/${toolCount}/${elapsedSeconds}`,
       stop: 'Stop',
     };
-    const el = createAgentRunningIndicator(labels);
+    const container = createAgentContainer(() => undefined, labels);
 
-    updateAgentRunningIndicator(el, { running: true, stepNumber: 1, toolCount: 3 }, labels);
-    expect(el.getAttribute('data-dpp-agent-running')).toBe('true');
-    expect(el.style.display).not.toBe('none');
-    expect(el.querySelector('.dpp-agent-running-indicator-text')?.textContent).toBe('RUN 1/3');
-    expect(el.querySelector('.dpp-agent-stop-btn')?.textContent).toBe('Stop');
+    updateAgentConsoleHeader(container, {
+      phase: 'running',
+      stepNumber: 1,
+      toolCount: 3,
+      totalSteps: 0,
+      totalTools: 0,
+      elapsedSeconds: 5,
+    }, labels);
 
-    updateAgentRunningIndicator(el, { running: false, stepNumber: 0, toolCount: 0 }, labels);
-    expect(el.getAttribute('data-dpp-agent-running')).toBe('false');
-    expect(el.style.display).toBe('none');
-    expect(el.querySelector('.dpp-agent-running-indicator-text')?.textContent).toBe('');
+    expect(container.getAttribute('data-console-phase')).toBe('running');
+    expect(container.querySelector('.dpp-agent-console-status')?.textContent).toBe('RUN 2/3/5');
+    expect(container.querySelector('.dpp-agent-stop-btn')?.textContent).toBe('Stop');
   });
 
   it('uses the shared injected theme for dark-mode readable text', () => {
@@ -384,7 +494,7 @@ describe('inline agent renderer', () => {
     expect(agentStyle?.textContent).not.toContain('var(--ds-text');
   });
 
-  it('keeps timeline and tool hooks in the injected styles', () => {
+  it('keeps timeline and console hooks in the injected styles', () => {
     injectInlineAgentStyles();
 
     const css = document.getElementById('dpp-inline-agent-css')?.textContent ?? '';
@@ -392,11 +502,15 @@ describe('inline agent renderer', () => {
     expect(css).toContain('.dpp-agent-step-dot');
     expect(css).toContain('.dpp-agent-step-section-label');
     expect(css).toContain('.dpp-agent-tool-summary');
-    expect(css).toContain('.dpp-agent-running-indicator');
-    expect(css).toContain('.dpp-agent-running-indicator {\n      position: fixed;\n      top: 12px;\n      right: 12px;');
-    expect(css).not.toContain('bottom: 16px;');
+    expect(css).toContain('.dpp-agent-console-header');
+    expect(css).toContain('.dpp-agent-console-status');
+    expect(css).toContain('.dpp-agent-console-chevron');
+    expect(css).toContain('.dpp-agent-reasoning-adopted');
+    // The old fixed top-right indicator is gone; status lives in the console.
+    expect(css).not.toContain('.dpp-agent-running-indicator');
+    expect(css).not.toContain('z-index: 2147483647');
     expect(css).toContain('[data-status="streaming"]');
-    expect(css).toContain('@keyframes dpp-agent-step-pulse');
+    expect(css).toContain('@keyframes dpp-agent-console-pulse');
     expect(css).toContain('prefers-reduced-motion');
   });
 
@@ -451,11 +565,11 @@ describe('inline agent renderer', () => {
     expect(css).toContain('[data-status="interrupted"]');
   });
 
-  it('exposes the running indicator as a polite live region with a dot', () => {
-    const el = createAgentRunningIndicator({ stop: 'Stop' });
-    const text = el.querySelector<HTMLElement>('.dpp-agent-running-indicator-text');
+  it('exposes the console header status as a polite live region with a dot', () => {
+    const el = createAgentContainer(() => undefined, { stop: 'Stop' });
+    const text = el.querySelector<HTMLElement>('.dpp-agent-console-status');
     expect(text?.getAttribute('role')).toBe('status');
     expect(text?.getAttribute('aria-live')).toBe('polite');
-    expect(el.querySelector('.dpp-agent-running-indicator-dot')).not.toBeNull();
+    expect(el.querySelector('.dpp-agent-console-dot')).not.toBeNull();
   });
 });
