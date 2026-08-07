@@ -55,13 +55,13 @@ import { shouldIgnoreEmptyTokenSpeedProgress } from '../core/deepseek/stream-met
 import { readDeepSeekChatSessionId } from '../core/deepseek/chat-session';
 import { createUsageProgressWriteCoordinator } from '../core/usage/progress-write-coordinator';
 import { runInlineAgentLoop } from '../core/inline-agent/loop';
-import { shouldAutoSaveAgentOutput } from '../core/inline-agent/auto-save';
 import {
   INCOMPLETE_TOOL_CALL_ERROR_CODE,
   selectContinuableToolExecutions,
 } from '../core/inline-agent/execution-policy';
 import {
   INLINE_AGENT_CONTINUATION_PLACEHOLDER,
+  buildContinuationPrompt,
   isInlineAgentContinuationRequest,
   isInlineAgentContinuationStructure,
   replaceTaskCompleteBlocks,
@@ -80,6 +80,7 @@ import {
 } from '../core/inline-agent/message-anchor';
 import type {
   InlineAgentStartPayload,
+  InlineAgentReasoningChunkMsg,
   InlineAgentStreamChunkMsg,
   InlineAgentStepCompleteMsg,
   InlineAgentToolDetectedMsg,
@@ -96,11 +97,12 @@ import {
   mountAgentNarration,
   updateStepStreamText,
   updateStepStatus,
+  updateAgentReasoningNoteElement,
+  getAgentReasoningNote,
   addAgentToolEntry,
   resolveAgentToolEntry,
   finalizePendingAgentToolEntries,
   collapseAllAgentToolGroups,
-  hydrateAgentArtifactPreviews,
   autoCollapseCompletedReasoningHost,
   followAgentStreamBottom,
   renderAgentStreamText,
@@ -449,6 +451,15 @@ let activeInlineAgentTrace: InlineAgentTraceRecord | null = null;
 let inlineAgentTraceWriteTimer: ReturnType<typeof setTimeout> | null = null;
 let inlineAgentStreamRenderFrame: number | null = null;
 let pendingInlineAgentStreamChunk: InlineAgentStreamChunkMsg | null = null;
+/** Reasoning deltas per step that arrived before the step's narration mounted. */
+const pendingAgentReasoningByStep = new Map<number, string>();
+/**
+ * Model backend of the active inline-agent run (set at loop start, cleared at
+ * loop end). The web backend can deliver the final answer through the page's
+ * native chat flow; the official-API backend has no page session and keeps
+ * the panel rendering.
+ */
+let activeAgentModelBackend: 'web' | 'official-api' | null = null;
 const restoredInlineAgentTraces = new Map<string, InlineAgentTraceRecord>();
 const pendingRestoredInlineAgentTraceIds = new Set<string>();
 let restoredInlineAgentRenderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -481,7 +492,6 @@ let toolCapabilityScope: ContentResourceScope | null = null;
 let toolCapabilityEpoch = 0;
 const pendingToolPersistenceOperations = new Set<Promise<unknown>>();
 let inlineAgentCapabilityScope: ContentResourceScope | null = null;
-let inlineAgentDownloadManager: BrowserDownloadManager | null = null;
 let inlineAgentCapabilityEpoch = 0;
 const pendingInlineAgentPersistenceOperations = new Set<Promise<unknown>>();
 let multimodalCapabilityScope: ContentResourceScope | null = null;
@@ -886,8 +896,6 @@ function startInlineAgentCapability(
   mutationHub: ContentMutationHub,
 ): void {
   inlineAgentCapabilityScope = scope;
-  inlineAgentDownloadManager?.stop();
-  inlineAgentDownloadManager = createBrowserDownloadManager();
   const epoch = ++inlineAgentCapabilityEpoch;
   startInlineAgentContinuationMessageHider(scope, mutationHub);
   observeReportedPersistence(restorePersistedInlineAgentTraces(scope, epoch));
@@ -895,8 +903,6 @@ function startInlineAgentCapability(
 
 async function stopInlineAgentCapability(): Promise<void> {
   inlineAgentCapabilityScope = null;
-  inlineAgentDownloadManager?.stop();
-  inlineAgentDownloadManager = null;
   inlineAgentCapabilityEpoch += 1;
   stopInlineAgentContinuationMessageHider();
   if (activeAgentAbort || inlineAgentContainer) stopInlineAgent();
@@ -4045,6 +4051,7 @@ function isInlineAgentRunning(): boolean {
 function teardownInlineAgentPanel(): void {
   flushPendingInlineAgentStreamRender();
   stopAgentConsoleTimer();
+  pendingAgentReasoningByStep.clear();
   if (inlineAgentContainer) {
     inlineAgentContainer.remove();
   }
@@ -4069,6 +4076,7 @@ function stopInlineAgent(): void {
   // retained momentarily so its header can switch to the neutral paused state,
   // then detached once the aborted loop settles.
   flushPendingInlineAgentStreamRender();
+  pendingAgentReasoningByStep.clear();
   inlineAgentLoopId = null;
   inlineAgentContainer = null;
   inlineAgentCurrentStep = null;
@@ -4093,6 +4101,7 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
   if (!payload.modelBackend) {
     payload.modelBackend = (await getDeepSeekApiKey()) ? 'official-api' : 'web';
   }
+  activeAgentModelBackend = payload.modelBackend;
 
   // Abort any previously running loop AND tear down its panel synchronously
   // before mounting the new one. Previously the old panel stayed in the DOM
@@ -4176,6 +4185,7 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
   } finally {
     await closeContentToolAuthorization(authorizationRequestKey);
     if (activeAgentAbort === abort) activeAgentAbort = null;
+    activeAgentModelBackend = null;
   }
 }
 
@@ -4188,6 +4198,9 @@ function handleInlineAgentLoopEvent(type: string, data: unknown): void {
     case 'AGENT_STREAM_CHUNK':
       setPetState('speaking');
       handleAgentStreamChunk(data as InlineAgentStreamChunkMsg);
+      break;
+    case 'AGENT_REASONING_CHUNK':
+      handleAgentReasoningChunk(data as InlineAgentReasoningChunkMsg);
       break;
     case 'AGENT_TOKEN_SPEED': {
       const progress = normalizeResponseTokenSpeedPayload(data);
@@ -4225,6 +4238,7 @@ function removeAgentStartingElement(): void {
 function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): void {
   if (data.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
   removeAgentStartingElement();
+  pendingAgentReasoningByStep.delete(data.stepIndex);
 
   // The narration segment mounts into the stream on its first non-empty text
   // (textless tool-only steps leave no empty paragraph in the flow).
@@ -4279,6 +4293,37 @@ function handleAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   });
 }
 
+/**
+ * Live reasoning deltas of the current step (AGENT_REASONING_CHUNK). The text
+ * is accumulated into the step's reasoning note — created when the narration
+ * mounts, or mounted on demand here — and persisted into the trace so a page
+ * refresh restores the same content (Issue: reasoning-not-persisted).
+ */
+function handleAgentReasoningChunk(msg: InlineAgentReasoningChunkMsg): void {
+  if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  if (!msg.fullText) return;
+
+  const stream = getAgentConsoleBody(inlineAgentContainer);
+  const step = inlineAgentCurrentStep;
+  const reasoningText = msg.fullText;
+
+  if (step && step.parentElement === stream) {
+    const note = getAgentReasoningNote(step);
+    if (note) updateAgentReasoningNoteElement(note, reasoningText);
+  } else {
+    pendingAgentReasoningByStep.set(msg.stepIndex, reasoningText);
+    // Reasoning without any narration text: mount the (textless) step so the
+    // note has a home in the stream instead of being silently dropped.
+    if (step && stream && step.parentElement !== stream) {
+      mountAgentNarration(step, stream, getAgentRendererLabels(), reasoningText);
+    }
+  }
+
+  updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
+    reasoning: reasoningText,
+  }));
+}
+
 function renderInlineAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep || !inlineAgentContainer) return;
   const step = inlineAgentCurrentStep;
@@ -4287,6 +4332,13 @@ function renderInlineAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
   if (nextText) {
     const stream = getAgentConsoleBody(inlineAgentContainer);
     if (stream) mountAgentNarration(step, stream, getAgentRendererLabels());
+  }
+  // Reasoning that streamed in before the narration mounted belongs to this
+  // step's note; fill it now that the note exists.
+  const pendingReasoning = pendingAgentReasoningByStep.get(msg.stepIndex);
+  if (pendingReasoning) {
+    const note = getAgentReasoningNote(step);
+    if (note) updateAgentReasoningNoteElement(note, pendingReasoning);
   }
   updateStepStreamText(step, nextText);
   updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
@@ -4334,8 +4386,6 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
   }, getAgentRendererLabels());
 
   updateStepStatus(inlineAgentCurrentStep, 'complete');
-  // The step text is stable now; hydrate any HTML artifact preview it carried.
-  if (stream) hydrateAgentArtifactPreviews(stream);
   const fullText = getInlineAgentStepText(inlineAgentCurrentStep);
   updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
     status: 'complete',
@@ -4409,15 +4459,17 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
       // Defense-in-depth: a missed STEP_COMPLETE (aborted mid-step) must not
       // leave pulsing pending tool entries behind a "complete" header.
       finalizePendingAgentToolEntries(stream);
-      // The final text is stable now: hydrate HTML artifact previews so the
-      // deliverables actually run inline.
-      hydrateAgentArtifactPreviews(stream);
     }
 
-    const executedToolNames = collectInlineAgentExecutedToolNames();
-    if (shouldAutoSaveAgentOutput(finalText, executedToolNames)) {
-      void persistLongAgentOutput(finalText, msg.loopId, inlineAgentContainer);
+    // Web backend: deliver the final answer through the page's native chat
+    // flow (registered agent replay + composer drive) so the deliverables
+    // render with DeepSeek's native pipeline (chart cards, copy/download/run
+    // code blocks, native preview panel). Never for budget-paused runs (the
+    // "final text" is a pause notice, not a deliverable).
+    if (activeAgentModelBackend === 'web' && !budgetPaused && finalText) {
+      void deliverInlineAgentFinalAnswerNatively(finalText);
     }
+
     updateActiveInlineAgentTrace((trace) => ({
       ...trace,
       status: 'complete',
@@ -4433,6 +4485,7 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
     // ALWAYS clean up state — even if rendering throws, the next agent loop
     // must start fresh. Otherwise subsequent searches silently fail.
     stopAgentConsoleTimer();
+    pendingAgentReasoningByStep.clear();
     inlineAgentLoopId = null;
     inlineAgentContainer = null;
     inlineAgentCurrentStep = null;
@@ -4444,6 +4497,144 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
     // After manual page refresh, DeepSeek's native renderer will show the
     // continuation message with proper Markdown.
   }
+}
+
+/**
+ * Delivers the completed agent run's final answer through the page's native
+ * chat flow (web backend only): the fetch hook is primed with the final
+ * answer (plus the last turn's reasoning) and the page composer is driven with
+ * the continuation prompt. The page then sends its own completion request,
+ * which the hook short-circuits with the synthetic response — so the page's
+ * native renderer presents the deliverable (chart cards, copy/download/run
+ * code blocks, native preview panel) exactly like an official conversation,
+ * and the final turn's thinking renders as a native "thought" block.
+ *
+ * Fail-closed and best-effort: mismatched session, busy composer, or a
+ * missing chain id skip the delivery silently (the panel rendering remains);
+ * the hook registration expires on its own when the page request never
+ * arrives.
+ */
+function deliverInlineAgentFinalAnswerNatively(finalText: string): void {
+  const trace = activeInlineAgentTrace;
+  if (!trace || !finalText.trim()) return;
+  // The replay registration travels over the main/content bridge; without it
+  // the composer drive would reach the real server (a divergent extra turn).
+  if (!mainWorldBridgeController?.ready) return;
+  const chatSessionId = trace.chatSessionId;
+  if (!chatSessionId) return;
+
+  // The replay only makes sense while this session is the visible one.
+  if (!document.location.pathname.includes(`/a/chat/s/${chatSessionId}`)) return;
+
+  const sortedSteps = [...trace.steps].sort((a, b) => a.index - b.index);
+  const lastStep = sortedSteps[sortedSteps.length - 1];
+  const responseMessageId = lastStep?.responseMessageId ?? null;
+  if (responseMessageId == null) return;
+
+  const executions = sortedSteps.flatMap((step) => step.toolExecutions);
+  const prompt = buildContinuationPrompt(
+    trace.agentTaskPrompt || trace.originalPrompt,
+    executions,
+    currentContentLocale,
+  );
+  if (!prompt) return;
+
+  postToMainWorld({
+    type: 'REGISTER_AGENT_REPLAY',
+    payload: {
+      chatSessionId,
+      prompt,
+      content: finalText,
+      reasoning: lastStep?.reasoning ?? '',
+      responseMessageId,
+      createdAt: Date.now(),
+    },
+  });
+  void drivePageChatSend(prompt, chatSessionId);
+}
+
+/**
+ * Drives the page's chat composer with `text` and sends it. The page's own
+ * send flow then creates the user message and fires the completion request the
+ * hook replays. Refuses to clobber text the user is typing. Returns true when
+ * the send was at least attempted; the send itself is verified by watching
+ * the composer clear (the page clears it on send).
+ */
+async function drivePageChatSend(text: string, chatSessionId: string): Promise<void> {
+  const composer = findChatComposer();
+  if (!composer) {
+    console.warn('[DeepSeek++] agent replay: chat composer not found; skipping native delivery.');
+    return;
+  }
+  if (composer.value.trim()) {
+    console.warn('[DeepSeek++] agent replay: composer busy; skipping native delivery.');
+    return;
+  }
+  if (!document.location.pathname.includes(`/a/chat/s/${chatSessionId}`)) return;
+
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  if (setter) setter.call(composer, text);
+  composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+  composer.focus();
+
+  // Send via the page's own Enter-to-send binding; if the composer did not
+  // clear within the grace window, fall back to the primary send button.
+  const sentViaEnter = await new Promise<boolean>((resolve) => {
+    window.setTimeout(() => resolve(!composer.value.trim()), 900);
+    composer.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+      cancelable: true,
+    }));
+    composer.dispatchEvent(new KeyboardEvent('keyup', {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+    }));
+  });
+  if (sentViaEnter) return;
+
+  const sendButton = findChatSendButton();
+  if (!sendButton) {
+    console.warn('[DeepSeek++] agent replay: composer did not send and no send button was found.');
+    return;
+  }
+  sendButton.click();
+  window.setTimeout(() => {
+    if (composer.value.trim()) {
+      console.warn('[DeepSeek++] agent replay: composer did not clear after send; native delivery likely failed.');
+    }
+  }, 1500);
+}
+
+function findChatComposer(): HTMLTextAreaElement | null {
+  // Placeholder text is matched with unicode escapes so the selector source
+  // stays free of hardcoded CJK (the i18n coverage audit greps literal text).
+  const composerPlaceholderRe = /[\u53d1\u9001\u6d88\u606f]|send\s+a\s+message/i;
+  const candidates = [
+    document.querySelector<HTMLTextAreaElement>('textarea[name="search"]'),
+    document.querySelector<HTMLTextAreaElement>('textarea[placeholder]'),
+  ];
+  for (const element of candidates) {
+    if (!element) continue;
+    if (element.name === 'search') return element;
+    if (composerPlaceholderRe.test(element.getAttribute('placeholder') ?? '')) return element;
+  }
+  return null;
+}
+
+function findChatSendButton(): HTMLElement | null {
+  const candidates = [
+    document.querySelector<HTMLElement>('[role="button"].ds-button--primary.ds-button--filled'),
+    document.querySelector<HTMLElement>('button.ds-button--primary'),
+    document.querySelector<HTMLElement>('[role="button"].ds-button--primary'),
+  ];
+  return candidates.find((element): element is HTMLElement => Boolean(element)) ?? null;
 }
 
 /**
@@ -4509,71 +4700,6 @@ function appendInlineAgentNarration(container: HTMLElement, text: string, loopId
   // Keep the scroller pinned while the final answer streams in (the reader is
   // watching the bottom; a scrolled-up reader is never yanked).
   followAgentStreamBottom(stream);
-}
-
-function collectInlineAgentExecutedToolNames(): string[] {
-  const trace = activeInlineAgentTrace;
-  if (!trace) return [];
-  const names: string[] = [];
-  for (const step of trace.steps) {
-    for (const exec of step.toolExecutions) names.push(exec.name);
-  }
-  return names;
-}
-
-async function persistLongAgentOutput(
-  finalText: string,
-  loopId: string,
-  container: HTMLElement,
-): Promise<void> {
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'SAVE_AGENT_OUTPUT_ARTIFACT',
-      payload: { loopId, content: finalText },
-    }) as { ok: boolean; artifactId?: string; error?: string } | undefined;
-    if (response?.ok && typeof response.artifactId === 'string') {
-      appendInlineAgentAutoSaveNote(container, response.artifactId);
-    } else {
-      console.warn('[DeepSeek++] agent output auto-save failed:', response?.error ?? 'unknown');
-    }
-  } catch (error) {
-    console.warn('[DeepSeek++] agent output auto-save request failed:', error);
-  }
-}
-
-function appendInlineAgentAutoSaveNote(container: HTMLElement, artifactId: string): void {
-  const note = document.createElement('div');
-  note.className = 'dpp-agent-autosave-note';
-  const label = document.createElement('span');
-  label.textContent = contentT('content.agent.autoSaved');
-  const download = document.createElement('button');
-  download.type = 'button';
-  download.textContent = contentT('content.agent.autoSavedDownload');
-  download.addEventListener('click', () => {
-    void downloadAgentOutputArtifact(artifactId);
-  });
-  note.append(label, download);
-  container.appendChild(note);
-}
-
-async function downloadAgentOutputArtifact(artifactId: string): Promise<void> {
-  try {
-    const response = await sendRuntimeMessageStrict<{ ok: true; artifact: { filename: string; mimeType: string; content: string } } | { ok: false; error: string }>({
-      type: 'GET_ARTIFACT',
-      payload: { id: artifactId },
-    });
-    if (!response?.ok) {
-      console.warn('[DeepSeek++] agent output artifact download failed:', response?.error ?? 'not found');
-      return;
-    }
-    const artifact = response.artifact;
-    inlineAgentDownloadManager?.download(
-      artifact.filename,
-      new Blob([artifact.content], { type: artifact.mimeType }),
-    );
-  } catch (error) {
-    console.warn('[DeepSeek++] agent output artifact download request failed:', error);
-  }
 }
 
 function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
@@ -6795,8 +6921,12 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
     const stepIsFinalAnswer = step.index === lastStepIndex && lastStepIsAnswer;
     if (renderStepText) {
       updateStepStreamText(stepEl, stepIsFinalAnswer ? restoredAnswerText : renderStepText);
-      mountAgentNarration(stepEl, consoleBody, getAgentRendererLabels());
+      mountAgentNarration(stepEl, consoleBody, getAgentRendererLabels(), step.reasoning);
       if (stepIsFinalAnswer) lastStepReplaced = true;
+    } else if (step.reasoning) {
+      // Reasoning-only step (no narration text was persisted): mount the
+      // textless step so the reasoning note has a home in the flow.
+      mountAgentNarration(stepEl, consoleBody, getAgentRendererLabels(), step.reasoning);
     }
     for (const exec of step.toolExecutions) {
       resolveAgentToolEntry(consoleBody, step.index, exec, getAgentRendererLabels());
@@ -6814,10 +6944,8 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
     appendInlineAgentNarration(container, restoredAnswerText, trace.loopId);
   }
   // A restored trace is a finished run: every tool group collapses to its
-  // one-line header, and HTML artifact previews run inline (Issue #551
-  // redesign).
+  // one-line header (Issue #551 redesign).
   collapseAllAgentToolGroups(consoleBody);
-  hydrateAgentArtifactPreviews(consoleBody);
 
   const elapsedSeconds = Math.max(0, Math.floor((trace.updatedAt - trace.createdAt) / 1000));
   if (trace.status === 'complete') {

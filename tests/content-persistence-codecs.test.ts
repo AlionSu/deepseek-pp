@@ -40,6 +40,35 @@ describe('Content persistence codecs', () => {
     expect(decoded.finalText).toBeUndefined();
   });
 
+  it('round-trips step reasoning text and rejects non-string reasoning', () => {
+    const withReasoning = createTrace({
+      steps: [{
+        index: 0,
+        status: 'complete',
+        text: 'Done',
+        reasoning: '我先分析。',
+        toolExecutions: [structuredClone(CONTRACT_EXECUTION_RECORD)],
+        responseMessageId: 11,
+        collapsed: true,
+      }],
+    });
+    const [decoded] = decodeInlineAgentTraces([withReasoning]);
+    expect(decoded.steps[0].reasoning).toBe('我先分析。');
+
+    expect(() => decodeInlineAgentTraces([createTrace({
+      steps: [{
+        index: 0,
+        status: 'complete',
+        text: 'Done',
+        reasoning: 7,
+        toolExecutions: [structuredClone(CONTRACT_EXECUTION_RECORD)],
+        responseMessageId: 11,
+        collapsed: true,
+      }],
+    })]))
+      .toThrow('steps[0].reasoning must be a string');
+  });
+
   it('rejects corrupt or unsupported future roots instead of filtering them', () => {
     expect(() => decodeToolExecutionBlocks({ schemaVersion: 2, items: [] }))
       .toThrow('must be a versionless array');

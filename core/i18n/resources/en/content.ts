@@ -64,7 +64,7 @@ export const content = {
     downloadCode: 'Download',
   },
   toolBlock: {
-    title: 'Executed tools ({count})',
+    title: 'Called tools ({count})',
     pythonInterpreter: 'Python interpreter',
     summaries: {
       saved: 'Saved',
@@ -106,8 +106,6 @@ export const content = {
     toolGroup: 'Ran {count} tool calls',
     reasoningStep: 'Thought · step {step}',
     reasoningNotPersisted: 'The thinking process for this step is not retained in the message stream.',
-    autoSaved: 'Long output was auto-saved as an artifact: ',
-    autoSavedDownload: 'Download',
     concurrencyGuard: 'An agent is still running. A duplicate task from this message was skipped. To interrupt, click Stop in the agent panel.',
   },
   permission: {

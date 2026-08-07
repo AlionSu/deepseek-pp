@@ -150,6 +150,7 @@ describe('active DeepSeek protocol codecs', () => {
       expect(consumeDeepSeekSseEvents(events, summary), `split ${splitAt}`).toBe('你好');
       expect(summary, `split ${splitAt}`).toEqual({
         assistantText: '你好',
+        assistantReasoningText: '',
         requestMessageId: 10,
         responseMessageId: 11,
         finished: true,

@@ -103,6 +103,8 @@ export type { DeepSeekUploadedFile } from './contracts';
 
 export interface StreamCallbacks {
   onTextChunk?(text: string, fullText: string): void;
+  /** Reasoning/thinking deltas of the current response (THINK fragments). */
+  onReasoningChunk?(reasoning: string, fullReasoning: string): void;
   onTokenSpeed?(progress: ResponseTokenSpeedPayload): void;
   onFinished?(): void;
   retainAssistantText?: boolean;
@@ -559,6 +561,7 @@ async function readCompletionStreamWithCallbacks(
       const newText = consumeDeepSeekSseEvents(decoder.push(value), summary, {
         retainAssistantText,
         onParsed,
+        onReasoningChunk: callbacks.onReasoningChunk,
       });
       if (newText && callbacks.onTextChunk) {
         callbacks.onTextChunk(newText, summary.assistantText);
@@ -568,6 +571,7 @@ async function readCompletionStreamWithCallbacks(
     const finalText = consumeDeepSeekSseEvents(decoder.finish(), summary, {
       retainAssistantText,
       onParsed,
+      onReasoningChunk: callbacks.onReasoningChunk,
     });
     if (finalText && callbacks.onTextChunk) {
       callbacks.onTextChunk(finalText, summary.assistantText);

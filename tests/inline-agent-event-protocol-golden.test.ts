@@ -15,6 +15,8 @@
  *   `[long-text:<length>]` marker so the golden stays readable; length is the
  *   contract (12_000-char clamp + `\n...[truncated]` suffix for stream events,
  *   unclamped final text on `AGENT_LOOP_COMPLETE`).
+ * - `AGENT_REASONING_CHUNK.fullText` follows the same `[long-text:<length>]`
+ *   marker rule (same 12_000-char clamp).
  * - `AGENT_TOOL_DETECTED.call` keeps `{name, invocationName, payload}` only;
  *   volatile fields (id/raw/provider/parseError) are not part of the contract.
  * - `AGENT_STEP_COMPLETE.toolExecutions` keeps the full released record
@@ -65,6 +67,15 @@ function normalizeEvent(type: string, data: unknown): NormalizedEvent {
         loopId: payload.loopId,
         stepIndex: payload.stepIndex,
         text: payload.text,
+        fullText: fullText.length > LONG_TEXT_THRESHOLD ? `[long-text:${fullText.length}]` : fullText,
+      };
+    }
+    case 'AGENT_REASONING_CHUNK': {
+      const fullText = payload.fullText as string;
+      return {
+        type,
+        loopId: payload.loopId,
+        stepIndex: payload.stepIndex,
         fullText: fullText.length > LONG_TEXT_THRESHOLD ? `[long-text:${fullText.length}]` : fullText,
       };
     }
@@ -390,6 +401,53 @@ describe('AGENT_* event protocol golden', () => {
         toolExecutions: [{ name: 'artifact_create', ok: true, summary: 'Artifact created' }],
       },
       { type: 'AGENT_STEP_STARTED', loopId: 'loop-1', stepIndex: 1 },
+      { type: 'AGENT_STREAM_CHUNK', loopId: 'loop-1', stepIndex: 1, text: '', fullText: 'All done.' },
+      { type: 'AGENT_STEP_COMPLETE', loopId: 'loop-1', stepIndex: 1, responseMessageId: 103, toolExecutions: [] },
+      { type: 'AGENT_LOOP_COMPLETE', loopId: 'loop-1', totalSteps: 2, totalTools: 2, finalText: 'All done.' },
+    ]);
+  });
+
+  it('G10 reasoning: per-turn thinking deltas stream as AGENT_REASONING_CHUNK', async () => {
+    vi.useFakeTimers();
+    adapterMocks.submitPromptStreaming
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onReasoningChunk?.('我', '我');
+        handlers.onReasoningChunk?.('先分析', '我先分析');
+        handlers.onTextChunk(TOOL_CALL_TEXT);
+        return { assistantText: '', responseMessageId: 102, requestMessageId: 101, finished: true };
+      })
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onReasoningChunk?.('最后检查', '最后检查');
+        handlers.onTextChunk('All done.');
+        return { assistantText: '', responseMessageId: 103, requestMessageId: 102, finished: true };
+      });
+
+    const { events, post } = createCollector();
+    const executeTool = vi.fn(async () => ARTIFACT_EXECUTION);
+
+    const run = runInlineAgentLoop(
+      { ...createPayload(), toolDescriptors: createArtifactToolDescriptors('en') },
+      { post, executeTool, signal: new AbortController().signal },
+    );
+    await vi.advanceTimersByTimeAsync(7_000);
+    await run;
+
+    expect(events).toEqual([
+      { type: 'AGENT_STEP_STARTED', loopId: 'loop-1', stepIndex: 0 },
+      { type: 'AGENT_REASONING_CHUNK', loopId: 'loop-1', stepIndex: 0, fullText: '我' },
+      { type: 'AGENT_REASONING_CHUNK', loopId: 'loop-1', stepIndex: 0, fullText: '我先分析' },
+      { type: 'AGENT_TOOL_DETECTED', loopId: 'loop-1', stepIndex: 0, call: {
+        name: 'artifact_create',
+        invocationName: 'artifact_create',
+        payload: { filename: 'a.txt', content: 'ok' },
+      } },
+      { type: 'AGENT_STEP_COMPLETE', loopId: 'loop-1', stepIndex: 0, responseMessageId: 102, toolExecutions: [{
+        name: 'artifact_create',
+        ok: true,
+        summary: 'Artifact created',
+      }] },
+      { type: 'AGENT_STEP_STARTED', loopId: 'loop-1', stepIndex: 1 },
+      { type: 'AGENT_REASONING_CHUNK', loopId: 'loop-1', stepIndex: 1, fullText: '最后检查' },
       { type: 'AGENT_STREAM_CHUNK', loopId: 'loop-1', stepIndex: 1, text: '', fullText: 'All done.' },
       { type: 'AGENT_STEP_COMPLETE', loopId: 'loop-1', stepIndex: 1, responseMessageId: 103, toolExecutions: [] },
       { type: 'AGENT_LOOP_COMPLETE', loopId: 'loop-1', totalSteps: 2, totalTools: 2, finalText: 'All done.' },

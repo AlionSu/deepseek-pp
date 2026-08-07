@@ -36,12 +36,18 @@ export function getInlineAgentProcessText(text: string): string {
 // by writing `<artifact_create>{"filename":"x.html","content":"…"}</artifact_create>`
 // as plain text (the artifact tools are not in the loop descriptor catalog, so
 // the XML stays in the text stream). The display layer converts every
-// artifact block into "filename + fenced code block" BEFORE tool-call
-// stripping, so the raw JSON is never shown and the answer no longer depends
-// on the 8000-char step clamp. `artifact_bundle_create` emits one block per
-// file. `convertInlineAgentArtifactBlocks` is pure and deterministic: the same
-// raw text always converts to the same markdown, which is what makes the
+// artifact block into a plain fenced code block BEFORE tool-call stripping,
+// so the raw JSON is never shown and the answer no longer depends on the
+// 8000-char step clamp. `artifact_bundle_create` emits one block per file.
+// `convertInlineAgentArtifactBlocks` is pure and deterministic: the same raw
+// text always converts to the same markdown, which is what makes the
 // persisted "body + code blocks" finalText form round-trip through refresh.
+// The DeepSeek native renderer takes over chart (mermaid/xychart-beta) and
+// runnable (html/svg/xml) fences from here — the plugin no longer renders
+// artifact previews of its own, and only those natively special-cased
+// languages get a fence label. Every other deliverable renders as a plain
+// unlabeled code block, exactly like official support: the plugin adds no
+// language handling beyond what the native pipeline already provides.
 // ---------------------------------------------------------------------------
 
 export const INLINE_AGENT_TRUNCATION_MARKER = '...[truncated]';
@@ -53,52 +59,41 @@ const ARTIFACT_FILENAME_RE = /"filename"\s*:\s*"((?:[^"\\]|\\.)*)"/;
 const ARTIFACT_CONTENT_RE = /"content"\s*:\s*"/;
 const ARTIFACT_PARAM_SUMMARY_MAX_CHARS = 120;
 
-/** Markdown language labels by file extension (lowercased). */
+/**
+ * Markdown language labels by file extension (lowercased). Only extensions the
+ * DeepSeek native renderer special-cases as runnable code blocks (html/svg/xml)
+ * are mapped; anything else falls back to an unlabeled fence.
+ */
 const ARTIFACT_LANGUAGE_BY_EXT: Record<string, string> = {
   html: 'html',
   htm: 'html',
-  css: 'css',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  jsx: 'javascript',
-  ts: 'typescript',
-  tsx: 'typescript',
-  json: 'json',
-  md: 'markdown',
-  markdown: 'markdown',
   svg: 'svg',
   xml: 'xml',
-  py: 'python',
-  sh: 'bash',
-  bash: 'bash',
-  yaml: 'yaml',
-  yml: 'yaml',
-  txt: '',
-  text: '',
 };
 
-/** Normalizes the artifact `language` enum to a markdown fence label. */
+/**
+ * Normalizes the artifact `language` enum to a markdown fence label. Only
+ * languages the DeepSeek native renderer special-cases get a label: runnable
+ * code blocks (html/svg/xml) and chart cards (mermaid — xychart-beta/xychart
+ * normalize to `mermaid` because the native chart card is a mermaid
+ * renderer). Every other deliverable renders as a plain unlabeled code block,
+ * matching official support exactly — the plugin adds no language handling of
+ * its own.
+ */
 function normalizeArtifactLanguage(language: unknown, filename: string): string {
   if (typeof language === 'string' && language.trim()) {
     const normalized = language.trim().toLowerCase();
     const byEnum: Record<string, string> = {
       html: 'html',
-      javascript: 'javascript',
-      typescript: 'typescript',
-      python: 'python',
-      text: '',
-      js: 'javascript',
-      ts: 'typescript',
-      py: 'python',
-      css: 'css',
-      json: 'json',
-      markdown: 'markdown',
-      md: 'markdown',
       svg: 'svg',
       xml: 'xml',
-      bash: 'bash',
-      sh: 'bash',
+      // Chart deliverables: the DeepSeek native renderer charts `mermaid`
+      // fences (its chart card is a mermaid renderer), so xychart-beta /
+      // xychart labels normalize to `mermaid` to make the native pipeline
+      // take over instead of showing a plain code block.
+      mermaid: 'mermaid',
+      'xychart-beta': 'mermaid',
+      xychart: 'mermaid',
     };
     if (normalized in byEnum) return byEnum[normalized];
   }
@@ -177,7 +172,7 @@ function escapeArtifactFilename(filename: string): string {
 }
 
 /**
- * Renders one artifact file as "filename + fenced code block" markdown.
+ * Renders one artifact file as a plain fenced code block.
  *
  * `style` controls the block's shape:
  * - `'closed'` (final/restore): a well-formed block; a truncated fragment
@@ -195,7 +190,7 @@ function renderArtifactCodeBlock(
 ): string {
   const fence = pickArtifactFence(content);
   const lang = normalizeArtifactLanguage(language, filename);
-  const header = `**${escapeArtifactFilename(filename)}**\n\n${fence}${lang}\n${content}`;
+  const header = `${fence}${lang}\n${content}`;
   if (style === 'open') return header;
   // The truncation marker sits INSIDE the block (honest labeling, same marker
   // as clampText). The block is always well-formed (closed fence), so the

@@ -340,8 +340,8 @@ function replaceMatchWithSummary(match: string, catalog: ToolInvocationCatalog):
   });
   const executedCount = calls.filter(call => !call.parseError).length;
   const header = executedCount === calls.length
-    ? `🔧 已执行工具（${calls.length}次）`
-    : `🔧 已执行工具（${executedCount}次，${calls.length - executedCount}次格式错误）`;
+    ? `🔧 已调用工具（${calls.length}次）`
+    : `🔧 已调用工具（${executedCount}次，${calls.length - executedCount}次格式错误）`;
   return '\n\n---\n' + header + '\n' + lines.join('\n') + '\n---';
 }
 

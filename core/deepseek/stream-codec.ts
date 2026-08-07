@@ -12,6 +12,17 @@ export interface ResponseStreamUsageStats {
 
 export interface DeepSeekStreamSummary {
   assistantText: string;
+  /**
+   * Thinking/reasoning text of the current response, accumulated separately
+   * from `assistantText`. The DeepSeek web stream interleaves `THINK`
+   * fragments (reasoning) and `RESPONSE` fragments (answer) over the same
+   * patch paths (`response/fragments/-1/content` and bare `{"v":...}`
+   * shorthand appends), so consumers that only want the answer text must read
+   * `assistantText` while reasoning consumers read this field. Consumers that
+   * want the combined visible text keep using the old mixed extraction
+   * (`extractResponseTextFromParsed`).
+   */
+  assistantReasoningText: string;
   responseMessageId: number | null;
   requestMessageId: number | null;
   finished: boolean;
@@ -42,6 +53,7 @@ export interface DeepSeekSseFrameDecoder {
 export function createDeepSeekStreamSummary(): DeepSeekStreamSummary {
   return {
     assistantText: '',
+    assistantReasoningText: '',
     responseMessageId: null,
     requestMessageId: null,
     finished: false,
@@ -120,6 +132,7 @@ export function consumeDeepSeekSseEvents(
   options: {
     retainAssistantText?: boolean;
     onParsed?: (parsed: unknown, event: SSEEvent) => void;
+    onReasoningChunk?: (reasoning: string, fullReasoning: string) => void;
   } = {},
 ): string {
   const appendedText: string[] = [];
@@ -139,6 +152,7 @@ export function consumeDeepSeekSseFrames(
   options: {
     retainAssistantText?: boolean;
     onParsed?: (parsed: unknown, event: SSEEvent) => void;
+    onReasoningChunk?: (reasoning: string, fullReasoning: string) => void;
   } = {},
 ): string {
   const appendedText: string[] = [];
@@ -210,16 +224,21 @@ function consumeParsedDeepSeekSseEvent(
   options: {
     retainAssistantText?: boolean;
     onParsed?: (parsed: unknown, event: SSEEvent) => void;
+    onReasoningChunk?: (reasoning: string, fullReasoning: string) => void;
   },
   appendedText: string[],
 ): void {
   collectDeepSeekMessageIds(parsed, summary);
   options.onParsed?.(parsed, event);
 
-  const eventText = extractResponseTextFromParsed(parsed);
-  if (eventText) {
-    appendedText.push(eventText);
-    if (options.retainAssistantText !== false) summary.assistantText += eventText;
+  const split = splitDeepSeekResponseText(parsed, getDeepSeekFragmentState(summary));
+  if (split.text) {
+    appendedText.push(split.text);
+    if (options.retainAssistantText !== false) summary.assistantText += split.text;
+  }
+  if (split.reasoning) {
+    summary.assistantReasoningText += split.reasoning;
+    options.onReasoningChunk?.(split.reasoning, summary.assistantReasoningText);
   }
   if (isStreamFinishedFromParsed(parsed)) summary.finished = true;
 }
@@ -387,6 +406,153 @@ function isFragmentsAppendPatch(parsed: any): boolean {
     parsed.p.endsWith('/fragments') &&
     parsed.o === 'APPEND' &&
     Array.isArray(parsed.v);
+}
+
+// ---------------------------------------------------------------------------
+// Fragment-type routing (thinking vs answer). The DeepSeek web stream
+// interleaves `THINK` fragments (reasoning) and `RESPONSE` fragments (answer)
+// over the SAME patch paths: a fragment-creation event
+// (`{"p":"response/fragments","o":"APPEND","v":[{type:"THINK"|"RESPONSE",...}]}`
+// or the full `{"v":{"response":{fragments:[...]}}}` snapshot) declares the
+// type, and every later content patch (`response/fragments/-1/content` or the
+// bare `{"v":"..."}` shorthand) targets the current (last-appended) fragment.
+// `extractResponseTextFromParsed` intentionally keeps the old MIXED behavior
+// (the fetch-hook filter relies on it to strip tool XML out of both thinking
+// and answer text); consumers that need the separated channels go through
+// {@link splitDeepSeekResponseText} via `consumeDeepSeekSseEvents`.
+// ---------------------------------------------------------------------------
+
+export type DeepSeekResponseFragmentType = 'THINK' | 'RESPONSE' | 'TOOL' | string;
+
+export interface DeepSeekFragmentState {
+  /** Fragment types in append order (position = fragment index). */
+  fragmentTypes: DeepSeekResponseFragmentType[];
+  /** Index of the fragment receiving `-1` content patches and shorthand appends. */
+  currentIndex: number;
+  /** Set once a fragment-creation or snapshot event declared the fragment list. */
+  observed: boolean;
+}
+
+const deepSeekFragmentStates = new WeakMap<DeepSeekStreamSummary, DeepSeekFragmentState>();
+
+export function getDeepSeekFragmentState(summary: DeepSeekStreamSummary): DeepSeekFragmentState {
+  let state = deepSeekFragmentStates.get(summary);
+  if (!state) {
+    state = { fragmentTypes: [], currentIndex: -1, observed: false };
+    deepSeekFragmentStates.set(summary, state);
+  }
+  return state;
+}
+
+export interface DeepSeekResponseTextSplit {
+  /** Answer (non-THINK fragment) content delta. */
+  text: string | null;
+  /** Thinking/reasoning fragment content delta. */
+  reasoning: string | null;
+}
+
+function splitByType(type: DeepSeekResponseFragmentType | null, content: string): DeepSeekResponseTextSplit {
+  return String(type).toUpperCase() === 'THINK'
+    ? { text: null, reasoning: content }
+    : { text: content, reasoning: null };
+}
+
+function fragmentTypeAt(state: DeepSeekFragmentState, index: number): DeepSeekResponseFragmentType | null {
+  if (index === -1) index = state.currentIndex;
+  if (index < 0 || index >= state.fragmentTypes.length) return null;
+  return state.fragmentTypes[index];
+}
+
+/**
+ * Splits one parsed SSE payload into answer text and reasoning text, updating
+ * the fragment-type tracker as fragment-creation events arrive. Unknown
+ * fragment state routes content to the answer channel (the pre-fragment
+ * behavior), so non-thinking streams extract exactly like before.
+ */
+export function splitDeepSeekResponseText(
+  parsed: any,
+  state: DeepSeekFragmentState,
+): DeepSeekResponseTextSplit {
+  if (parsed?.o === 'BATCH' && Array.isArray(parsed.v)) {
+    let text: string | null = null;
+    let reasoning: string | null = null;
+    for (const item of parsed.v) {
+      const part = splitDeepSeekResponseText(item, state);
+      if (part.text) text = (text ?? '') + part.text;
+      if (part.reasoning) reasoning = (reasoning ?? '') + part.reasoning;
+    }
+    return { text, reasoning };
+  }
+
+  // Fragment creation: `{"p":"response/fragments","o":"APPEND","v":[...]}`.
+  // The appended fragments become the current ones; their initial `content`
+  // is a real delta (the server only re-streams it here, not in later
+  // patches), routed by each fragment's own type.
+  if (isFragmentsAppendPatch(parsed)) {
+    const fragments = parsed.v as unknown[];
+    const types: DeepSeekResponseFragmentType[] = fragments.map((fragment) =>
+      String((fragment as Record<string, unknown> | null)?.type ?? 'RESPONSE'));
+    state.fragmentTypes.push(...types);
+    state.currentIndex = state.fragmentTypes.length - 1;
+    state.observed = true;
+    const last = fragments[fragments.length - 1];
+    const content = extractFragmentText(last);
+    if (content) return splitByType(types[types.length - 1], content);
+    return { text: null, reasoning: null };
+  }
+
+  // Full response snapshot: `{"v":{"response":{...,"fragments":[...]}}}`.
+  // It declares (or re-declares) the fragment list. Its embedded content is
+  // only consumed on the FIRST observation — the snapshot is cumulative, so
+  // later snapshots would duplicate already-streamed content.
+  const snapshotFragments = getSnapshotFragments(parsed);
+  if (snapshotFragments) {
+    const firstObservation = !state.observed;
+    state.fragmentTypes = snapshotFragments.map((fragment) =>
+      String((fragment as Record<string, unknown> | null)?.type ?? 'RESPONSE'));
+    state.currentIndex = state.fragmentTypes.length - 1;
+    state.observed = true;
+    if (firstObservation) {
+      const last = snapshotFragments[snapshotFragments.length - 1];
+      const content = extractFragmentText(last);
+      if (content) return splitByType(state.fragmentTypes[state.currentIndex], content);
+    }
+    return { text: null, reasoning: null };
+  }
+
+  // Explicit thinking/reasoning patch paths are always reasoning.
+  if (isThinkingPatchPath(parsed?.p) && typeof parsed?.v === 'string') {
+    return { text: null, reasoning: parsed.v };
+  }
+
+  // Content patches (`response/fragments/-1/content`, `response/content`, ...)
+  // route by the fragment they target.
+  if (typeof parsed?.p === 'string' && isResponseTextPatchPath(parsed.p) && typeof parsed.v === 'string') {
+    const index = fragmentIndexFromPatchPath(parsed.p);
+    return splitByType(fragmentTypeAt(state, index), parsed.v);
+  }
+
+  // Bare shorthand `{"v":"text"}` appends to the current fragment.
+  if (!parsed?.p && typeof parsed?.v === 'string') {
+    return splitByType(fragmentTypeAt(state, state.currentIndex), parsed.v);
+  }
+
+  return { text: null, reasoning: null };
+}
+
+/** Reads `response/fragments/<index>/content`-style paths; `-1` means current. */
+function fragmentIndexFromPatchPath(path: string): number {
+  const match = /^response\/fragments\/(-?\d+)\//.exec(path);
+  if (!match) return -1;
+  return Number(match[1]);
+}
+
+function getSnapshotFragments(parsed: any): unknown[] | null {
+  if (!parsed || parsed.p !== undefined || !parsed.v || typeof parsed.v !== 'object') return null;
+  const response = (parsed.v as Record<string, unknown>).response;
+  if (!response || typeof response !== 'object') return null;
+  const fragments = (response as Record<string, unknown>).fragments;
+  return Array.isArray(fragments) && fragments.length > 0 ? fragments : null;
 }
 
 function isResponseFragmentsAppendPatch(parsed: any): boolean {

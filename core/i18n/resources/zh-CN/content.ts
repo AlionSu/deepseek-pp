@@ -64,7 +64,7 @@ export const content = {
     downloadCode: '下载',
   },
   toolBlock: {
-    title: '已执行工具（{count}次）',
+    title: '已调用工具（{count}次）',
     pythonInterpreter: 'Python 解释器',
     summaries: {
       saved: '已保存',
@@ -106,8 +106,6 @@ export const content = {
     toolGroup: '已调用 {count} 次工具',
     reasoningStep: '已思考 · 第 {step} 步',
     reasoningNotPersisted: '该步骤的思考过程未保留在消息流中。',
-    autoSaved: '长文产出已自动保存为产物：',
-    autoSavedDownload: '下载',
     concurrencyGuard: 'Agent 正在执行中，已忽略此消息触发的重复任务。如需中断，请点击 Agent 面板的「停止」。',
   },
   permission: {

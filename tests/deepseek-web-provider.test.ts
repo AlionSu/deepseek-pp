@@ -224,6 +224,35 @@ describe('createDeepSeekWebProvider registration', () => {
     expect(simpleResult.stopReason).toBe('stop');
   });
 
+  it('streams reasoning as pi thinking content blocks', async () => {
+    adapterMocks.submitPromptStreaming.mockImplementationOnce(async (_input, handlers) => {
+      handlers.onReasoningChunk?.('我', '我');
+      handlers.onReasoningChunk?.('先思考', '我先思考');
+      handlers.onTextChunk('答案', '答案');
+      return { assistantText: '答案', responseMessageId: 22, requestMessageId: 21, finished: true };
+    });
+
+    const provider = createDeepSeekWebProvider(createProviderDeps());
+    const model = provider.getModels()[0];
+    const context = {
+      systemPrompt: '',
+      messages: [{ role: 'user' as const, content: 'hi', timestamp: 1 }],
+    };
+
+    const thinkingEvents: string[] = [];
+    const stream = provider.stream(model, context, {});
+    for await (const event of stream) {
+      if (event.type === 'thinking_delta') thinkingEvents.push(event.delta);
+    }
+    const result = await stream.result();
+
+    expect(thinkingEvents).toEqual(['我', '先思考']);
+    const thinking = result.content.find((block) => block.type === 'thinking');
+    expect(thinking).toMatchObject({ type: 'thinking', thinking: '我先思考' });
+    const text = result.content.find((block) => block.type === 'text');
+    expect(text).toMatchObject({ type: 'text', text: '答案' });
+  });
+
   it('exposes a static catalog factory with the custom api', () => {
     const models = createDeepSeekWebModels();
     expect(models).toHaveLength(2);

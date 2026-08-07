@@ -43,6 +43,11 @@ export interface MainWorldBridgeControllerDependencies {
   readonly applyState: (state: MainWorldBridgeState) => void;
   readonly clearState: () => void;
   readonly reportError: (message: string, error?: unknown) => void;
+  /**
+   * Registers the pending agent final-answer replay in the fetch hook. The
+   * payload is the validated `AgentReplayRegistration` shape.
+   */
+  readonly onRegisterAgentReplay?: (payload: unknown) => void;
 }
 
 type PendingRequest = {
@@ -192,6 +197,11 @@ export function createMainWorldBridgeController(
         break;
       case 'AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT':
         extendRequestTimeout(message);
+        break;
+      case 'REGISTER_AGENT_REPLAY':
+        dependencies.onRegisterAgentReplay?.(
+          (message as AugmentResultMessage & { payload?: unknown }).payload,
+        );
         break;
     }
   };

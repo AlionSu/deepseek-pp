@@ -1,13 +1,13 @@
 export const RUNTIME_TOPOLOGY = {
-  liveCommands: 130,
+  liveCommands: 129,
   declaredActions: 98,
   shared: 96,
-  liveOnly: 34,
+  liveOnly: 33,
   declaredOnly: 2,
-  readsPayload: 86,
+  readsPayload: 85,
   ignoresPayload: 44,
   directPayloadCasts: 0,
-  decodedPayloads: 86,
+  decodedPayloads: 85,
   delegatedPayloads: 0,
 } as const;
 

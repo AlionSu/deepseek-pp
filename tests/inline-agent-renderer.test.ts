@@ -9,10 +9,11 @@ import {
   createAgentStepElement,
   finalizePendingAgentToolEntries,
   getAgentConsoleBody,
-  hydrateAgentArtifactPreviews,
+  getAgentReasoningNote,
   injectInlineAgentStyles,
   isInlineAgentBudgetFinalText,
   mountAgentNarration,
+  updateAgentReasoningNoteElement,
   renderAgentStreamText,
   resolveAgentToolEntry,
   updateAgentConsoleHeader,
@@ -502,6 +503,62 @@ describe('inline agent renderer', () => {
     expect(adoptReasoningBlock(host)).toBe(false);
   });
 
+  it('mounts a reasoning note carrying the real captured thinking text', () => {
+    const container = createAgentContainer();
+    const stream = getAgentConsoleBody(container);
+    const step = createAgentStepElement(0);
+    expect(stream).not.toBeNull();
+    if (!stream) return;
+    mountAgentNarration(step, stream, streamLabels, '我先分析数据再下结论。');
+
+    const note = getAgentReasoningNote(step);
+    expect(note).not.toBeNull();
+    const title = note?.querySelector('.dpp-agent-reasoning-note-title');
+    expect(title?.textContent).toBe('Thought · step 1');
+    const body = note?.querySelector<HTMLElement>('.dpp-agent-reasoning-note-body');
+    expect(body?.textContent).toBe('我先分析数据再下结论。');
+    // The note is folded by default.
+    expect(body?.hidden).toBe(true);
+    // Expanding reveals the real content, not the placeholder.
+    const toggle = note?.querySelector<HTMLButtonElement>('.dpp-agent-reasoning-note-toggle');
+    toggle?.click();
+    expect(body?.hidden).toBe(false);
+    expect(body?.textContent).not.toContain('not retained');
+  });
+
+  it('fills a placeholder reasoning note with live reasoning deltas', () => {
+    const container = createAgentContainer();
+    const stream = getAgentConsoleBody(container);
+    const step = createAgentStepElement(1);
+    expect(stream).not.toBeNull();
+    if (!stream) return;
+    mountAgentNarration(step, stream, streamLabels);
+
+    const note = getAgentReasoningNote(step);
+    expect(note).not.toBeNull();
+    let body = note?.querySelector<HTMLElement>('.dpp-agent-reasoning-note-body');
+    expect(body?.textContent).toContain('not retained');
+
+    if (note) updateAgentReasoningNoteElement(note, '先');
+    if (note) updateAgentReasoningNoteElement(note, '先分析');
+    body = note?.querySelector<HTMLElement>('.dpp-agent-reasoning-note-body');
+    expect(body?.textContent).toBe('先分析');
+    expect(body?.textContent).not.toContain('not retained');
+  });
+
+  it('does not mutate the reasoning note for empty updates', () => {
+    const container = createAgentContainer();
+    const stream = getAgentConsoleBody(container);
+    const step = createAgentStepElement(2);
+    expect(stream).not.toBeNull();
+    if (!stream) return;
+    mountAgentNarration(step, stream, streamLabels, 'real content');
+    const note = getAgentReasoningNote(step);
+    if (note) updateAgentReasoningNoteElement(note, '');
+    const body = note?.querySelector<HTMLElement>('.dpp-agent-reasoning-note-body');
+    expect(body?.textContent).toBe('real content');
+  });
+
   it('marks interrupted steps as neutral instead of frozen streaming', () => {
     const step = createAgentStepElement(0);
     updateStepStatus(step, 'interrupted');
@@ -548,24 +605,22 @@ describe('inline agent renderer', () => {
     expect(el.textContent).toBe('Starting…');
   });
 
-  it('renders artifact blocks structurally with a preview placeholder', () => {
-    // The converted artifact text is "filename + 4-backtick fence"; the
-    // stream renderer emits the filename + code block + a preview placeholder
-    // carrying the raw content in a <template>, so HTML files can run inline.
+  it('renders artifact blocks as plain fenced code (no plugin preview UI)', () => {
+    // Artifact conversion yields plain fences; the stream renderer treats them
+    // like any markdown code block. The DeepSeek native renderer takes over
+    // the deliverable presentation on the native final-answer message.
     const html = renderAgentStreamText([
       '我生成了文件。',
-      '',
-      '**demo.html**',
       '',
       '````html',
       '<h1>Hi</h1>',
       '````',
     ].join('\n'));
 
-    expect(html).toContain('<strong>demo.html</strong>');
-    expect(html).toContain('<pre><code>&lt;h1&gt;Hi&lt;/h1&gt;</code></pre>');
-    expect(html).toContain('data-dpp-artifact-filename="demo.html"');
-    expect(html).toContain('<template class="dpp-agent-artifact-content">&lt;h1&gt;Hi&lt;/h1&gt;</template>');
+    expect(html).not.toContain('<strong>demo.html</strong>');
+    expect(html).toContain('<pre><code>&lt;h1&gt;Hi&lt;/h1&gt;');
+    expect(html).not.toContain('dpp-agent-artifact-preview');
+    expect(html).not.toContain('iframe');
   });
 
   it('leaves non-artifact narration as plain markdown', () => {
@@ -575,46 +630,16 @@ describe('inline agent renderer', () => {
     expect(html).not.toContain('dpp-agent-artifact-preview');
   });
 
-  it('renders a closed artifact block followed by more narration intact', () => {
-    // Regression: the block regex must not stop at an arbitrary line end
-    // (a /m `$` made the lazy content match truncate mid-file).
-    const html = renderAgentStreamText('**demo.html**\n\n````html\n<h1>Hi</h1>\n````\n\n后续正文。');
-    expect(html).toContain('<pre><code>&lt;h1&gt;Hi&lt;/h1&gt;</code></pre>');
-    expect(html).toContain('后续正文');
-    expect(html).not.toContain('<p>&lt;h1');
-  });
 
-  it('hydrates HTML artifact previews into sandboxed iframes', () => {
+  it('renders artifact block text without any preview placeholders', () => {
     const container = createAgentContainer();
     const stream = getAgentConsoleBody(container);
     expect(stream).not.toBeNull();
     if (stream) {
-      stream.innerHTML = renderAgentStreamText('**demo.html**\n\n````html\n<h1>Hi</h1>\n````');
+      stream.innerHTML = renderAgentStreamText('````html\n<h1>Hi</h1>\n````');
     }
-
-    if (stream) hydrateAgentArtifactPreviews(stream);
-    const frame = stream?.querySelector<HTMLIFrameElement>('iframe.dpp-agent-artifact-frame');
-    expect(frame).not.toBeNull();
-    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts');
-    expect(frame?.srcdoc).toBe('<h1>Hi</h1>');
-
-    // Idempotent: a second hydration must not rebuild the iframe.
-    const first = frame;
-    if (stream) hydrateAgentArtifactPreviews(stream);
-    expect(stream?.querySelectorAll('iframe.dpp-agent-artifact-frame')).toHaveLength(1);
-    expect(stream?.querySelector('iframe.dpp-agent-artifact-frame')).toBe(first);
-  });
-
-  it('does not hydrate non-HTML artifact previews', () => {
-    const container = createAgentContainer();
-    const stream = getAgentConsoleBody(container);
-    expect(stream).not.toBeNull();
-    if (stream) {
-      stream.innerHTML = renderAgentStreamText('**app.js**\n\n````javascript\nconsole.log(1)\n````');
-    }
-    if (stream) hydrateAgentArtifactPreviews(stream);
-    expect(stream?.querySelector('iframe.dpp-agent-artifact-frame')).toBeNull();
-    expect(stream?.querySelector('.dpp-agent-artifact-preview')).not.toBeNull();
+    expect(stream?.querySelector('iframe')).toBeNull();
+    expect(stream?.querySelector('.dpp-agent-artifact-preview')).toBeNull();
   });
 
   it('follows the page scroll while the reader is at the bottom', () => {

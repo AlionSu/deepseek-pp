@@ -13,6 +13,7 @@ export const BRIDGE_MESSAGE_TYPES = [
   'AUGMENT_REQUEST_BODY',
   'AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT',
   'AUGMENT_REQUEST_BODY_RESULT',
+  'REGISTER_AGENT_REPLAY',
   'TOOL_CALL_STARTED',
   'TOOL_CALL_CHUNK',
   'TOOL_CALL',
@@ -43,6 +44,7 @@ export const BRIDGE_TYPE_SOURCES = {
   AUGMENT_REQUEST_BODY: BRIDGE_SOURCES.mainWorld,
   AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT: BRIDGE_SOURCES.content,
   AUGMENT_REQUEST_BODY_RESULT: BRIDGE_SOURCES.content,
+  REGISTER_AGENT_REPLAY: BRIDGE_SOURCES.content,
   TOOL_CALL_STARTED: BRIDGE_SOURCES.mainWorld,
   TOOL_CALL_CHUNK: BRIDGE_SOURCES.mainWorld,
   TOOL_CALL: BRIDGE_SOURCES.mainWorld,
@@ -223,6 +225,7 @@ const BRIDGE_PAYLOAD_VALIDATORS: Record<
     isNonEmptyString(message.id) && isPositiveFiniteNumber(message.timeoutMs)
   ),
   AUGMENT_REQUEST_BODY_RESULT: isAugmentResult,
+  REGISTER_AGENT_REPLAY: (message) => isAgentReplayPayload(message.payload),
   TOOL_CALL_STARTED: (message) => isToolCallRecord(message.data),
   TOOL_CALL_CHUNK: (message) => (
     isPlainRecord(message.data) &&
@@ -279,6 +282,18 @@ function isAugmentResult(message: Record<string, unknown>): boolean {
 
 function isSkillSummary(value: unknown): boolean {
   return isPlainRecord(value) && isNonEmptyString(value.name) && typeof value.description === 'string';
+}
+
+function isAgentReplayPayload(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  return (
+    isNonEmptyString(value.chatSessionId) &&
+    isNonEmptyString(value.prompt) &&
+    typeof value.content === 'string' &&
+    typeof value.reasoning === 'string' &&
+    isNullableNumber(value.responseMessageId) &&
+    isFiniteNumber(value.createdAt)
+  );
 }
 
 function isSkillPopupCopy(value: unknown): boolean {

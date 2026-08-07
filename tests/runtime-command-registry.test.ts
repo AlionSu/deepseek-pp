@@ -29,7 +29,7 @@ describe('runtime command registry', () => {
       ...CLIENT_ONLY_RUNTIME_COMMAND_TYPES,
     ];
 
-    expect(TYPED_RUNTIME_COMMAND_TYPES).toHaveLength(130);
+    expect(TYPED_RUNTIME_COMMAND_TYPES).toHaveLength(129);
     expect(TYPED_RUNTIME_COMMAND_TYPES).toEqual(expect.arrayContaining([
       'GET_MEMORIES',
       'GET_ARTIFACT',
@@ -45,10 +45,9 @@ describe('runtime command registry', () => {
       'GET_DEEPSEEK_API_KEY_STATUS',
       'EXPORT_DEEPSEEK_CONVERSATIONS',
       'EXPORT_DIAGNOSTIC_LOGS',
-      'SAVE_AGENT_OUTPUT_ARTIFACT',
     ]));
     expect(CLIENT_ONLY_RUNTIME_COMMAND_TYPES).toEqual(['TOOL_CALL_EXECUTED', 'MEMORIES_UPDATED']);
-    expect(new Set(allTypes).size).toBe(132);
+    expect(new Set(allTypes).size).toBe(131);
     for (const type of TYPED_RUNTIME_COMMAND_TYPES) {
       expect(getRuntimeCommandOwner(type)).toBe('typed-handler');
     }

@@ -69,6 +69,7 @@ function decodeStep(value: unknown, path: string): InlineAgentTraceStepRecord {
     throw new Error(`${path}.status is not supported`);
   }
   requireString(step.text, `${path}.text`);
+  requireOptionalString(step.reasoning, `${path}.reasoning`);
   if (!Array.isArray(step.toolExecutions) || !step.toolExecutions.every(isToolExecutionRecord)) {
     throw new Error(`${path}.toolExecutions must contain valid tool execution records`);
   }

@@ -86,7 +86,7 @@ const lineAllowlist = [
   },
   {
     path: 'core/interceptor/tool-parser.ts',
-    includes: '已执行工具',
+    includes: '已调用工具',
     reason: 'unused legacy DSML summary renderer retained for compatibility',
   },
   {

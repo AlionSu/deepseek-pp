@@ -336,13 +336,13 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 
 ### 1.12.2 Release Highlights
 
-1.12.2 makes tool execution transparent and fixes production workflows: tool failures are no longer a black box, diagnostic logs export in one click, long outputs auto-save, full replies copy in one click, and conversation export supports a content scope choice.
+1.12.2 makes tool execution transparent and fixes production workflows: tool failures are no longer a black box, diagnostic logs export in one click, full replies copy in one click, and conversation export supports a content scope choice. (The long-output auto-save entry was removed in a later version: final deliverables are now presented by DeepSeek's native rendering.)
 
 | Area | Main changes |
 |------|--------------|
 | Tool execution | Failures such as `shell_exec` now show the actual command and reason; authorization denials show the specific cause (missing/stale grant, session mismatch, disabled tool). Settings → Data adds "Export diagnostic logs" to export tool execution, authorization, and error records in one click. |
 | Inline agent | When the auto-continuation budget pauses a run, the notice now reports the actual completed step count, matching the "send 'continue' to resume" prompt. |
-| Long outputs | Long agent outputs are auto-saved as artifacts with a download entry, with no need to ask for a download tool. |
+| Long outputs | (Removed) This version auto-saved long agent outputs as artifacts with a download entry; later versions present final deliverables through DeepSeek's native rendering (chart cards, runnable code blocks) without the plugin-side save/download row. |
 | Copy output | A new "Copy full output" button next to message actions copies the complete DeepSeek reply in one click. |
 | Conversation export | Markdown/HTML export supports "inputs + outputs only" or "everything" scope selection, remembering your last choice. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |

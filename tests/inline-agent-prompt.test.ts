@@ -165,7 +165,7 @@ describe('inline-agent model prompts', () => {
     expect(getInlineAgentProcessText('普通过程文本。')).toBe('普通过程文本。');
   });
 
-  it('converts artifact_create blocks into filename + fenced code blocks', () => {
+  it('converts artifact_create blocks into plain fenced code blocks', () => {
     // Issue #551 stream redesign: the model delivers files as raw
     // `<artifact_create>` XML text; the display layer must never show the raw
     // JSON — the deliverable renders as its own code block.
@@ -179,7 +179,7 @@ describe('inline-agent model prompts', () => {
 
     expect(converted).not.toContain('<artifact_create>');
     expect(converted).not.toContain('{"filename"');
-    expect(converted).toContain('**demo.html**');
+    expect(converted).not.toContain('**demo.html**');
     // Fixed 4-backtick fence + inferred language, content unescaped.
     expect(converted).toContain('````html\n<h1>Hi</h1>\n<p>你好</p>\n````');
   });
@@ -187,11 +187,11 @@ describe('inline-agent model prompts', () => {
   it('lengthens the artifact fence when the content contains backticks', () => {
     const withFence = '<artifact_create>{"filename":"a.md","content":"```js\\ncode\\n```"}</artifact_create>';
     const converted = convertInlineAgentArtifactBlocks(withFence);
-    expect(converted).toContain('````markdown\n```js\ncode\n```\n````');
+    expect(converted).toContain('````\n```js\ncode\n```\n````');
 
     const withQuad = '<artifact_create>{"filename":"b.md","content":"````\\nquad\\n````"}</artifact_create>';
     const convertedQuad = convertInlineAgentArtifactBlocks(withQuad);
-    expect(convertedQuad).toContain('`````markdown\n````\nquad\n````\n`````');
+    expect(convertedQuad).toContain('`````\n````\nquad\n````\n`````');
   });
 
   it('converts artifact_bundle_create into one code block per file', () => {
@@ -200,10 +200,10 @@ describe('inline-agent model prompts', () => {
     const converted = convertInlineAgentArtifactBlocks(raw);
 
     expect(converted).not.toContain('<artifact_bundle_create>');
-    expect(converted).toContain('**index.html**');
-    expect(converted).toContain('**app.js**');
+    expect(converted).not.toContain('**index.html**');
+    expect(converted).not.toContain('**app.js**');
     expect(converted).toContain('````html\n<h1>首页</h1>\n````');
-    expect(converted).toContain('````javascript\nconsole.log(1)\n````');
+    expect(converted).toContain('````\nconsole.log(1)\n````');
   });
 
   it('salvages truncated artifact fragments with an explicit truncation marker', () => {
@@ -214,7 +214,7 @@ describe('inline-agent model prompts', () => {
 
     const converted = convertInlineAgentArtifactBlocks(truncated);
 
-    expect(converted).toContain('**demo.html**');
+    expect(converted).not.toContain('**demo.html**');
     expect(converted).toContain('````html\n<h1>Hi</h1>\n<p>part');
     expect(converted).toContain(`\n${INLINE_AGENT_TRUNCATION_MARKER}\n` + '````');
     // The closing fence makes the salvaged block well-formed markdown.
@@ -227,7 +227,7 @@ describe('inline-agent model prompts', () => {
     expect(convertInlineAgentArtifactBlocks(truncated, { partial: 'hide' })).toBe('');
     // A complete block renders even in streaming mode.
     const complete = '<artifact_create>{"filename":"demo.html","content":"done"}</artifact_create>';
-    expect(convertInlineAgentArtifactBlocks(complete, { partial: 'hide' })).toContain('**demo.html**');
+    expect(convertInlineAgentArtifactBlocks(complete, { partial: 'hide' })).toContain('````html\ndone\n````');
   });
 
   it('renders an open code block while streaming so the deliverable grows', () => {
@@ -238,7 +238,7 @@ describe('inline-agent model prompts', () => {
 
     const converted = convertInlineAgentArtifactBlocks(partial, { partial: 'stream' });
 
-    expect(converted).toContain('**demo.html**');
+    expect(converted).not.toContain('**demo.html**');
     expect(converted).toContain('````html\n<h1>Hi</h1>\n<p>part');
     // No truncation marker and no closing fence while streaming.
     expect(converted).not.toContain(INLINE_AGENT_TRUNCATION_MARKER);

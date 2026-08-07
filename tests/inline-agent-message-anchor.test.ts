@@ -69,7 +69,7 @@ describe('getAssistantMessageOwnText', () => {
     answer.textContent = '最终答案区';
     const toolBlock = document.createElement('div');
     toolBlock.className = 'dpp-tool-block';
-    toolBlock.textContent = '已执行工具 3 次';
+    toolBlock.textContent = '已调用工具 3 次';
     const note = document.createElement('div');
     note.className = 'dpp-agent-autosave-note';
     note.textContent = '已自动保存';
@@ -78,7 +78,7 @@ describe('getAssistantMessageOwnText', () => {
     const ownText = getAssistantMessageOwnText(message);
     expect(ownText).toContain('消息正文');
     expect(ownText).not.toContain('最终答案区');
-    expect(ownText).not.toContain('已执行工具');
+    expect(ownText).not.toContain('已调用工具');
     expect(ownText).not.toContain('已自动保存');
   });
 });

@@ -118,6 +118,8 @@ export function createDeepSeekStreamFn(deps: DeepSeekStreamFnDeps): StreamFn {
         const toolCallParser = createStreamingToolCallParser(toolDescriptors);
         let lastVisibleText = '';
         let textContentIndex: number | null = null;
+        let thinkingContentIndex: number | null = null;
+        let lastThinkingText = '';
         let toolCallCount = 0;
         // Raw (un-stripped) stream text for the released fallback parse:
         // legacy DSML blocks are invisible to the streaming XML parser and are
@@ -150,6 +152,20 @@ export function createDeepSeekStreamFn(deps: DeepSeekStreamFnDeps): StreamFn {
           emit({ type: 'toolcall_end', contentIndex, toolCall, partial: snapshot() });
         };
 
+        const emitThinking = (fullText: string) => {
+          const delta = fullText.slice(lastThinkingText.length);
+          lastThinkingText = fullText;
+          if (!delta) return;
+          if (thinkingContentIndex === null) {
+            thinkingContentIndex = partial.content.length;
+            partial.content.push({ type: 'thinking', thinking: fullText });
+            emit({ type: 'thinking_start', contentIndex: thinkingContentIndex, partial: snapshot() });
+          } else {
+            partial.content[thinkingContentIndex] = { type: 'thinking', thinking: fullText };
+          }
+          emit({ type: 'thinking_delta', contentIndex: thinkingContentIndex, delta, partial: snapshot() });
+        };
+
         const onParsed = (parsed: { completed: CoreToolCall[]; failed: CoreToolCall[] }) => {
           for (const call of parsed.completed) {
             emitToolCall({ name: call.name, invocationName: call.invocationName ?? call.name, payload: call.payload });
@@ -171,6 +187,9 @@ export function createDeepSeekStreamFn(deps: DeepSeekStreamFnDeps): StreamFn {
             }
             emitText(textAccumulator.append(text));
             onParsed(toolCallParser.append(text));
+          },
+          onReasoningChunk(reasoning, fullReasoning) {
+            emitThinking(fullReasoning);
           },
           onTokenSpeed(progress) {
             deps.onTokenSpeed?.(progress);
@@ -199,6 +218,14 @@ export function createDeepSeekStreamFn(deps: DeepSeekStreamFnDeps): StreamFn {
             type: 'text_end',
             contentIndex: textContentIndex,
             content: lastVisibleText,
+            partial: snapshot(),
+          });
+        }
+        if (thinkingContentIndex !== null) {
+          emit({
+            type: 'thinking_end',
+            contentIndex: thinkingContentIndex,
+            content: lastThinkingText,
             partial: snapshot(),
           });
         }
@@ -245,6 +272,7 @@ async function submitWithRetry(
           receivedAnyChunk = true;
           callbacks.onTextChunk(text, fullText);
         },
+        onReasoningChunk: callbacks.onReasoningChunk,
         onTokenSpeed: callbacks.onTokenSpeed,
       }, stepTimeout.signal);
       return {

@@ -38,6 +38,8 @@ export interface DeepSeekTurnRequest {
 /** Callbacks invoked while the DS-web turn streams. */
 export interface DeepSeekTurnCallbacks {
   onTextChunk: (text: string, fullText: string) => void;
+  /** Reasoning/thinking deltas of the current turn (THINK fragments). */
+  onReasoningChunk?: (reasoning: string, fullReasoning: string) => void;
   onTokenSpeed: (progress: ResponseTokenSpeedPayload) => void;
 }
 

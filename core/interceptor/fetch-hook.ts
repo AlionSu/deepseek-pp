@@ -26,6 +26,13 @@ import {
   type DeepSeekSseFrame,
 } from '../deepseek/stream-codec';
 import {
+  AGENT_REPLAY_REGISTRATION_TTL_MS,
+  buildAgentReplaySse,
+  isAgentReplayRegistration,
+  matchAgentReplayRegistration,
+  type AgentReplayRegistration,
+} from './agent-replay';
+import {
   createResponseTokenSpeedTracker,
   type ResponseTokenSpeedPayload,
 } from '../deepseek/stream-metrics';
@@ -66,6 +73,13 @@ interface HookState {
   onResponseComplete: (complete: ResponseCompletePayload) => void;
   onRequestTerminal: (terminal: RequestTerminalPayload) => void;
   onMemoriesUsed: (ids: number[]) => void;
+  /**
+   * Pending agent final-answer replay: the next completion request that
+   * matches (same chat session + byte-equal prompt) is short-circuited with
+   * the synthetic response instead of reaching the server, so the page's
+   * native renderer presents the agent's final turn.
+   */
+  pendingAgentReplay: AgentReplayRegistration | null;
 }
 
 function createEmptyHookState(): HookState {
@@ -81,6 +95,7 @@ function createEmptyHookState(): HookState {
     onResponseComplete: () => {},
     onRequestTerminal: () => {},
     onMemoriesUsed: () => {},
+    pendingAgentReplay: null,
   };
 }
 
@@ -91,6 +106,36 @@ export function updateHookState(partial: Partial<HookState>) {
   if (Object.prototype.hasOwnProperty.call(partial, 'toolDescriptors')) {
     markInitialHookStateReady();
   }
+}
+
+let pendingAgentReplayClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Registers the pending agent final-answer replay. The registration expires
+ * after {@link AGENT_REPLAY_REGISTRATION_TTL_MS} if the matching page request
+ * never arrives (failed input drive, user navigated away), so a stale entry
+ * can never hijack a later request that happens to match by chance.
+ * Invalid shapes are dropped (fail closed at the hook trust boundary).
+ */
+export function registerPendingAgentReplay(registration: unknown): void {
+  if (!isAgentReplayRegistration(registration)) return;
+  if (pendingAgentReplayClearTimer !== null) {
+    clearTimeout(pendingAgentReplayClearTimer);
+  }
+  hookState = { ...hookState, pendingAgentReplay: registration };
+  pendingAgentReplayClearTimer = setTimeout(() => {
+    pendingAgentReplayClearTimer = null;
+    if (hookState.pendingAgentReplay === registration) {
+      hookState = { ...hookState, pendingAgentReplay: null };
+    }
+  }, AGENT_REPLAY_REGISTRATION_TTL_MS);
+}
+
+function consumePendingAgentReplay(body: string): AgentReplayRegistration | null {
+  if (!matchAgentReplayRegistration(body, hookState.pendingAgentReplay)) return null;
+  const registration = hookState.pendingAgentReplay;
+  hookState = { ...hookState, pendingAgentReplay: null };
+  return registration;
 }
 
 export function installFetchHook(): () => void {
@@ -203,6 +248,14 @@ export function hookFetch(): () => void {
       return originalFetch.call(this, input, { ...init, headers: stripBypassHookHeader(init.headers) });
     }
 
+    // Agent final-answer replay: a page completion request that matches the
+    // pending registration is short-circuited with the synthetic response so
+    // the page's native renderer presents the agent's final turn.
+    if (typeof init?.body === 'string') {
+      const replay = consumePendingAgentReplay(init.body);
+      if (replay) return buildAgentReplayResponse(replay, init.body);
+    }
+
     await waitForInitialHookState();
     hookState.onHeadersCaptured(captureDeepSeekClientHeaders(init.headers));
     const originalContext = createRequestContext(init.body);
@@ -278,6 +331,13 @@ export function hookXHR(): () => void {
   XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
     const route = xhrRoutes.get(this);
     if (isDeepSeekAugmentableWebRoute(route) && typeof body === 'string') {
+      // Agent final-answer replay (XHR path): short-circuit the request with
+      // the synthetic response instead of reaching the server.
+      const replay = consumePendingAgentReplay(body);
+      if (replay) {
+        simulateAgentReplayXhrResponse(this, replay, body);
+        return;
+      }
       const xhr = this;
       const sendChatRequest = async () => {
         const originalContext = createRequestContext(body);
@@ -1312,6 +1372,99 @@ function createPassiveDeepSeekStreamState(requestContext: RequestContext): Passi
       cancelled = true;
     },
   };
+}
+
+function readReplayParentMessageId(rawBody: string): number | null {
+  try {
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+    return normalizeDeepSeekMessageId(parsed.parent_message_id);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Builds the synthetic fetch Response for an agent final-answer replay: the
+ * page consumes the same `{p,o,v}` SSE patch stream it would get from the
+ * server, so its native markdown/chart/code-block renderer takes over.
+ */
+function buildAgentReplayResponse(
+  registration: AgentReplayRegistration,
+  rawBody: string,
+): Response {
+  const sse = buildAgentReplaySse(registration, readReplayParentMessageId(rawBody));
+  const bytes = new TextEncoder().encode(sse);
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  }), {
+    status: 200,
+    statusText: 'OK',
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+/**
+ * Simulates a completed XHR for an agent final-answer replay without touching
+ * the network: the instance getters serve the synthetic SSE text and the
+ * standard progress lifecycle events fire so the page's own XHR handler
+ * parses the response exactly like a real stream.
+ */
+function simulateAgentReplayXhrResponse(
+  xhr: XMLHttpRequest,
+  registration: AgentReplayRegistration,
+  rawBody: string,
+): void {
+  const sse = buildAgentReplaySse(registration, readReplayParentMessageId(rawBody));
+  let simulatedReadyState = 2;
+  const overrideProperty = (name: string, value: unknown) => {
+    try {
+      Object.defineProperty(xhr, name, { get: () => value, configurable: true });
+    } catch {
+      // Instance-level override failed (frozen object): fall through and let
+      // the page observe the real (never-started) XHR state; the replay then
+      // simply does not happen for this request.
+    }
+  };
+  try {
+    Object.defineProperty(xhr, 'readyState', { get: () => simulatedReadyState, configurable: true });
+  } catch {
+    return;
+  }
+  overrideProperty('status', 200);
+  overrideProperty('statusText', 'OK');
+  overrideProperty('responseText', sse);
+  overrideProperty('response', sse);
+  overrideProperty('responseURL', '');
+  try {
+    xhr.getResponseHeader = ((name: string) => (
+      String(name ?? '').toLowerCase() === 'content-type' ? 'text/event-stream' : null
+    )) as typeof xhr.getResponseHeader;
+    xhr.getAllResponseHeaders = (() => 'content-type: text/event-stream\r\n') as typeof xhr.getAllResponseHeaders;
+  } catch {
+    // Header overrides are best-effort; the response body getters still serve
+    // the synthetic stream.
+  }
+
+  const fire = (type: string) => {
+    const event = new Event(type);
+    const propertyHandler = (xhr as unknown as Record<string, unknown>)[`on${type}`];
+    if (typeof propertyHandler === 'function') {
+      (propertyHandler as (ev: Event) => void).call(xhr, event);
+    }
+    xhr.dispatchEvent(event);
+  };
+
+  simulatedReadyState = 3;
+  fire('readystatechange');
+  fire('progress');
+  simulatedReadyState = 4;
+  fire('readystatechange');
+  fire('progress');
+  fire('load');
+  fire('loadend');
 }
 
 export async function interceptFetchResponse(

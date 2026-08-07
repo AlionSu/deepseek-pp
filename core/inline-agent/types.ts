@@ -58,6 +58,8 @@ export interface InlineAgentTraceStepRecord {
   index: number;
   status: InlineAgentStepStatus;
   text: string;
+  /** Accumulated reasoning/thinking text of the step, when the backend captured it. */
+  reasoning?: string;
   toolExecutions: ToolExecutionRecord[];
   responseMessageId: number | null;
   collapsed: boolean;
@@ -87,6 +89,13 @@ export interface InlineAgentStreamChunkMsg {
   loopId: string;
   stepIndex: number;
   text: string;
+  fullText: string;
+}
+
+/** Reasoning/thinking deltas of the current step (real content, live). */
+export interface InlineAgentReasoningChunkMsg {
+  loopId: string;
+  stepIndex: number;
   fullText: string;
 }
 

@@ -383,9 +383,7 @@ export function injectInlineAgentStyles(): void {
       border-left: 1px solid var(--dpp-ui-border);
       padding-left: 16px;
     }
-    /* Per-step reasoning note: a folded one-line row like the native
-       ""Thought (N s)" chip, rendered by the stream itself because the
-       continuation turns' thinking text is not retained in the message flow. */
+    /* Reasoning notes: real captured thinking text, expanded on click. */
     .dpp-agent-reasoning-note {
       margin: 2px 0;
     }
@@ -442,20 +440,10 @@ export function injectInlineAgentStyles(): void {
       font-size: 12px;
       line-height: 1.5;
       color: var(--dpp-ui-text-muted);
-    }
-    /* HTML artifact deliverables: the code block plus a sandboxed iframe so
-       the file actually runs inline (Issue #551 follow-up). */
-    .dpp-agent-artifact-preview {
-      margin: 2px 0 6px;
-    }
-    .dpp-agent-artifact-frame {
-      display: block;
-      width: 100%;
-      height: 360px;
-      border: 1px solid var(--dpp-ui-border);
-      border-radius: 8px;
-      background: #fff;
-      box-sizing: border-box;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 240px;
+      overflow-y: auto;
     }
     .dpp-agent-starting {
       display: flex;
@@ -639,6 +627,7 @@ export function mountAgentNarration(
   step: HTMLElement,
   stream: HTMLElement,
   labels?: Partial<InlineAgentRendererLabels>,
+  reasoningText?: string,
 ): void {
   if (step.parentElement === stream) return;
   sealCurrentToolGroup(stream);
@@ -651,7 +640,7 @@ export function mountAgentNarration(
       break;
     }
   }
-  const note = createAgentReasoningNoteElement(stepIndex, labels);
+  const note = createAgentReasoningNoteElement(stepIndex, labels, reasoningText);
   if (insertBefore) {
     stream.insertBefore(note, insertBefore);
     stream.insertBefore(step, insertBefore);
@@ -663,13 +652,14 @@ export function mountAgentNarration(
 
 /**
  * Folded per-step reasoning note (default collapsed), mirroring the native
- * "Thought (N s)" row. The continuation turns' thinking text is not
- * retained in the message flow, so the expanded body states that plainly
- * instead of faking content.
+ * "Thought (N s)" row. The note body carries the real captured thinking text
+ * when the backend delivered it; without it the body states plainly that the
+ * step had no retained thinking instead of faking content.
  */
 export function createAgentReasoningNoteElement(
   stepNumber: number,
   labels?: Partial<InlineAgentRendererLabels>,
+  reasoningText?: string,
 ): HTMLElement {
   const note = document.createElement('div');
   note.className = 'dpp-agent-reasoning-note';
@@ -698,7 +688,7 @@ export function createAgentReasoningNoteElement(
   const body = document.createElement('div');
   body.className = 'dpp-agent-reasoning-note-body';
   body.hidden = true;
-  body.textContent = labels?.reasoningNotPersisted
+  body.textContent = reasoningText ?? labels?.reasoningNotPersisted
     ?? 'The thinking process for this step is not retained in the message stream.';
 
   toggle.addEventListener('click', () => {
@@ -710,6 +700,33 @@ export function createAgentReasoningNoteElement(
   note.appendChild(toggle);
   note.appendChild(body);
   return note;
+}
+
+/**
+ * Fills the step's folded reasoning note with the real captured thinking text
+ * (replacing the "not retained" placeholder). Idempotent: the note is created
+ * on demand and the body text is replaced in place, so repeated updates from
+ * reasoning deltas are safe. The note stays collapsed; only the stored body
+ * changes.
+ */
+export function updateAgentReasoningNoteElement(note: HTMLElement, reasoningText: string): void {
+  if (!reasoningText) return;
+  const body = note.querySelector<HTMLElement>('.dpp-agent-reasoning-note-body');
+  if (!body) return;
+  if (body.textContent === reasoningText) return;
+  body.textContent = reasoningText;
+  // The note was created with the placeholder; once real content exists the
+  // collapsed toggle still opens the real text, so nothing else changes.
+}
+
+/**
+ * Finds the folded reasoning note mounted right before a narration segment.
+ */
+export function getAgentReasoningNote(step: HTMLElement): HTMLElement | null {
+  const previous = step.previousElementSibling;
+  return previous?.classList.contains('dpp-agent-reasoning-note')
+    ? (previous as HTMLElement)
+    : null;
 }
 
 function sealCurrentToolGroup(stream: HTMLElement): void {
@@ -764,95 +781,15 @@ export function updateStepStatus(step: HTMLElement, status: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Agent-stream text rendering: the narration body is markdown, with artifact
-// deliverable blocks rendered structurally so HTML files can actually run
-// inline. `convertInlineAgentArtifactBlocks` emits "**filename** + 4-backtick
-// fenced block" (open fence while streaming); this parser recognizes exactly
-// that deterministic shape and swaps the code block for the same markup plus
-// a preview placeholder that {@link hydrateAgentArtifactPreviews} fills with a
-// sandboxed iframe once the text is stable.
+// Agent-stream text rendering: the narration body is plain markdown. Artifact
+// deliverables arrive as fenced code blocks (converted by
+// `convertInlineAgentArtifactBlocks` in display-text), and the DeepSeek page's
+// own native renderer takes over their presentation (chart cards, runnable
+// code blocks) on the native final-answer message — the plugin renders no
+// artifact previews of its own.
 // ---------------------------------------------------------------------------
-// NOTE: no /m flag — `$` must mean "end of the whole text" so the lazy
-// content match cannot stop at an arbitrary line end. `^` is replaced by
-// `(?:^|\n)` so blocks can appear mid-text, and the closing fence matches a
-// full line via `(?=\n|$)` without consuming the following newline.
-const ARTIFACT_DISPLAY_BLOCK_RE = /(?:^|\n)\*\*([^*\n`]+)\*\*\n{2,}(`{3,})([^\n`]*)\n([\s\S]*?)(?:\n\2[ \t]*(?=\n|$)|$)/g;
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-/**
- * Renders agent-stream narration text: ordinary markdown, except artifact
- * blocks (filename + fenced code) are emitted as filename + `<pre>` + a
- * preview placeholder carrying the raw content in a `<template>`. Only blocks
- * whose header looks like a real file name (the conversion output always
- * carries one) get the structured treatment — a plain `**label**` paragraph
- * above a code block stays ordinary markdown.
- */
 export function renderAgentStreamText(text: string): string {
-  if (!text.includes('**')) return renderInlineMarkdown(text);
-  let output = '';
-  let cursor = 0;
-  let matched = false;
-  ARTIFACT_DISPLAY_BLOCK_RE.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = ARTIFACT_DISPLAY_BLOCK_RE.exec(text)) !== null) {
-    matched = true;
-    output += renderInlineMarkdown(text.slice(cursor, match.index));
-    const [, filename, , lang, content] = match;
-    if (filename.includes('.')) {
-      output += renderArtifactBlockHtml(filename, lang, content);
-    } else {
-      output += renderInlineMarkdown(match[0]);
-    }
-    cursor = match.index + match[0].length;
-  }
-  if (!matched) return renderInlineMarkdown(text);
-  output += renderInlineMarkdown(text.slice(cursor));
-  return output;
-}
-
-function renderArtifactBlockHtml(filename: string, lang: string, content: string): string {
-  const safeFilename = escapeHtml(filename);
-  // `<template>` children are not rendered; `textContent` reads back the
-  // original (entity-decoded) content, so the hydrated iframe gets the exact
-  // file bytes without double-decoding.
-  return `<p><strong>${safeFilename}</strong></p>`
-    + `<pre><code>${escapeHtml(content)}</code></pre>`
-    + `<div class="dpp-agent-artifact-preview" data-dpp-artifact-filename="${safeFilename}">`
-    + `<template class="dpp-agent-artifact-content">${escapeHtml(content)}</template></div>`;
-}
-
-function isHtmlArtifactFilename(filename: string): boolean {
-  return /\.(?:html?|xhtml)$/i.test(filename);
-}
-
-/**
- * Fills every artifact preview placeholder with a sandboxed iframe running the
- * delivered file inline (HTML deliverables only; other languages keep their
- * code block). Idempotent: an existing iframe is never replaced, so hydration
- * is safe to run after every stabilization point.
- */
-export function hydrateAgentArtifactPreviews(stream: HTMLElement): void {
-  for (const preview of stream.querySelectorAll<HTMLElement>('.dpp-agent-artifact-preview')) {
-    if (preview.querySelector('iframe')) continue;
-    const filename = preview.getAttribute('data-dpp-artifact-filename') ?? '';
-    if (!isHtmlArtifactFilename(filename)) continue;
-    const template = preview.querySelector<HTMLTemplateElement>('template.dpp-agent-artifact-content');
-    const content = template?.content.textContent ?? '';
-    if (!content) continue;
-    const frame = document.createElement('iframe');
-    frame.className = 'dpp-agent-artifact-frame';
-    frame.setAttribute('sandbox', 'allow-scripts');
-    frame.setAttribute('title', filename);
-    frame.srcdoc = content;
-    preview.appendChild(frame);
-  }
+  return renderInlineMarkdown(text);
 }
 
 // ---------------------------------------------------------------------------

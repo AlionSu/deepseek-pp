@@ -1,9 +1,11 @@
 import {
+  registerPendingAgentReplay,
   updateHookState,
   type RequestTerminalPayload,
   type ResponseCompletePayload,
   type ResponseTokenSpeedPayload,
 } from '../core/interceptor/fetch-hook';
+import { isAgentReplayRegistration } from '../core/interceptor/agent-replay';
 import { initSkillPopup, stopSkillPopup } from '../core/ui/skill-popup';
 import type {
   ToolCall,
@@ -40,6 +42,13 @@ export default defineContentScript({
       reportError(message, error) {
         if (error === undefined) console.error(message);
         else console.error(message, error);
+      },
+      onRegisterAgentReplay(payload) {
+        // The bridge schema validated the payload shape; the hook re-validates
+        // at its own trust boundary (fail closed on invalid registrations).
+        if (isAgentReplayRegistration(payload)) {
+          registerPendingAgentReplay(payload);
+        }
       },
     });
     const navigation = createMainWorldNavigationController({

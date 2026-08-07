@@ -52,6 +52,7 @@ import {
 } from '../prompt';
 import type {
   InlineAgentStartPayload,
+  InlineAgentReasoningChunkMsg,
   InlineAgentStepCompleteMsg,
   InlineAgentStreamChunkMsg,
   InlineAgentToolDetectedMsg,
@@ -116,6 +117,8 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
   let lastStepCompleted = false; // whether the current step already posted STEP_COMPLETE
   let stepText = ''; // current turn's visible text
   let lastPostedText = '';
+  let stepReasoning = ''; // current step's accumulated reasoning text (per-turn thinking deltas)
+  let lastPostedReasoning = '';
   let finalizeDone = false;
   let resolvedFinalText: string | null = null;
   let stopNotice: string | null = null;
@@ -140,6 +143,17 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
       text: '',
       fullText,
     } satisfies InlineAgentStreamChunkMsg);
+  };
+
+  const postReasoningChunk = (nextReasoning: string) => {
+    const fullText = clampStreamEventText(nextReasoning);
+    if (fullText === lastPostedReasoning) return;
+    lastPostedReasoning = fullText;
+    post('AGENT_REASONING_CHUNK', {
+      loopId,
+      stepIndex,
+      fullText,
+    } satisfies InlineAgentReasoningChunkMsg);
   };
 
   const postStepComplete = () => {
@@ -380,16 +394,21 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
           nudge.pendingTurn = false;
         } else {
           lastStepCompleted = false;
+          stepReasoning = '';
+          lastPostedReasoning = '';
           post('AGENT_STEP_STARTED', { loopId, stepIndex });
         }
         break;
       case 'message_update': {
-        const delta = event.assistantMessageEvent.type === 'text_delta'
-          ? event.assistantMessageEvent.delta
-          : '';
+        const assistantEvent = event.assistantMessageEvent;
+        const delta = assistantEvent.type === 'text_delta' ? assistantEvent.delta : '';
         if (delta) {
           stepText += delta;
           postStreamChunk(stepText);
+        }
+        if (assistantEvent.type === 'thinking_delta' && assistantEvent.delta) {
+          stepReasoning += assistantEvent.delta;
+          postReasoningChunk(stepReasoning);
         }
         break;
       }

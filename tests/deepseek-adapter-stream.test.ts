@@ -131,6 +131,37 @@ describe('DeepSeek web adapter streaming', () => {
     expect(final?.tokensPerSecond).toBeCloseTo(1.5, 5);
   });
 
+  it('emits reasoning chunks for THINK fragments separately from text', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => createSseResponse([
+      'data: {"v":{"response":{"message_id":6,"thinking_enabled":true,"fragments":[{"id":2,"type":"THINK","content":"我"}]}}}',
+      'data: {"v":"们"}',
+      'data: {"p":"response/fragments","o":"APPEND","v":[{"id":3,"type":"RESPONSE","content":"答"}]}',
+      'data: {"v":"案"}',
+      'data: {"p":"response/status","v":"FINISHED"}',
+    ].join('\n\n'))));
+
+    const chunks: string[] = [];
+    const fullTexts: string[] = [];
+    const reasoningChunks: string[] = [];
+    const reasoningFulls: string[] = [];
+    const turn = await submitPromptStreaming(createSubmitInput(), {
+      retainAssistantText: false,
+      onTextChunk(text, fullText) {
+        chunks.push(text);
+        fullTexts.push(fullText);
+      },
+      onReasoningChunk(reasoning, fullReasoning) {
+        reasoningChunks.push(reasoning);
+        reasoningFulls.push(fullReasoning);
+      },
+    });
+
+    expect(chunks.join('')).toBe('答案');
+    expect(reasoningChunks.join('')).toBe('我们');
+    expect(reasoningFulls.at(-1)).toBe('我们');
+    expect(turn.assistantText).toBe('');
+  });
+
   it('creates PoW headers for the requested DeepSeek target path', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({
       data: {
