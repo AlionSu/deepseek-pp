@@ -8,7 +8,22 @@ export function renderInlineMarkdown(text: string): string {
     // (Issue: agent panel blank-line rendering).
     let html = escapeHtml(text).replace(/\r\n?/g, '\n');
 
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
+    // Fenced code blocks with variable fence lengths (```..`````). Anchored
+    // at line starts so a 4-backtick run inside a 3-backtick block is content,
+    // not the closing fence; the closing fence must repeat the opener's exact
+    // run length (standard markdown). Artifact deliverables (Issue #551) use
+    // 4-backtick fences so their content may contain ``` freely.
+    html = html.replace(/^(`{3,})(\w*)\n([\s\S]*?)^\1[ \t]*$/gm, (_match, _fence, _lang, code) => {
+      const token = `@@DPP_CODE_BLOCK_${codeBlocks.length}@@`;
+      codeBlocks.push(`<pre><code>${code}</code></pre>`);
+      return token;
+    });
+    // An unterminated trailing fence (streaming cut, persisted text clamped
+    // mid-block) still renders as a code block instead of leaking raw
+    // backticks: close it at the end of the text. The truncation honesty for
+    // clamped content comes from clampText's own `...[truncated]` marker,
+    // which lands inside the block and renders as its last line.
+    html = html.replace(/^(`{3,})(\w*)\n([\s\S]*)$/m, (_match, _fence, _lang, code) => {
       const token = `@@DPP_CODE_BLOCK_${codeBlocks.length}@@`;
       codeBlocks.push(`<pre><code>${code}</code></pre>`);
       return token;

@@ -95,6 +95,16 @@ const lineAllowlist = [
     reason: 'DeepSeek host reasoning-label detection across locales',
   },
   {
+    path: 'core/inline-agent/renderer.ts',
+    includes: 'REASONING_HOST_TEXT_RE',
+    reason: 'DeepSeek host reasoning-label detection for auto-folding completed reasoning blocks',
+  },
+  {
+    path: 'core/inline-agent/renderer.ts',
+    includes: 'REASONING_COMPLETED_TEXT_RE',
+    reason: 'DeepSeek host completed-reasoning label detection for auto-folding reasoning blocks',
+  },
+  {
     path: 'scripts/automation-contract-smoke.mjs',
     includes: "['Agent', '任务']",
     reason: 'negative assertion checks README public-doc leakage fragments',

@@ -1,12 +1,10 @@
 import { renderInlineMarkdown } from './markdown';
+import { summarizeInlineAgentToolParams } from './display-text';
 import { injectInjectedThemeStyles } from '../ui/injected-theme';
 import { INLINE_AGENT_MAX_STEPS } from './types';
 import type { ToolExecutionRecord, ToolResult } from '../types';
 
 const AGENT_STEP_STYLE_ID = 'dpp-inline-agent-css';
-const TOOL_SUMMARY_MAX_CHARS = 600;
-/** Distance from the bottom within which streaming output keeps auto-following. */
-const STREAM_SCROLL_FOLLOW_TOLERANCE_PX = 24;
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons (fill="currentColor" so each icon inherits the themed color
@@ -31,20 +29,42 @@ function nextAgentDomId(prefix: string): string {
 }
 
 export interface InlineAgentRendererLabels {
-  step: (stepNumber: number) => string;
-  streaming: string;
-  executingTools: string;
   starting: string;
   stop: string;
-  process: string;
-  tools: string;
-  results: string;
   running: (stepNumber: number, toolCount: number, elapsedSeconds: number) => string;
-  toolOk: string;
-  toolError: string;
   consoleComplete: (totalSteps: number, totalTools: number, elapsedSeconds: number) => string;
   consolePaused: (totalSteps: number, totalTools: number, elapsedSeconds: number) => string;
   consoleError: (totalSteps: number, totalTools: number, elapsedSeconds: number) => string;
+  toolOk: string;
+  toolError: string;
+  /** Tool-group header, e.g. "Called 3 tools" (Codex-style work log). */
+  toolGroup: (count: number) => string;
+  /** Reasoning-step note header, e.g. "Thought · step 3" (folded by default). */
+  reasoningStep: (stepNumber: number) => string;
+  /** Explanation shown when a folded reasoning note is expanded. */
+  reasoningNotPersisted: string;
+}
+
+// ---------------------------------------------------------------------------
+// Per-stream bookkeeping. The stream is a time-ordered sequence of narration
+// segments and tool groups; tool entries are appended to the CURRENT group
+// and consecutive tool calls without narration between them stay in one
+// group. A narration segment seals the current group (and collapses it unless
+// the user toggled it), so groups only span textless steps.
+// ---------------------------------------------------------------------------
+interface AgentStreamState {
+  currentToolGroup: HTMLElement | null;
+  pendingRowsByStep: Map<number, HTMLElement[]>;
+}
+const agentStreamStates = new WeakMap<HTMLElement, AgentStreamState>();
+
+function getAgentStreamState(stream: HTMLElement): AgentStreamState {
+  let state = agentStreamStates.get(stream);
+  if (!state) {
+    state = { currentToolGroup: null, pendingRowsByStep: new Map() };
+    agentStreamStates.set(stream, state);
+  }
+  return state;
 }
 
 export function injectInlineAgentStyles(): void {
@@ -54,252 +74,65 @@ export function injectInlineAgentStyles(): void {
   const style = document.createElement('style');
   style.id = AGENT_STEP_STYLE_ID;
   style.textContent = `
+    /* The agent run renders as a lightweight work-log stream inside the
+       assistant message (Issue #551 redesign): no card, no console shell,
+       no answer-area split. A one-line status row, the narration body stream
+       (never folded or truncated) and collapsed single-line tool entries. */
     .dpp-agent-container {
       position: relative;
-      margin-top: 12px;
-      padding-left: 36px;
-      border: 1px solid var(--dpp-ui-border);
-      border-radius: 12px;
-      background: var(--dpp-ui-surface);
+      margin-top: 10px;
       color: var(--dpp-ui-text);
     }
-    .dpp-agent-container::before {
-      content: '';
-      position: absolute;
-      left: 16px;
-      top: 12px;
-      bottom: 12px;
-      width: 1px;
-      background: var(--dpp-ui-border);
-    }
     .dpp-agent-container[data-restored="true"] {
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
-    .dpp-agent-console-header {
+    .dpp-agent-status-line {
       display: flex;
       align-items: center;
-      gap: 4px;
-      border-bottom: 1px solid var(--dpp-ui-border);
-      border-radius: 11px 11px 0 0;
-      background: var(--dpp-ui-surface-muted);
-    }
-    .dpp-agent-console-toggle {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-      padding: 8px 10px;
-      border: none;
-      background: transparent;
+      gap: 6px;
+      padding: 2px 0;
       font-size: 12px;
+      line-height: 1.5;
       color: var(--dpp-ui-text-muted);
-      cursor: pointer;
-      user-select: none;
-      text-align: left;
     }
-    .dpp-agent-console-toggle:focus-visible {
-      outline: 2px solid var(--dpp-ui-accent);
-      outline-offset: -2px;
-      border-radius: 11px 0 0 0;
-    }
-    .dpp-agent-console-dot {
+    .dpp-agent-status-dot {
       flex: none;
-      width: 14px;
-      height: 14px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      background-repeat: no-repeat;
-      background-position: center;
-      background-size: 14px 14px;
+      background: var(--dpp-ui-text-subtle);
     }
-    .dpp-agent-container[data-console-phase="starting"] .dpp-agent-console-dot,
-    .dpp-agent-container[data-console-phase="running"] .dpp-agent-console-dot {
-      background-color: var(--dpp-ui-accent);
+    .dpp-agent-container[data-console-phase="starting"] .dpp-agent-status-dot,
+    .dpp-agent-container[data-console-phase="running"] .dpp-agent-status-dot {
+      background: var(--dpp-ui-accent);
       animation: dpp-agent-console-pulse 1.1s ease-in-out infinite;
     }
-    .dpp-agent-container[data-console-phase="complete"] .dpp-agent-console-dot {
-      background-image: ${ICON_CHECK};
-      color: var(--dpp-ui-success);
+    .dpp-agent-container[data-console-phase="complete"] .dpp-agent-status-dot {
+      background: var(--dpp-ui-success);
     }
-    .dpp-agent-container[data-console-phase="paused"] .dpp-agent-console-dot {
-      background-color: var(--dpp-ui-text-subtle);
+    .dpp-agent-container[data-console-phase="paused"] .dpp-agent-status-dot {
+      background: var(--dpp-ui-text-subtle);
     }
-    .dpp-agent-container[data-console-phase="error"] .dpp-agent-console-dot {
-      background-image: ${ICON_CROSS};
-      color: var(--dpp-ui-error);
+    .dpp-agent-container[data-console-phase="error"] .dpp-agent-status-dot {
+      background: var(--dpp-ui-error);
     }
     @keyframes dpp-agent-console-pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
     }
-    .dpp-agent-console-status {
+    .dpp-agent-status-text {
       flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .dpp-agent-console-chevron {
-      flex: none;
-      width: 12px;
-      height: 12px;
-      background-image: ${ICON_CHEVRON_DOWN};
-      background-repeat: no-repeat;
-      background-position: center;
-      background-size: 12px 12px;
-      color: var(--dpp-ui-text-subtle);
-      transition: transform 0.2s ease;
-    }
-    .dpp-agent-container[data-console-collapsed="true"] .dpp-agent-console-chevron {
-      transform: rotate(-90deg);
-    }
-    .dpp-agent-console-body {
-      padding: 4px 0 8px;
-    }
-    .dpp-agent-container[data-console-collapsed="true"] .dpp-agent-console-body {
-      display: none;
-    }
-    .dpp-agent-reasoning-adopted {
-      margin-left: 16px;
-      border-left: 1px solid var(--dpp-ui-border);
-      padding-left: 16px;
-    }
-    .dpp-agent-step {
-      position: relative;
-      margin-bottom: 8px;
-      border: 1px solid var(--dpp-ui-border);
-      border-radius: 12px;
-      background: var(--dpp-ui-surface);
-      color: var(--dpp-ui-text);
-    }
-    .dpp-agent-step::before {
-      content: '';
-      position: absolute;
-      left: -24px;
-      top: 13px;
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--dpp-ui-surface);
-      border: 1px solid var(--dpp-ui-border);
-    }
-    .dpp-agent-step[data-status="streaming"] {
-      border-color: var(--dpp-ui-accent);
-    }
-    .dpp-agent-step[data-status="streaming"]::before {
-      border-color: var(--dpp-ui-accent);
-      background: var(--dpp-ui-accent);
-    }
-    .dpp-agent-step[data-status="executing_tools"] {
-      border-color: var(--dpp-ui-warning);
-    }
-    .dpp-agent-step[data-status="executing_tools"]::before {
-      border-color: var(--dpp-ui-warning);
-      background: var(--dpp-ui-warning);
-    }
-    .dpp-agent-step[data-status="complete"]::before {
-      border-color: var(--dpp-ui-success);
-      background: var(--dpp-ui-success);
-    }
-    .dpp-agent-step[data-status="error"] {
-      border-color: var(--dpp-ui-error);
-    }
-    .dpp-agent-step[data-status="error"]::before {
-      border-color: var(--dpp-ui-error);
-      background: var(--dpp-ui-error);
-    }
-    .dpp-agent-step-header {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      background: var(--dpp-ui-surface-muted);
-      border-radius: 11px 11px 0 0;
-    }
-    .dpp-agent-step-toggle {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 8px;
       min-width: 0;
-      padding: 6px 10px;
-      border: none;
-      background: transparent;
-      font-size: 12px;
-      color: var(--dpp-ui-text-muted);
-      cursor: pointer;
-      user-select: none;
-      text-align: left;
-    }
-    .dpp-agent-step-toggle:focus-visible {
-      outline: 2px solid var(--dpp-ui-accent);
-      outline-offset: -2px;
-      border-radius: 11px 0 0 0;
-    }
-    .dpp-agent-step-indicator {
-      flex: none;
-      font-weight: 600;
-      color: var(--dpp-ui-accent);
-    }
-    .dpp-agent-step-dot {
-      flex: none;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background-repeat: no-repeat;
-      background-position: center;
-      background-size: 14px 14px;
-    }
-    .dpp-agent-step[data-status="streaming"] .dpp-agent-step-dot {
-      background-color: var(--dpp-ui-accent);
-      animation: dpp-agent-step-pulse 1.1s ease-in-out infinite;
-    }
-    .dpp-agent-step[data-status="executing_tools"] .dpp-agent-step-dot {
-      background-image: ${ICON_GEAR};
-      color: var(--dpp-ui-warning);
-    }
-    .dpp-agent-step[data-status="complete"] .dpp-agent-step-dot {
-      background-image: ${ICON_CHECK};
-      color: var(--dpp-ui-success);
-    }
-    .dpp-agent-step[data-status="error"] .dpp-agent-step-dot {
-      background-image: ${ICON_CROSS};
-      color: var(--dpp-ui-error);
-    }
-    .dpp-agent-step[data-status="interrupted"] .dpp-agent-step-dot {
-      background-color: var(--dpp-ui-text-subtle);
-    }
-    @keyframes dpp-agent-step-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .dpp-agent-step[data-status="streaming"] .dpp-agent-step-dot {
-        animation: none;
-      }
-    }
-    .dpp-agent-step-status {
-      flex: 1;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .dpp-agent-step-chevron {
-      flex: none;
-      width: 12px;
-      height: 12px;
-      background-image: ${ICON_CHEVRON_DOWN};
-      background-repeat: no-repeat;
-      background-position: center;
-      background-size: 12px 12px;
-      color: var(--dpp-ui-text-subtle);
-      transition: transform 0.2s ease;
-    }
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-chevron {
-      transform: rotate(-90deg);
+    .dpp-agent-container[data-console-phase="error"] .dpp-agent-status-text {
+      color: var(--dpp-ui-error);
     }
     .dpp-agent-stop-btn {
       flex: none;
-      margin-right: 8px;
-      padding: 3px 10px;
+      padding: 2px 9px;
       font-size: 12px;
       border: 1px solid var(--dpp-ui-error);
       border-radius: 6px;
@@ -314,28 +147,18 @@ export function injectInlineAgentStyles(): void {
       outline: 2px solid var(--dpp-ui-error);
       outline-offset: 1px;
     }
-    .dpp-agent-step-section-label {
-      padding: 8px 10px 0;
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      color: var(--dpp-ui-text-muted);
+    /* Narration body stream: normal message typography, never folded. */
+    .dpp-agent-stream {
+      /* Pure flow container: segments stack in time order, no card shell. */
     }
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-section-label {
-      display: none;
-    }
-    .dpp-agent-step-section-label[hidden] {
-      display: none;
+    .dpp-agent-narration {
+      margin: 4px 0 6px;
     }
     .dpp-agent-step-body {
-      padding: 4px 10px 8px;
       font-size: 14px;
-      line-height: 1.6;
+      line-height: 1.7;
       color: var(--dpp-ui-text);
       word-break: break-word;
-      max-height: 300px;
-      overflow-y: auto;
-      transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
     }
     .dpp-agent-step-body:empty {
       display: none;
@@ -401,43 +224,81 @@ export function injectInlineAgentStyles(): void {
       font-weight: 600;
       color: var(--dpp-ui-text-muted);
     }
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-body,
-    .dpp-agent-step[data-collapsed="true"] .dpp-agent-step-results {
-      max-height: 0;
-      padding: 0 10px;
-      opacity: 0;
-      overflow: hidden;
+    /* Tool groups: one-line low-emphasis headers over single-line tool rows. */
+    .dpp-agent-tool-group {
+      margin: 2px 0;
     }
-    .dpp-agent-step-results {
-      transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
-    }
-    .dpp-agent-step-tools {
+    .dpp-agent-tool-group-toggle {
       display: flex;
-      flex-direction: column;
-      gap: 4px;
-      padding: 4px 10px 8px;
-      font-size: 13px;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      padding: 2px 0;
+      border: none;
+      background: transparent;
+      font-size: 12px;
       color: var(--dpp-ui-text-muted);
+      cursor: pointer;
+      user-select: none;
+      text-align: left;
     }
-    .dpp-agent-step-tools:empty {
+    .dpp-agent-tool-group-toggle:focus-visible {
+      outline: 2px solid var(--dpp-ui-accent);
+      outline-offset: -2px;
+      border-radius: 4px;
+    }
+    .dpp-agent-tool-group-icon {
+      flex: none;
+      width: 12px;
+      height: 12px;
+      background-image: ${ICON_GEAR};
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 12px 12px;
+      color: var(--dpp-ui-text-subtle);
+    }
+    .dpp-agent-tool-group-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dpp-agent-tool-group-chevron {
+      flex: none;
+      width: 12px;
+      height: 12px;
+      background-image: ${ICON_CHEVRON_DOWN};
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 12px 12px;
+      color: var(--dpp-ui-text-subtle);
+      transition: transform 0.2s ease;
+    }
+    .dpp-agent-tool-group[data-collapsed="true"] .dpp-agent-tool-group-chevron {
+      transform: rotate(-90deg);
+    }
+    .dpp-agent-tool-group[data-collapsed="true"] .dpp-agent-tool-group-items {
       display: none;
     }
-    .dpp-agent-step-tool-item {
-      border: 1px solid var(--dpp-ui-border-muted);
-      border-radius: 8px;
-      background: var(--dpp-ui-surface-muted);
-      overflow: hidden;
+    .dpp-agent-tool-group-items {
+      display: flex;
+      flex-direction: column;
+    }
+    /* Single-line tool entries (small, gray, left icon). */
+    .dpp-agent-tool-item {
+      min-width: 0;
     }
     .dpp-agent-tool-toggle {
       display: flex;
       align-items: center;
       gap: 6px;
       width: 100%;
-      padding: 5px 8px;
+      padding: 1px 0;
       border: none;
       background: transparent;
-      font-size: 13px;
-      color: var(--dpp-ui-text);
+      font-size: 12px;
+      color: var(--dpp-ui-text-muted);
       cursor: pointer;
       user-select: none;
       text-align: left;
@@ -445,43 +306,62 @@ export function injectInlineAgentStyles(): void {
     .dpp-agent-tool-toggle:focus-visible {
       outline: 2px solid var(--dpp-ui-accent);
       outline-offset: -2px;
+      border-radius: 4px;
     }
     .dpp-agent-tool-state-icon {
       flex: none;
-      width: 13px;
-      height: 13px;
+      width: 12px;
+      height: 12px;
       background-repeat: no-repeat;
       background-position: center;
-      background-size: 13px 13px;
+      background-size: 12px 12px;
     }
-    .dpp-agent-step-tool-item.ok .dpp-agent-tool-state-icon {
+    .dpp-agent-tool-item[data-tool-status="ok"] .dpp-agent-tool-state-icon {
       background-image: ${ICON_CHECK};
       color: var(--dpp-ui-success);
     }
-    .dpp-agent-step-tool-item.err .dpp-agent-tool-state-icon {
+    .dpp-agent-tool-item[data-tool-status="err"] .dpp-agent-tool-state-icon {
       background-image: ${ICON_CROSS};
       color: var(--dpp-ui-error);
     }
+    .dpp-agent-tool-item[data-tool-status="pending"] .dpp-agent-tool-state-icon {
+      background-color: var(--dpp-ui-accent);
+      border-radius: 50%;
+      animation: dpp-agent-console-pulse 1.1s ease-in-out infinite;
+    }
+    .dpp-agent-tool-item[data-tool-status="interrupted"] .dpp-agent-tool-state-icon {
+      background-color: var(--dpp-ui-text-subtle);
+      border-radius: 50%;
+    }
     .dpp-agent-tool-name {
+      flex: none;
+      max-width: 45%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       font-weight: 600;
+      color: var(--dpp-ui-text);
+    }
+    .dpp-agent-tool-param {
+      flex: 1;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .dpp-agent-tool-state {
       flex: none;
-      margin-left: auto;
-      font-size: 12px;
-      color: var(--dpp-ui-text-muted);
+      font-size: 11px;
+      color: var(--dpp-ui-text-subtle);
     }
     .dpp-agent-tool-chevron {
       flex: none;
-      width: 12px;
-      height: 12px;
+      width: 10px;
+      height: 10px;
       background-image: ${ICON_CHEVRON_RIGHT};
       background-repeat: no-repeat;
       background-position: center;
-      background-size: 12px 12px;
+      background-size: 10px 10px;
       color: var(--dpp-ui-text-subtle);
       transition: transform 0.15s ease;
     }
@@ -489,9 +369,8 @@ export function injectInlineAgentStyles(): void {
       transform: rotate(90deg);
     }
     .dpp-agent-tool-summary {
-      padding: 6px 8px 8px;
-      border-top: 1px solid var(--dpp-ui-border-muted);
-      font-size: 13px;
+      padding: 2px 0 4px 18px;
+      font-size: 12px;
       line-height: 1.5;
       color: var(--dpp-ui-text-muted);
       white-space: pre-wrap;
@@ -499,60 +378,90 @@ export function injectInlineAgentStyles(): void {
       max-height: 160px;
       overflow-y: auto;
     }
-    .dpp-agent-step-tool-result {
-      margin: 4px 0;
-      border: 1px solid var(--dpp-ui-border);
-      border-radius: 8px;
-      background: var(--dpp-ui-surface-muted);
-      font-size: 13px;
+    .dpp-agent-reasoning-adopted {
+      margin-left: 16px;
+      border-left: 1px solid var(--dpp-ui-border);
+      padding-left: 16px;
     }
-    .dpp-agent-step-tool-result summary {
-      position: relative;
-      padding: 4px 8px 4px 24px;
+    /* Per-step reasoning note: a folded one-line row like the native
+       ""Thought (N s)" chip, rendered by the stream itself because the
+       continuation turns' thinking text is not retained in the message flow. */
+    .dpp-agent-reasoning-note {
+      margin: 2px 0;
+    }
+    .dpp-agent-reasoning-note-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      padding: 2px 0;
+      border: none;
+      background: transparent;
+      font-size: 12px;
+      color: var(--dpp-ui-text-muted);
       cursor: pointer;
-      color: var(--dpp-ui-text);
-      word-break: break-word;
-      list-style: none;
+      user-select: none;
+      text-align: left;
     }
-    .dpp-agent-step-tool-result summary::-webkit-details-marker {
-      display: none;
+    .dpp-agent-reasoning-note-toggle:focus-visible {
+      outline: 2px solid var(--dpp-ui-accent);
+      outline-offset: -2px;
+      border-radius: 4px;
     }
-    .dpp-agent-step-tool-result summary::before {
-      content: '';
-      position: absolute;
-      left: 8px;
-      top: 50%;
-      transform: translateY(-50%);
+    .dpp-agent-reasoning-note-icon {
+      flex: none;
       width: 12px;
       height: 12px;
+      border-radius: 50%;
+      background: var(--dpp-ui-accent);
+      opacity: 0.55;
+    }
+    .dpp-agent-reasoning-note-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dpp-agent-reasoning-note-chevron {
+      flex: none;
+      width: 12px;
+      height: 12px;
+      background-image: ${ICON_CHEVRON_DOWN};
       background-repeat: no-repeat;
       background-position: center;
       background-size: 12px 12px;
+      color: var(--dpp-ui-text-subtle);
+      transition: transform 0.15s ease;
     }
-    .dpp-agent-step-tool-result summary.ok::before {
-      background-image: ${ICON_CHECK};
-      color: var(--dpp-ui-success);
+    .dpp-agent-reasoning-note-toggle[aria-expanded="true"] .dpp-agent-reasoning-note-chevron {
+      transform: rotate(180deg);
     }
-    .dpp-agent-step-tool-result summary.err::before {
-      background-image: ${ICON_CROSS};
-      color: var(--dpp-ui-error);
-    }
-    .dpp-agent-step-tool-result-body {
-      padding: 0 8px 6px;
+    .dpp-agent-reasoning-note-body {
+      padding: 2px 0 4px 18px;
+      font-size: 12px;
+      line-height: 1.5;
       color: var(--dpp-ui-text-muted);
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 180px;
-      overflow-y: auto;
     }
-    .dpp-agent-step-tool-result-body .dpp-tool-result-line {
-      margin: 2px 0;
+    /* HTML artifact deliverables: the code block plus a sandboxed iframe so
+       the file actually runs inline (Issue #551 follow-up). */
+    .dpp-agent-artifact-preview {
+      margin: 2px 0 6px;
+    }
+    .dpp-agent-artifact-frame {
+      display: block;
+      width: 100%;
+      height: 360px;
+      border: 1px solid var(--dpp-ui-border);
+      border-radius: 8px;
+      background: #fff;
+      box-sizing: border-box;
     }
     .dpp-agent-starting {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 10px;
+      padding: 6px 0;
       font-size: 13px;
       color: var(--dpp-ui-text-muted);
     }
@@ -570,72 +479,17 @@ export function injectInlineAgentStyles(): void {
       to { transform: rotate(360deg); }
     }
     @media (prefers-reduced-motion: reduce) {
-      .dpp-agent-starting::before {
+      .dpp-agent-starting::before,
+      .dpp-agent-container[data-console-phase="starting"] .dpp-agent-status-dot,
+      .dpp-agent-container[data-console-phase="running"] .dpp-agent-status-dot,
+      .dpp-agent-tool-item[data-tool-status="pending"] .dpp-agent-tool-state-icon {
         animation: none;
       }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .dpp-agent-step-body,
-      .dpp-agent-step-results,
-      .dpp-agent-step-chevron,
-      .dpp-agent-tool-chevron,
-      .dpp-agent-console-chevron {
+      .dpp-agent-tool-group-chevron,
+      .dpp-agent-tool-chevron {
         transition: none;
       }
-      .dpp-agent-container[data-console-phase="starting"] .dpp-agent-console-dot,
-      .dpp-agent-container[data-console-phase="running"] .dpp-agent-console-dot {
-        animation: none;
-      }
     }
-    [data-dpp-body-text] {
-      font-size: inherit;
-      line-height: 1.7;
-      margin-top: 12px;
-      color: var(--dpp-ui-text);
-      word-break: break-word;
-    }
-    [data-dpp-body-text] * { color: inherit; }
-    [data-dpp-body-text] h1,
-    [data-dpp-body-text] h2,
-    [data-dpp-body-text] h3,
-    [data-dpp-body-text] h4,
-    [data-dpp-body-text] h5,
-    [data-dpp-body-text] h6 {
-      font-weight: 600;
-      margin: 10px 0 4px;
-      line-height: 1.35;
-    }
-    [data-dpp-body-text] h1 { font-size: 1.25em; }
-    [data-dpp-body-text] h2 { font-size: 1.15em; }
-    [data-dpp-body-text] h3,
-    [data-dpp-body-text] h4 { font-size: 1.05em; }
-    [data-dpp-body-text] h5,
-    [data-dpp-body-text] h6 { font-size: 1em; }
-    [data-dpp-body-text] p { margin: 3px 0; }
-    [data-dpp-body-text] ul, [data-dpp-body-text] ol { margin: 3px 0 3px 16px; }
-    [data-dpp-body-text] li { margin: 2px 0; }
-    [data-dpp-body-text] blockquote {
-      margin: 6px 0;
-      padding: 2px 10px;
-      border-left: 3px solid var(--dpp-ui-border);
-      color: var(--dpp-ui-text-muted);
-    }
-    [data-dpp-body-text] strong { font-weight: 600; }
-    [data-dpp-body-text] a { color: var(--dpp-ui-accent); text-decoration: underline; }
-    [data-dpp-body-text] table {
-      width: 100%;
-      margin: 10px 0;
-      border-collapse: collapse;
-      font-size: 0.95em;
-    }
-    [data-dpp-body-text] th,
-    [data-dpp-body-text] td {
-      padding: 7px 8px;
-      border-bottom: 1px solid var(--dpp-ui-border);
-      text-align: left;
-      vertical-align: top;
-    }
-    [data-dpp-body-text] th { font-weight: 600; }
   `;
   document.head.appendChild(style);
 }
@@ -652,37 +506,22 @@ export function createAgentContainer(
   container.className = 'dpp-agent-container';
   container.setAttribute('data-dpp-agent', 'true');
   container.setAttribute('data-console-phase', 'starting');
-  container.setAttribute('data-console-collapsed', 'false');
 
-  const header = document.createElement('div');
-  header.className = 'dpp-agent-console-header';
-
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'dpp-agent-console-toggle';
-  toggle.setAttribute('aria-expanded', 'true');
-  toggle.addEventListener('click', () => {
-    setAgentConsoleCollapsed(container, container.getAttribute('data-console-collapsed') !== 'true');
-  });
+  const statusLine = document.createElement('div');
+  statusLine.className = 'dpp-agent-status-line';
 
   const dot = document.createElement('span');
-  dot.className = 'dpp-agent-console-dot';
+  dot.className = 'dpp-agent-status-dot';
   dot.setAttribute('aria-hidden', 'true');
 
   const status = document.createElement('span');
-  status.className = 'dpp-agent-console-status';
+  status.className = 'dpp-agent-status-text';
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   status.textContent = labels?.starting ?? 'Starting…';
 
-  const chevron = document.createElement('span');
-  chevron.className = 'dpp-agent-console-chevron';
-  chevron.setAttribute('aria-hidden', 'true');
-
-  toggle.appendChild(dot);
-  toggle.appendChild(status);
-  toggle.appendChild(chevron);
-  header.appendChild(toggle);
+  statusLine.appendChild(dot);
+  statusLine.appendChild(status);
 
   if (onStop) {
     const stopBtn = document.createElement('button');
@@ -693,25 +532,19 @@ export function createAgentContainer(
       event.stopPropagation();
       onStop();
     });
-    header.appendChild(stopBtn);
+    statusLine.appendChild(stopBtn);
   }
 
-  const body = document.createElement('div');
-  body.className = 'dpp-agent-console-body';
+  const stream = document.createElement('div');
+  stream.className = 'dpp-agent-stream';
 
-  container.appendChild(header);
-  container.appendChild(body);
+  container.appendChild(statusLine);
+  container.appendChild(stream);
   return container;
 }
 
 export function getAgentConsoleBody(container: HTMLElement): HTMLElement | null {
-  return container.querySelector<HTMLElement>('.dpp-agent-console-body');
-}
-
-export function setAgentConsoleCollapsed(container: HTMLElement, collapsed: boolean): void {
-  container.setAttribute('data-console-collapsed', collapsed ? 'true' : 'false');
-  const toggle = container.querySelector('.dpp-agent-console-toggle');
-  toggle?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  return container.querySelector<HTMLElement>('.dpp-agent-stream');
 }
 
 export type AgentConsolePhase = 'starting' | 'running' | 'complete' | 'paused' | 'error';
@@ -734,7 +567,7 @@ export function updateAgentConsoleHeader(
   labels?: Partial<InlineAgentRendererLabels>,
 ): void {
   container.setAttribute('data-console-phase', state.phase);
-  const status = container.querySelector<HTMLElement>('.dpp-agent-console-status');
+  const status = container.querySelector<HTMLElement>('.dpp-agent-status-text');
   if (status) status.textContent = getAgentConsoleStatusText(state, labels);
   const stopBtn = container.querySelector<HTMLElement>('.dpp-agent-stop-btn');
   if (stopBtn) stopBtn.hidden = state.phase !== 'starting' && state.phase !== 'running';
@@ -750,24 +583,24 @@ function getAgentConsoleStatusText(
       return labels?.starting ?? 'Starting…';
     case 'running':
       return labels?.running?.(state.stepNumber, state.toolCount, state.elapsedSeconds)
-        ?? `Agent running (step ${state.stepNumber + 1}, ${state.toolCount} tool calls, ${state.elapsedSeconds}s)`;
+        ?? `Running · step ${state.stepNumber + 1} · ${state.toolCount} tool calls · ${state.elapsedSeconds}s`;
     case 'complete':
       return labels?.consoleComplete?.(state.totalSteps, state.totalTools, state.elapsedSeconds)
-        ?? `Agent complete (${state.totalSteps} steps, ${state.totalTools} tool calls, ${state.elapsedSeconds}s)`;
+        ?? `Complete · ${state.totalSteps} steps · ${state.totalTools} tool calls · ${state.elapsedSeconds}s`;
     case 'paused':
       return labels?.consolePaused?.(state.totalSteps, state.totalTools, state.elapsedSeconds)
-        ?? `Agent paused (${state.totalSteps} steps, ${state.totalTools} tool calls, ${state.elapsedSeconds}s)`;
+        ?? `Paused · ${state.totalSteps} steps · ${state.totalTools} tool calls · ${state.elapsedSeconds}s`;
     case 'error':
       return labels?.consoleError?.(state.totalSteps, state.totalTools, state.elapsedSeconds)
-        ?? `Agent error (${state.totalSteps} steps, ${state.totalTools} tool calls, ${state.elapsedSeconds}s)`;
+        ?? `Error · ${state.totalSteps} steps · ${state.totalTools} tool calls · ${state.elapsedSeconds}s`;
   }
 }
 
 /**
- * Visually adopts a native DeepSeek reasoning block into the agent console
- * timeline (Issue #551). CSS-only: the host DOM is never moved or re-parented,
- * so host React re-renders cannot lose extension state. Returns true when the
- * class was newly applied (idempotent, safe to call on every mutation).
+ * Visually adopts a native DeepSeek reasoning block into the agent stream
+ * (Issue #551). CSS-only: the host DOM is never moved or re-parented, so host
+ * React re-renders cannot lose extension state. Returns true when the class
+ * was newly applied (idempotent, safe to call on every mutation).
  */
 export function adoptReasoningBlock(host: HTMLElement): boolean {
   if (host.classList.contains('dpp-agent-reasoning-adopted')) return false;
@@ -775,157 +608,394 @@ export function adoptReasoningBlock(host: HTMLElement): boolean {
   return true;
 }
 
-export function setAgentStepCollapsed(step: HTMLElement, collapsed: boolean): void {
-  step.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
-  const toggle = step.querySelector('.dpp-agent-step-toggle');
-  toggle?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-}
-
-export function createAgentStepElement(
-  stepIndex: number,
-  labels?: Partial<InlineAgentRendererLabels>,
-): HTMLElement {
-  const step = document.createElement('div');
-  step.className = 'dpp-agent-step';
-  step.setAttribute('data-step-index', String(stepIndex));
-  step.setAttribute('data-status', 'streaming');
-  step.setAttribute('data-collapsed', 'false');
-
-  const bodyId = nextAgentDomId('dpp-agent-step-body');
-  const toolsId = nextAgentDomId('dpp-agent-step-tools');
-  const resultsId = nextAgentDomId('dpp-agent-step-results');
-
-  const header = document.createElement('div');
-  header.className = 'dpp-agent-step-header';
-  header.addEventListener('click', (event) => {
-    const target = event.target as HTMLElement | null;
-    if (target?.closest('.dpp-agent-stop-btn')) return;
-    // Manual toggle: later programmatic auto-collapse must not override the
-    // user's explicit choice (Issue #544).
-    step.setAttribute('data-user-toggled', 'true');
-    setAgentStepCollapsed(step, step.getAttribute('data-collapsed') !== 'true');
-  });
-
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'dpp-agent-step-toggle';
-  toggle.setAttribute('aria-expanded', 'true');
-  toggle.setAttribute('aria-controls', `${bodyId} ${toolsId} ${resultsId}`);
-
-  const indicator = document.createElement('span');
-  indicator.className = 'dpp-agent-step-indicator';
-  indicator.textContent = labels?.step?.(stepIndex + 1) ?? `Step ${stepIndex + 1}`;
-
-  const dot = document.createElement('span');
-  dot.className = 'dpp-agent-step-dot';
-  dot.setAttribute('aria-hidden', 'true');
-
-  const status = document.createElement('span');
-  status.className = 'dpp-agent-step-status';
-  status.textContent = labels?.streaming ?? 'streaming...';
-
-  const chevron = document.createElement('span');
-  chevron.className = 'dpp-agent-step-chevron';
-  chevron.setAttribute('aria-hidden', 'true');
-
-  toggle.appendChild(indicator);
-  toggle.appendChild(dot);
-  toggle.appendChild(status);
-  toggle.appendChild(chevron);
-  header.appendChild(toggle);
-
-  const sectionLabel = document.createElement('div');
-  sectionLabel.className = 'dpp-agent-step-section-label process';
-  sectionLabel.textContent = labels?.process ?? 'Process';
-  sectionLabel.hidden = true;
+/**
+ * Creates the narration segment for one step. The segment is NOT attached to
+ * the stream yet: it is mounted (and the previous tool group sealed) on the
+ * first non-empty text via {@link mountAgentNarration}, so textless tool-only
+ * steps never leave an empty paragraph in the flow.
+ */
+export function createAgentStepElement(stepIndex: number): HTMLElement {
+  const narration = document.createElement('div');
+  narration.className = 'dpp-agent-step dpp-agent-narration';
+  narration.setAttribute('data-step-index', String(stepIndex));
+  narration.setAttribute('data-status', 'streaming');
 
   const body = document.createElement('div');
   body.className = 'dpp-agent-step-body';
-  body.id = bodyId;
 
-  const toolsLabel = document.createElement('div');
-  toolsLabel.className = 'dpp-agent-step-section-label tools';
-  toolsLabel.textContent = labels?.tools ?? 'Tool calls';
-  toolsLabel.hidden = true;
+  narration.appendChild(body);
+  return narration;
+}
 
-  const tools = document.createElement('div');
-  tools.className = 'dpp-agent-step-tools';
-  tools.id = toolsId;
+/**
+ * Places a narration segment into the stream at its chronological position
+ * (after every segment of earlier steps, before any segment of the same or a
+ * later step) and seals the current tool group: narration text separates tool
+ * groups, so consecutive textless steps keep sharing one group while any
+ * narration between tool batches starts a fresh one. A folded reasoning note
+ * for the step ("Thought · step N") is mounted right before the narration.
+ */
+export function mountAgentNarration(
+  step: HTMLElement,
+  stream: HTMLElement,
+  labels?: Partial<InlineAgentRendererLabels>,
+): void {
+  if (step.parentElement === stream) return;
+  sealCurrentToolGroup(stream);
+  const stepIndex = Number(step.getAttribute('data-step-index') ?? 0);
+  let insertBefore: HTMLElement | null = null;
+  for (const child of Array.from(stream.children) as HTMLElement[]) {
+    const childStepIndex = Number(child.getAttribute('data-step-index') ?? -1);
+    if (childStepIndex >= stepIndex) {
+      insertBefore = child;
+      break;
+    }
+  }
+  const note = createAgentReasoningNoteElement(stepIndex, labels);
+  if (insertBefore) {
+    stream.insertBefore(note, insertBefore);
+    stream.insertBefore(step, insertBefore);
+  } else {
+    stream.appendChild(note);
+    stream.appendChild(step);
+  }
+}
 
-  const results = document.createElement('div');
-  results.className = 'dpp-agent-step-results';
-  results.id = resultsId;
+/**
+ * Folded per-step reasoning note (default collapsed), mirroring the native
+ * "Thought (N s)" row. The continuation turns' thinking text is not
+ * retained in the message flow, so the expanded body states that plainly
+ * instead of faking content.
+ */
+export function createAgentReasoningNoteElement(
+  stepNumber: number,
+  labels?: Partial<InlineAgentRendererLabels>,
+): HTMLElement {
+  const note = document.createElement('div');
+  note.className = 'dpp-agent-reasoning-note';
 
-  const resultsLabel = document.createElement('div');
-  resultsLabel.className = 'dpp-agent-step-section-label results';
-  resultsLabel.textContent = labels?.results ?? 'Results';
-  resultsLabel.hidden = true;
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'dpp-agent-reasoning-note-toggle';
+  toggle.setAttribute('aria-expanded', 'false');
 
-  step.appendChild(header);
-  step.appendChild(sectionLabel);
-  step.appendChild(body);
-  step.appendChild(toolsLabel);
-  step.appendChild(tools);
-  results.appendChild(resultsLabel);
-  step.appendChild(results);
+  const icon = document.createElement('span');
+  icon.className = 'dpp-agent-reasoning-note-icon';
+  icon.setAttribute('aria-hidden', 'true');
 
-  return step;
+  const title = document.createElement('span');
+  title.className = 'dpp-agent-reasoning-note-title';
+  title.textContent = labels?.reasoningStep?.(stepNumber) ?? `Thought · step ${stepNumber + 1}`;
+
+  const chevron = document.createElement('span');
+  chevron.className = 'dpp-agent-reasoning-note-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+
+  toggle.appendChild(icon);
+  toggle.appendChild(title);
+  toggle.appendChild(chevron);
+
+  const body = document.createElement('div');
+  body.className = 'dpp-agent-reasoning-note-body';
+  body.hidden = true;
+  body.textContent = labels?.reasoningNotPersisted
+    ?? 'The thinking process for this step is not retained in the message stream.';
+
+  toggle.addEventListener('click', () => {
+    const expanded = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    body.hidden = expanded;
+  });
+
+  note.appendChild(toggle);
+  note.appendChild(body);
+  return note;
+}
+
+function sealCurrentToolGroup(stream: HTMLElement): void {
+  const state = getAgentStreamState(stream);
+  const group = state.currentToolGroup;
+  if (!group) return;
+  state.currentToolGroup = null;
+  // Sealed groups collapse to their one-line header; a manual toggle is never
+  // overridden (Issue #544).
+  if (group.getAttribute('data-user-toggled') !== 'true') {
+    setAgentToolGroupCollapsed(group, true);
+  }
+}
+
+function setAgentToolGroupCollapsed(group: HTMLElement, collapsed: boolean): void {
+  group.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+  const toggle = group.querySelector<HTMLElement>('.dpp-agent-tool-group-toggle');
+  toggle?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+/**
+ * Collapses every tool group of a finished run (unless the user toggled it)
+ * and forgets the open-group bookkeeping.
+ */
+export function collapseAllAgentToolGroups(stream: HTMLElement): void {
+  for (const group of stream.querySelectorAll<HTMLElement>(':scope > .dpp-agent-tool-group')) {
+    if (group.getAttribute('data-user-toggled') !== 'true') {
+      setAgentToolGroupCollapsed(group, true);
+    }
+  }
+  const state = agentStreamStates.get(stream);
+  if (state) state.currentToolGroup = null;
 }
 
 export function updateStepStreamText(step: HTMLElement, visibleText: string): void {
   const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
   if (!body) return;
-
-  const sectionLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.process');
-  if (sectionLabel) sectionLabel.hidden = visibleText.length === 0;
-
+  if (!visibleText) {
+    // Drop the folded reasoning note mounted right before this narration.
+    const previous = step.previousElementSibling;
+    if (previous?.classList.contains('dpp-agent-reasoning-note')) previous.remove();
+    step.remove();
+    return;
+  }
   body.setAttribute('data-dpp-raw-text', visibleText);
-  body.innerHTML = renderInlineMarkdown(visibleText);
-  scrollStepBodyToBottom(body);
+  body.innerHTML = renderAgentStreamText(visibleText);
+  followAgentStreamScroll(step);
 }
 
-function scrollStepBodyToBottom(body: HTMLElement): void {
-  const distanceFromBottom = body.scrollHeight - body.scrollTop - body.clientHeight;
-  // Only follow the stream while the reader is already at the bottom; never
-  // yank the scroll position away from a reader who scrolled up (Issue #541).
-  const stickToBottom = distanceFromBottom <= STREAM_SCROLL_FOLLOW_TOLERANCE_PX;
-  if (!stickToBottom) return;
-  body.scrollTop = body.scrollHeight;
-  if (typeof requestAnimationFrame !== 'function') return;
-
-  requestAnimationFrame(() => {
-    const after = body.scrollHeight - body.scrollTop - body.clientHeight;
-    if (after <= STREAM_SCROLL_FOLLOW_TOLERANCE_PX) {
-      body.scrollTop = body.scrollHeight;
-    }
-  });
-}
-
-export function updateStepStatus(step: HTMLElement, status: string, label?: string): void {
+export function updateStepStatus(step: HTMLElement, status: string): void {
   step.setAttribute('data-status', status);
-  const statusEl = step.querySelector('.dpp-agent-step-status');
-  if (statusEl && label) statusEl.textContent = label;
 }
 
-export function addToolResultToStep(
-  step: HTMLElement,
+// ---------------------------------------------------------------------------
+// Agent-stream text rendering: the narration body is markdown, with artifact
+// deliverable blocks rendered structurally so HTML files can actually run
+// inline. `convertInlineAgentArtifactBlocks` emits "**filename** + 4-backtick
+// fenced block" (open fence while streaming); this parser recognizes exactly
+// that deterministic shape and swaps the code block for the same markup plus
+// a preview placeholder that {@link hydrateAgentArtifactPreviews} fills with a
+// sandboxed iframe once the text is stable.
+// ---------------------------------------------------------------------------
+// NOTE: no /m flag — `$` must mean "end of the whole text" so the lazy
+// content match cannot stop at an arbitrary line end. `^` is replaced by
+// `(?:^|\n)` so blocks can appear mid-text, and the closing fence matches a
+// full line via `(?=\n|$)` without consuming the following newline.
+const ARTIFACT_DISPLAY_BLOCK_RE = /(?:^|\n)\*\*([^*\n`]+)\*\*\n{2,}(`{3,})([^\n`]*)\n([\s\S]*?)(?:\n\2[ \t]*(?=\n|$)|$)/g;
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Renders agent-stream narration text: ordinary markdown, except artifact
+ * blocks (filename + fenced code) are emitted as filename + `<pre>` + a
+ * preview placeholder carrying the raw content in a `<template>`. Only blocks
+ * whose header looks like a real file name (the conversion output always
+ * carries one) get the structured treatment — a plain `**label**` paragraph
+ * above a code block stays ordinary markdown.
+ */
+export function renderAgentStreamText(text: string): string {
+  if (!text.includes('**')) return renderInlineMarkdown(text);
+  let output = '';
+  let cursor = 0;
+  let matched = false;
+  ARTIFACT_DISPLAY_BLOCK_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = ARTIFACT_DISPLAY_BLOCK_RE.exec(text)) !== null) {
+    matched = true;
+    output += renderInlineMarkdown(text.slice(cursor, match.index));
+    const [, filename, , lang, content] = match;
+    if (filename.includes('.')) {
+      output += renderArtifactBlockHtml(filename, lang, content);
+    } else {
+      output += renderInlineMarkdown(match[0]);
+    }
+    cursor = match.index + match[0].length;
+  }
+  if (!matched) return renderInlineMarkdown(text);
+  output += renderInlineMarkdown(text.slice(cursor));
+  return output;
+}
+
+function renderArtifactBlockHtml(filename: string, lang: string, content: string): string {
+  const safeFilename = escapeHtml(filename);
+  // `<template>` children are not rendered; `textContent` reads back the
+  // original (entity-decoded) content, so the hydrated iframe gets the exact
+  // file bytes without double-decoding.
+  return `<p><strong>${safeFilename}</strong></p>`
+    + `<pre><code>${escapeHtml(content)}</code></pre>`
+    + `<div class="dpp-agent-artifact-preview" data-dpp-artifact-filename="${safeFilename}">`
+    + `<template class="dpp-agent-artifact-content">${escapeHtml(content)}</template></div>`;
+}
+
+function isHtmlArtifactFilename(filename: string): boolean {
+  return /\.(?:html?|xhtml)$/i.test(filename);
+}
+
+/**
+ * Fills every artifact preview placeholder with a sandboxed iframe running the
+ * delivered file inline (HTML deliverables only; other languages keep their
+ * code block). Idempotent: an existing iframe is never replaced, so hydration
+ * is safe to run after every stabilization point.
+ */
+export function hydrateAgentArtifactPreviews(stream: HTMLElement): void {
+  for (const preview of stream.querySelectorAll<HTMLElement>('.dpp-agent-artifact-preview')) {
+    if (preview.querySelector('iframe')) continue;
+    const filename = preview.getAttribute('data-dpp-artifact-filename') ?? '';
+    if (!isHtmlArtifactFilename(filename)) continue;
+    const template = preview.querySelector<HTMLTemplateElement>('template.dpp-agent-artifact-content');
+    const content = template?.content.textContent ?? '';
+    if (!content) continue;
+    const frame = document.createElement('iframe');
+    frame.className = 'dpp-agent-artifact-frame';
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.setAttribute('title', filename);
+    frame.srcdoc = content;
+    preview.appendChild(frame);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Page scroll follow: while the agent streams, the chat scroller stays pinned
+// to the bottom as long as the reader is already there; a reader who scrolled
+// up is never yanked down. The scroller is discovered once by walking up from
+// the stream and cached.
+// ---------------------------------------------------------------------------
+const AGENT_STREAM_SCROLL_FOLLOW_TOLERANCE_PX = 24;
+let cachedAgentStreamScroller: HTMLElement | null | undefined;
+
+function getAgentStreamScroller(stream: HTMLElement): HTMLElement | null {
+  const cached = cachedAgentStreamScroller;
+  if (cached !== undefined && cached !== null && cached.isConnected) return cached;
+  let el: HTMLElement | null = stream.parentElement;
+  while (el && el !== document.documentElement) {
+    if (el.scrollHeight > el.clientHeight + 1) {
+      const style = getComputedStyle(el);
+      if (/(auto|scroll)/.test(style.overflowY)) {
+        cachedAgentStreamScroller = el;
+        return el;
+      }
+    }
+    el = el.parentElement;
+  }
+  cachedAgentStreamScroller = null;
+  return null;
+}
+
+function followAgentStreamScroll(stream: HTMLElement): void {
+  const scroller = getAgentStreamScroller(stream);
+  if (!scroller) return;
+  const distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+  if (distanceToBottom > AGENT_STREAM_SCROLL_FOLLOW_TOLERANCE_PX) return;
+  scroller.scrollTop = scroller.scrollHeight;
+}
+
+/**
+ * Pins the chat scroller to the bottom after new stream content (narration
+ * segments, appended answer segments) while the reader is already near it.
+ */
+export function followAgentStreamBottom(stream: HTMLElement): void {
+  followAgentStreamScroll(stream);
+}
+
+// ---------------------------------------------------------------------------
+// Native reasoning blocks: after the host finishes thinking (its title reads
+// ("Thought (N s)"), the block is folded once by clicking the page's own
+// title toggle. Idempotent per host, so a later manual expand is never
+// re-folded, and the page's React state stays authoritative.
+// ---------------------------------------------------------------------------
+const REASONING_HOST_TEXT_RE = /^(?:已(?:深度)?思考|深度思考|思考过程|思考中|正在思考|thinking|reasoning|thought)(?:[\s（(:：]|$)/i;
+const REASONING_COMPLETED_TEXT_RE = /^(?:已(?:深度)?思考|深度思考|思考过程|thought)(?:[\s（(:：]|$)/i;
+
+function findReasoningHostTitle(host: HTMLElement): HTMLElement | null {
+  // Prefer the most specific (shortest) matching descendant — the page's
+  // title row — over the host container whose textContent also includes the
+  // thinking body.
+  let best: HTMLElement | null = null;
+  for (const el of Array.from(host.querySelectorAll<HTMLElement>('*'))) {
+    const text = (el.textContent ?? '').trim();
+    if (!text || text.length > 80) continue;
+    if (!REASONING_HOST_TEXT_RE.test(text)) continue;
+    if (!best || text.length < (best.textContent ?? '').trim().length) best = el;
+  }
+  if (best) return best;
+  // Fallback: the host itself when it carries the title text directly.
+  const hostText = (host.textContent ?? '').trim();
+  if (hostText && hostText.length <= 80 && REASONING_HOST_TEXT_RE.test(hostText)) return host;
+  return null;
+}
+
+/**
+ * Folds a completed native reasoning block once (Issue #551 follow-up). No-op
+ * while the host is still thinking, and no-op after the first fold so the
+ * user's own expand/collapse choices are never overridden.
+ */
+export function autoCollapseCompletedReasoningHost(host: HTMLElement): boolean {
+  if (host.getAttribute('data-dpp-reasoning-auto-folded') === 'true') return false;
+  const title = findReasoningHostTitle(host);
+  if (!title) return false;
+  const text = (title.textContent ?? '').trim();
+  if (!REASONING_COMPLETED_TEXT_RE.test(text)) return false;
+  host.setAttribute('data-dpp-reasoning-auto-folded', 'true');
+  title.click();
+  return true;
+}
+
+function createAgentToolGroup(stepIndex: number): HTMLElement {
+  const group = document.createElement('div');
+  group.className = 'dpp-agent-tool-group';
+  group.setAttribute('data-step-index', String(stepIndex));
+  group.setAttribute('data-collapsed', 'false');
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'dpp-agent-tool-group-toggle';
+  toggle.setAttribute('aria-expanded', 'true');
+  toggle.addEventListener('click', () => {
+    // Manual toggle: later auto-collapse must not override the user's choice.
+    group.setAttribute('data-user-toggled', 'true');
+    setAgentToolGroupCollapsed(group, group.getAttribute('data-collapsed') !== 'true');
+  });
+
+  const icon = document.createElement('span');
+  icon.className = 'dpp-agent-tool-group-icon';
+  icon.setAttribute('aria-hidden', 'true');
+
+  const title = document.createElement('span');
+  title.className = 'dpp-agent-tool-group-title';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'dpp-agent-tool-group-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+
+  toggle.appendChild(icon);
+  toggle.appendChild(title);
+  toggle.appendChild(chevron);
+
+  const items = document.createElement('div');
+  items.className = 'dpp-agent-tool-group-items';
+
+  group.appendChild(toggle);
+  group.appendChild(items);
+  return group;
+}
+
+function updateAgentToolGroupCount(group: HTMLElement, labels?: Partial<InlineAgentRendererLabels>): void {
+  const title = group.querySelector<HTMLElement>('.dpp-agent-tool-group-title');
+  if (!title) return;
+  const count = group.querySelectorAll('.dpp-agent-tool-item').length;
+  title.textContent = labels?.toolGroup?.(count) ?? `Tool calls (${count})`;
+}
+
+function createAgentToolRow(
   toolName: string,
-  result: Pick<ToolResult, 'ok' | 'summary' | 'detail' | 'error'>,
+  paramSummary: string | null,
+  status: 'pending' | 'ok' | 'err',
   labels?: Partial<InlineAgentRendererLabels>,
-): void {
-  const tools = step.querySelector('.dpp-agent-step-tools');
-  if (!tools) return;
-  const { ok } = result;
-  const summary = getToolRowSummary(result);
-
-  // The tools section label stays hidden until the first tool row exists
-  // (Issue #544).
-  const toolsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.tools');
-  if (toolsLabel) toolsLabel.hidden = false;
-
+): HTMLElement {
   const item = document.createElement('div');
-  item.className = `dpp-agent-step-tool-item ${ok ? 'ok' : 'err'}`;
-  item.setAttribute('data-tool-status', ok ? 'ok' : 'err');
+  item.className = 'dpp-agent-tool-item';
+  item.setAttribute('data-tool-status', status);
 
   const summaryId = nextAgentDomId('dpp-agent-tool-summary');
 
@@ -943,9 +1013,15 @@ export function addToolResultToStep(
   name.className = 'dpp-agent-tool-name';
   name.textContent = toolName;
 
+  const param = document.createElement('span');
+  param.className = 'dpp-agent-tool-param';
+  param.textContent = paramSummary ? `· ${paramSummary}` : '';
+
   const state = document.createElement('span');
   state.className = 'dpp-agent-tool-state';
-  state.textContent = ok ? labels?.toolOk ?? 'OK' : labels?.toolError ?? 'Error';
+  state.textContent = status === 'pending'
+    ? ''
+    : (status === 'ok' ? (labels?.toolOk ?? 'OK') : (labels?.toolError ?? 'Error'));
 
   const chevron = document.createElement('span');
   chevron.className = 'dpp-agent-tool-chevron';
@@ -953,6 +1029,7 @@ export function addToolResultToStep(
 
   toggle.appendChild(icon);
   toggle.appendChild(name);
+  toggle.appendChild(param);
   toggle.appendChild(state);
   toggle.appendChild(chevron);
 
@@ -960,11 +1037,6 @@ export function addToolResultToStep(
   detail.className = 'dpp-agent-tool-summary';
   detail.id = summaryId;
   detail.hidden = true;
-  // Clamp with an explicit truncation marker so the collapsed row and the
-  // expanded result details use the same honest labeling (Issue #544).
-  detail.textContent = summary.length > TOOL_SUMMARY_MAX_CHARS
-    ? `${summary.slice(0, TOOL_SUMMARY_MAX_CHARS)}\n...[truncated]`
-    : summary;
 
   toggle.addEventListener('click', () => {
     const expanded = toggle.getAttribute('aria-expanded') === 'true';
@@ -974,14 +1046,148 @@ export function addToolResultToStep(
 
   item.appendChild(toggle);
   item.appendChild(detail);
-  tools.appendChild(item);
+  return item;
 }
 
-function getToolRowSummary(result: Pick<ToolResult, 'ok' | 'summary' | 'detail' | 'error'>): string {
-  if (result.ok) return result.summary;
-  const reason = result.detail?.trim() || result.error?.message.trim() || '';
-  if (!reason || reason === result.summary.trim()) return result.summary;
-  return `${result.summary}\n${reason}`;
+function appendToolRowToGroup(stream: HTMLElement, stepIndex: number, row: HTMLElement): HTMLElement {
+  const state = getAgentStreamState(stream);
+  let group = state.currentToolGroup;
+  // The group must still belong to THIS stream (a re-mount through the
+  // virtual list could have re-parented it otherwise).
+  if (!group || group.parentElement !== stream) {
+    group = createAgentToolGroup(stepIndex);
+    stream.appendChild(group);
+    state.currentToolGroup = group;
+  }
+  group.querySelector('.dpp-agent-tool-group-items')?.appendChild(row);
+  return group;
+}
+
+/**
+ * Renders one single-line tool entry when the model's tool call is detected
+ * (status: pending). The row carries the payload parameter summary, sits in
+ * the current tool group and is completed by
+ * {@link resolveAgentToolEntry} once the execution result arrives.
+ */
+export function addAgentToolEntry(
+  stream: HTMLElement,
+  stepIndex: number,
+  call: { name: string; payload?: unknown },
+  labels?: Partial<InlineAgentRendererLabels>,
+): HTMLElement {
+  const row = createAgentToolRow(call.name, summarizeInlineAgentToolParams(call.payload), 'pending', labels);
+  const group = appendToolRowToGroup(stream, stepIndex, row);
+  updateAgentToolGroupCount(group, labels);
+
+  const state = getAgentStreamState(stream);
+  const rows = state.pendingRowsByStep.get(stepIndex) ?? [];
+  rows.push(row);
+  state.pendingRowsByStep.set(stepIndex, rows);
+  return row;
+}
+
+/**
+ * Completes the oldest pending tool entry of the step with its execution
+ * result. When no pending row exists (restored traces, missed detection) a
+ * completed row is created in the current group instead.
+ */
+export function resolveAgentToolEntry(
+  stream: HTMLElement,
+  stepIndex: number,
+  execution: ToolExecutionRecord,
+  labels?: Partial<InlineAgentRendererLabels>,
+): void {
+  const state = getAgentStreamState(stream);
+  const pending = state.pendingRowsByStep.get(stepIndex) ?? [];
+  const row = pending.shift();
+  if (row && row.parentElement) {
+    setAgentToolRowResult(row, execution, labels);
+    return;
+  }
+  const paramFallback = execution.result.summary.trim();
+  const completed = createAgentToolRow(
+    execution.name,
+    paramFallback || null,
+    execution.result.ok ? 'ok' : 'err',
+    labels,
+  );
+  const group = appendToolRowToGroup(stream, stepIndex, completed);
+  updateAgentToolGroupCount(group, labels);
+  setAgentToolRowResult(completed, execution, labels);
+}
+
+/**
+ * Terminal-state cleanup: tool entries that were detected but never resolved
+ * (loop aborted mid-step) switch from the pulsing "pending" state to a
+ * neutral dot instead of blinking forever.
+ */
+export function finalizePendingAgentToolEntries(stream: HTMLElement): void {
+  const state = agentStreamStates.get(stream);
+  if (!state) return;
+  for (const rows of state.pendingRowsByStep.values()) {
+    for (const row of rows) {
+      if (row.getAttribute('data-tool-status') !== 'pending') continue;
+      row.setAttribute('data-tool-status', 'interrupted');
+    }
+  }
+  state.pendingRowsByStep.clear();
+}
+
+function setAgentToolRowResult(
+  row: HTMLElement,
+  execution: ToolExecutionRecord,
+  labels?: Partial<InlineAgentRendererLabels>,
+): void {
+  const { ok } = execution.result;
+  row.setAttribute('data-tool-status', ok ? 'ok' : 'err');
+
+  const state = row.querySelector<HTMLElement>('.dpp-agent-tool-state');
+  if (state) state.textContent = ok ? (labels?.toolOk ?? 'OK') : (labels?.toolError ?? 'Error');
+
+  const detail = row.querySelector<HTMLElement>('.dpp-agent-tool-summary');
+  if (!detail) return;
+  detail.textContent = getToolResultDetailText(execution.result);
+  // Entries default to the collapsed single line; a user-expanded detail is
+  // never force-closed, and an empty detail stays hidden either way.
+  const userExpanded = row.querySelector('.dpp-agent-tool-toggle')?.getAttribute('aria-expanded') === 'true';
+  detail.hidden = !(userExpanded && detail.textContent.length > 0);
+}
+
+function getToolResultDetailText(result: Pick<ToolResult, 'ok' | 'summary' | 'detail' | 'output' | 'error'>): string {
+  const lines: string[] = [];
+  if (result.ok) {
+    lines.push(result.summary);
+    if (result.detail) lines.push(clampDisplayText(result.detail, 2000));
+  } else {
+    const reason = result.detail?.trim() || result.error?.message.trim() || '';
+    if (!reason || reason === result.summary.trim()) {
+      lines.push(result.summary);
+    } else {
+      lines.push(`${result.summary}\n${reason}`);
+    }
+    if (result.error) lines.push(`error: ${clampDisplayText(JSON.stringify(result.error), 2000)}`);
+  }
+  if (result.output !== undefined) {
+    lines.push(`output: ${clampDisplayText(JSON.stringify(result.output), 4000)}`);
+  }
+  return lines.filter(Boolean).join('\n');
+}
+
+function clampDisplayText(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}\n...[truncated]` : value;
+}
+
+/**
+ * "Starting" placeholder shown between container mount and the first step
+ * (the loop waits 2.5-6.5s for the first model turn; without this the stream
+ * appears dead) (Issue #544).
+ */
+export function createAgentStartingElement(labels?: Partial<InlineAgentRendererLabels>): HTMLElement {
+  const element = document.createElement('div');
+  element.className = 'dpp-agent-starting';
+  element.setAttribute('role', 'status');
+  element.textContent = labels?.starting ?? 'Starting…';
+  return element;
 }
 
 /**
@@ -1007,72 +1213,4 @@ export function isInlineAgentBudgetFinalText(
     if (text === budgetNoticeForCount(count)) return true;
   }
   return false;
-}
-
-/**
- * Renders one collapsible block per executed tool with its result payload.
- * Display-only: values are clamped here and never written back to trace or
- * history records.
- */
-export function addToolResultDetailsToStep(
-  step: HTMLElement,
-  executions: readonly ToolExecutionRecord[],
-): void {
-  const results = step.querySelector<HTMLElement>('.dpp-agent-step-results');
-  if (!results || executions.length === 0) return;
-
-  const resultsLabel = step.querySelector<HTMLElement>('.dpp-agent-step-section-label.results');
-  if (resultsLabel) resultsLabel.hidden = false;
-
-  for (const exec of executions) {
-    const details = document.createElement('details');
-    details.className = 'dpp-agent-step-tool-result';
-
-    const summary = document.createElement('summary');
-    summary.className = exec.result.ok ? 'ok' : 'err';
-    const provider = exec.provider?.displayName;
-    summary.textContent = exec.result.ok
-      ? (provider ? `${exec.name} · ${provider}` : exec.name)
-      : `${exec.name} · ${exec.result.error?.code ?? 'error'}`;
-
-    const body = document.createElement('div');
-    body.className = 'dpp-agent-step-tool-result-body';
-    appendResultLine(body, 'summary', exec.result.summary);
-    if (exec.result.detail) appendResultLine(body, 'detail', exec.result.detail);
-    if (exec.result.output !== undefined) {
-      appendResultLine(body, 'output', JSON.stringify(exec.result.output));
-    }
-    if (exec.result.error) {
-      appendResultLine(body, 'error', JSON.stringify(exec.result.error));
-    }
-
-    details.appendChild(summary);
-    details.appendChild(body);
-    results.appendChild(details);
-  }
-}
-
-function appendResultLine(body: HTMLElement, key: string, value: string | undefined): void {
-  if (!value) return;
-  const line = document.createElement('div');
-  line.className = 'dpp-tool-result-line';
-  line.textContent = `${key}: ${clampDisplayText(value, key === 'output' ? 4000 : 2000)}`;
-  body.appendChild(line);
-}
-
-function clampDisplayText(value: string, maxLength: number): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}\n...[truncated]` : value;
-}
-
-/**
- * "Starting" placeholder shown between container mount and the first step
- * (the loop waits 2.5-6.5s for the first model turn; without this the panel
- * appears dead) (Issue #544).
- */
-export function createAgentStartingElement(labels?: Partial<InlineAgentRendererLabels>): HTMLElement {
-  const element = document.createElement('div');
-  element.className = 'dpp-agent-starting';
-  element.setAttribute('role', 'status');
-  element.textContent = labels?.starting ?? 'Starting…';
-  return element;
 }

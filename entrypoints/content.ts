@@ -67,9 +67,11 @@ import {
   replaceTaskCompleteBlocks,
 } from '../core/inline-agent/prompt';
 import {
+  convertInlineAgentArtifactBlocks,
   getInlineAgentAnswerText,
   getInlineAgentProcessText,
   resolveInlineAgentAnswerText,
+  stripInlineAgentTruncationSuffix,
 } from '../core/inline-agent/display-text';
 import {
   elementHasMessageId,
@@ -91,14 +93,19 @@ import {
   removeInlineAgentStyles,
   createAgentContainer,
   createAgentStepElement,
-  setAgentStepCollapsed,
+  mountAgentNarration,
   updateStepStreamText,
   updateStepStatus,
-  addToolResultToStep,
-  addToolResultDetailsToStep,
+  addAgentToolEntry,
+  resolveAgentToolEntry,
+  finalizePendingAgentToolEntries,
+  collapseAllAgentToolGroups,
+  hydrateAgentArtifactPreviews,
+  autoCollapseCompletedReasoningHost,
+  followAgentStreamBottom,
+  renderAgentStreamText,
   adoptReasoningBlock,
   getAgentConsoleBody,
-  setAgentConsoleCollapsed,
   updateAgentConsoleHeader,
   createAgentStartingElement,
   isInlineAgentBudgetFinalText,
@@ -515,14 +522,8 @@ function refreshLocalizedContentSurfaces(): void {
 
 function getAgentRendererLabels() {
   return {
-    step: (stepNumber: number) => contentT('content.agent.step', { index: stepNumber }),
-    streaming: contentT('content.agent.streaming'),
-    executingTools: contentT('content.agent.executingTools'),
     starting: contentT('content.agent.starting'),
     stop: contentT('content.agent.stop'),
-    process: contentT('content.agent.process'),
-    tools: contentT('content.agent.tools'),
-    results: contentT('content.agent.results'),
     running: (stepNumber: number, toolCount: number, elapsedSeconds: number) =>
       contentT('content.agent.running', { step: stepNumber + 1, tools: toolCount, seconds: elapsedSeconds }),
     toolOk: contentT('content.toolBlock.summaries.executed'),
@@ -533,6 +534,9 @@ function getAgentRendererLabels() {
       contentT('content.agent.consolePaused', { steps: totalSteps, tools: totalTools, seconds: elapsedSeconds }),
     consoleError: (totalSteps: number, totalTools: number, elapsedSeconds: number) =>
       contentT('content.agent.consoleError', { steps: totalSteps, tools: totalTools, seconds: elapsedSeconds }),
+    toolGroup: (count: number) => contentT('content.agent.toolGroup', { count }),
+    reasoningStep: (stepNumber: number) => contentT('content.agent.reasoningStep', { step: stepNumber + 1 }),
+    reasoningNotPersisted: contentT('content.agent.reasoningNotPersisted'),
   };
 }
 
@@ -3976,7 +3980,11 @@ function isInlineAgentResponseComplete(complete: ResponseCompletePayload): boole
  */
 function adoptMessageReasoningBlocks(message: Element): void {
   for (const host of getAssistantContentHosts(message)) {
-    if (looksLikeReasoningContentHost(host)) adoptReasoningBlock(host);
+    if (!looksLikeReasoningContentHost(host)) continue;
+    adoptReasoningBlock(host);
+    // Fold the host once its thinking finished ("Thought (N s)");
+    // idempotent per host, manual expand/collapse is never overridden.
+    autoCollapseCompletedReasoningHost(host);
   }
 }
 
@@ -4075,8 +4083,11 @@ function stopInlineAgent(): void {
   activeAgentAbort?.abort();
   activeAgentAbort = null;
   if (container) {
+    // Stop is a neutral pause, never a fake completion: the status line keeps
+    // the interrupted step visible and pending tool entries stop pulsing.
+    const stream = getAgentConsoleBody(container);
+    if (stream) finalizePendingAgentToolEntries(stream);
     renderTerminalAgentConsoleHeader(container, 'paused', 0, 0, contentT('content.agent.stopped'));
-    setAgentConsoleCollapsed(container, true);
   }
 }
 
@@ -4220,9 +4231,10 @@ function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): vo
   if (data.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
   removeAgentStartingElement();
 
-  const stepEl = createAgentStepElement(data.stepIndex, getAgentRendererLabels());
+  // The narration segment mounts into the stream on its first non-empty text
+  // (textless tool-only steps leave no empty paragraph in the flow).
+  const stepEl = createAgentStepElement(data.stepIndex);
   inlineAgentCurrentStep = stepEl;
-  getAgentConsoleBody(inlineAgentContainer)?.appendChild(stepEl);
   updateAgentConsoleHeader(inlineAgentContainer, {
     phase: 'running',
     stepNumber: data.stepIndex,
@@ -4242,14 +4254,18 @@ function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): vo
 }
 
 /**
- * Tool calls were detected in the model turn: surface the real state instead
- * of leaving the step at a blinking "streaming..." (Issue #541). The live
- * panel now shows "executing tools" (⚙) until text resumes on the nudge turn
- * or the step completes.
+ * Tool calls were detected in the model turn: surface each call as a pending
+ * single-line work-log entry (icon + name + parameter summary) in the current
+ * tool group; the entries are completed by the step's execution records
+ * (Issue #551 redesign).
  */
 function handleAgentToolDetected(msg: InlineAgentToolDetectedMsg): void {
-  if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
-  updateStepStatus(inlineAgentCurrentStep, 'executing_tools', getAgentRendererLabels().executingTools);
+  if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+  const stream = getAgentConsoleBody(inlineAgentContainer);
+  if (stream && inlineAgentCurrentStep) {
+    addAgentToolEntry(stream, msg.stepIndex, msg.call, getAgentRendererLabels());
+  }
+  agentRunningToolCount += 1;
   updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
     status: 'executing_tools',
   }));
@@ -4269,17 +4285,15 @@ function handleAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
 }
 
 function renderInlineAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
-  if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep) return;
+  if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep || !inlineAgentContainer) return;
   const step = inlineAgentCurrentStep;
   const previousText = getInlineAgentStepText(step);
   const nextText = clampText(getInlineAgentDisplayStepText(msg.fullText) || previousText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '';
-  updateStepStreamText(step, nextText);
-  // Text is flowing again: a tool-phase step returns to the streaming state
-  // (Issue #541).
-  if (nextText && step.getAttribute('data-status') === 'executing_tools') {
-    updateStepStatus(step, 'streaming', getAgentRendererLabels().streaming);
+  if (nextText) {
+    const stream = getAgentConsoleBody(inlineAgentContainer);
+    if (stream) mountAgentNarration(step, stream, getAgentRendererLabels());
   }
-  // Never force-expand a step the user collapsed mid-stream (Issue #551).
+  updateStepStreamText(step, nextText);
   updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
     text: nextText,
     ...(nextText ? { status: 'streaming' as const } : {}),
@@ -4309,11 +4323,12 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep || !inlineAgentContainer) return;
   flushPendingInlineAgentStreamRender();
 
+  const stream = getAgentConsoleBody(inlineAgentContainer);
   for (const exec of msg.toolExecutions) {
-    addToolResultToStep(inlineAgentCurrentStep, exec.name, exec.result, getAgentRendererLabels());
+    if (stream) {
+      resolveAgentToolEntry(stream, msg.stepIndex, exec, getAgentRendererLabels());
+    }
   }
-  addToolResultDetailsToStep(inlineAgentCurrentStep, msg.toolExecutions);
-  agentRunningToolCount += msg.toolExecutions.length;
   updateAgentConsoleHeader(inlineAgentContainer, {
     phase: 'running',
     stepNumber: msg.stepIndex,
@@ -4323,10 +4338,9 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
     elapsedSeconds: getAgentConsoleElapsedSeconds(),
   }, getAgentRendererLabels());
 
-  const label = msg.toolExecutions.length > 0
-    ? contentT('content.agent.completeWithTools', { count: msg.toolExecutions.length })
-    : contentT('content.agent.complete');
-  updateStepStatus(inlineAgentCurrentStep, 'complete', label);
+  updateStepStatus(inlineAgentCurrentStep, 'complete');
+  // The step text is stable now; hydrate any HTML artifact preview it carried.
+  if (stream) hydrateAgentArtifactPreviews(stream);
   const fullText = getInlineAgentStepText(inlineAgentCurrentStep);
   updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
     status: 'complete',
@@ -4335,13 +4349,6 @@ function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
     responseMessageId: msg.responseMessageId,
     collapsed: true,
   }), { immediate: true });
-
-  // Collapse the finished step immediately so only the current step stays
-  // expanded; a manual expand is never overridden afterwards (Issue #551).
-  const completedStep = inlineAgentCurrentStep;
-  if (completedStep.getAttribute('data-user-toggled') !== 'true') {
-    setAgentStepCollapsed(completedStep, true);
-  }
 
   inlineAgentCurrentStep = null;
 }
@@ -4356,35 +4363,42 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
     inlineAgentContainerObserver?.disconnect();
     inlineAgentContainerObserver = null;
 
-    const rawFinalText = getInlineAgentDisplayFinalText(msg.finalText);
+    // The stream redesign (Issue #551): the final turn is the LAST narration
+    // segment of the body stream — there is no separate answer area. The
+    // display text is the full final-turn reply, with artifact blocks already
+    // converted to code blocks and the `<task_complete>` control block
+    // stripped, so the answer no longer depends on the 8000-char step clamp.
+    const displayFinalText = getInlineAgentDisplayFinalText(msg.finalText);
 
     // Budget-exhausted loops end with the budget notice as their final text;
-    // they are paused, not complete, so the console header must not claim
+    // they are paused, not complete, so the status line must not claim
     // success (Issue #541).
     const budgetPaused = isInlineAgentBudgetFinalText(
       msg.finalText,
       (count) => contentT('content.agent.budgetReached', { count }),
     );
-    // Display pivot (Issue #551 follow-up): the full final-turn reply is the
-    // user-facing answer rendered unfolded below the console. Resolve it from
-    // the two same-origin candidates — the loop's resolved final text and the
-    // last step's streamed text; when one is a prefix of the other the longer
-    // one is the complete reply (a truncated resolution must not hide the
-    // deliverable inside the collapsed timeline). The last step body is
-    // cleared only when it IS that answer, so budget-paused runs and legacy
-    // summary-split traces keep their distinct step notes.
+    // Resolve the answer from the two same-origin candidates — the loop's
+    // resolved final text and the last step's streamed text. Both are
+    // code-blockified display texts, so the resolver normalizes truncation
+    // markers: when the last step is a (clamped) prefix of the final turn the
+    // full answer REPLACES the partial narration instead of being rendered
+    // twice. Budget-paused runs and legacy summary-split traces keep their
+    // distinct step notes and append the notice as a final stream segment.
     const completedSteps = inlineAgentContainer.querySelectorAll('.dpp-agent-step');
     const lastCompletedStep = completedSteps[completedSteps.length - 1] as HTMLElement | undefined;
     const lastCompletedStepText = lastCompletedStep ? getInlineAgentStepText(lastCompletedStep) : '';
     const resolvedAnswer = budgetPaused
-      ? { answer: rawFinalText, fromStep: false }
-      : resolveInlineAgentAnswerText(rawFinalText, lastCompletedStepText);
+      ? { answer: displayFinalText, fromStep: false }
+      : resolveInlineAgentAnswerText(displayFinalText, lastCompletedStepText);
     const finalText = resolvedAnswer.answer;
-    appendInlineAgentFinalAnswer(inlineAgentContainer, finalText, msg.loopId);
     if (lastCompletedStep
       && (resolvedAnswer.fromStep
         || isInlineAgentStepTextTheFinalAnswer(lastCompletedStepText, finalText))) {
-      updateStepStreamText(lastCompletedStep, '');
+      // The last narration IS the answer (possibly a clamped prefix of it):
+      // render the resolved full answer in its place.
+      updateStepStreamText(lastCompletedStep, finalText);
+    } else if (finalText) {
+      appendInlineAgentNarration(inlineAgentContainer, finalText, msg.loopId);
     }
     renderTerminalAgentConsoleHeader(
       inlineAgentContainer,
@@ -4392,9 +4406,18 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
       msg.totalSteps,
       msg.totalTools,
     );
-    // The finished console collapses to its one-line status summary; the
-    // timeline stays one click away (Issue #551).
-    setAgentConsoleCollapsed(inlineAgentContainer, true);
+    // Finished runs collapse every tool group to its one-line header; manual
+    // toggles are never overridden (Issue #551 redesign).
+    const stream = getAgentConsoleBody(inlineAgentContainer);
+    if (stream) {
+      collapseAllAgentToolGroups(stream);
+      // Defense-in-depth: a missed STEP_COMPLETE (aborted mid-step) must not
+      // leave pulsing pending tool entries behind a "complete" header.
+      finalizePendingAgentToolEntries(stream);
+      // The final text is stable now: hydrate HTML artifact previews so the
+      // deliverables actually run inline.
+      hydrateAgentArtifactPreviews(stream);
+    }
 
     const executedToolNames = collectInlineAgentExecutedToolNames();
     if (shouldAutoSaveAgentOutput(finalText, executedToolNames)) {
@@ -4405,7 +4428,9 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
       status: 'complete',
       totalSteps: msg.totalSteps,
       totalTools: msg.totalTools,
-      finalText,
+      // Persist the "body + code blocks" display form so a page refresh
+      // restores the same complete deliverable (clamped to the 100k cap).
+      finalText: clampText(finalText, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? '',
     }), { immediate: true });
   } catch (err) {
     console.error('[DeepSeek++] handleAgentLoopComplete error:', err);
@@ -4427,37 +4452,68 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
 }
 
 /**
- * Issue #551 answer separation: the final answer area renders ONLY the
- * `<task_complete>` summary when the model closed with a non-empty signal,
- * and falls back to the full normalized text otherwise (malformed runs never
- * hide the answer). Working notes stay in the step timeline.
+ * Issue #551 stream redesign: the user-facing final text is the full final
+ * turn with artifact blocks converted to code blocks FIRST (so the raw
+ * `<artifact_create>` JSON is never shown and tool-call stripping cannot
+ * mangle the payload), tool-call XML removed, and the `<task_complete>`
+ * control block stripped.
  */
 function getInlineAgentDisplayFinalText(text: string): string {
-  const withoutToolCalls = stripToolCalls(text, { descriptors: currentToolDescriptors });
+  const withCodeBlocks = convertInlineAgentArtifactBlocks(text);
+  const withoutToolCalls = stripToolCalls(withCodeBlocks, { descriptors: currentToolDescriptors });
   return getInlineAgentAnswerText(withoutToolCalls);
 }
 
 /**
  * Issue #551 process separation: step bodies show the model's working notes
- * with the internal `<task_complete>` control block removed, so the answer
- * summary is not duplicated into the timeline.
+ * with artifact blocks converted to code blocks and the internal
+ * `<task_complete>` control block removed. Live streaming uses `'stream'`
+ * mode — an incomplete artifact block renders as an OPEN code block (no
+ * marker, no closing fence — the markdown renderer auto-closes it) so the
+ * deliverable visibly grows with the token stream.
  */
 function getInlineAgentDisplayStepText(text: string): string {
-  const withoutToolCalls = stripToolCalls(text, { descriptors: currentToolDescriptors });
+  const withCodeBlocks = convertInlineAgentArtifactBlocks(text, { partial: 'stream' });
+  const withoutToolCalls = stripToolCalls(withCodeBlocks, { descriptors: currentToolDescriptors });
   return getInlineAgentProcessText(withoutToolCalls);
 }
 
-function appendInlineAgentFinalAnswer(container: HTMLElement, text: string, loopId: string): void {
+/**
+ * Restored step text extraction: historical traces clamped mid-artifact, so
+ * salvage mode decodes the fragment into a closed code block with the explicit
+ * truncation marker (the streaming open-block form is only for live output).
+ */
+function getInlineAgentRestoredStepText(text: string): string {
+  const withCodeBlocks = convertInlineAgentArtifactBlocks(text);
+  const withoutToolCalls = stripToolCalls(withCodeBlocks, { descriptors: currentToolDescriptors });
+  return getInlineAgentProcessText(withoutToolCalls);
+}
+
+/**
+ * Appends a narration segment (markdown body) to the agent stream — used for
+ * final answers that are not the last step's own text (budget notices, legacy
+ * summary-split runs) and for restored answers.
+ */
+function appendInlineAgentNarration(container: HTMLElement, text: string, loopId: string): void {
   const renderText = clampText(text, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? '';
   if (!renderText) return;
-  const parent = container.parentNode;
-  if (!parent) return;
+  const stream = getAgentConsoleBody(container);
+  if (!stream) return;
 
-  const textDiv = document.createElement('div');
-  textDiv.innerHTML = renderInlineMarkdown(renderText);
-  textDiv.setAttribute('data-dpp-body-text', 'true');
-  textDiv.setAttribute('data-dpp-agent-loop-id', loopId);
-  parent.appendChild(textDiv);
+  const narration = document.createElement('div');
+  narration.className = 'dpp-agent-step dpp-agent-narration';
+  narration.setAttribute('data-dpp-agent-loop-id', loopId);
+
+  const body = document.createElement('div');
+  body.className = 'dpp-agent-step-body';
+  body.setAttribute('data-dpp-raw-text', renderText);
+  body.innerHTML = renderAgentStreamText(renderText);
+
+  narration.appendChild(body);
+  stream.appendChild(narration);
+  // Keep the scroller pinned while the final answer streams in (the reader is
+  // watching the bottom; a scrolled-up reader is never yanked).
+  followAgentStreamBottom(stream);
 }
 
 function collectInlineAgentExecutedToolNames(): string[] {
@@ -4533,8 +4589,10 @@ function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
 
   try {
     if (inlineAgentCurrentStep) {
-      updateStepStatus(inlineAgentCurrentStep, 'error', msg.error);
+      updateStepStatus(inlineAgentCurrentStep, 'error');
     }
+    const stream = getAgentConsoleBody(inlineAgentContainer);
+    if (stream) finalizePendingAgentToolEntries(stream);
 
     renderTerminalAgentConsoleHeader(
       inlineAgentContainer,
@@ -4543,7 +4601,6 @@ function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
       msg.totalTools,
       msg.error,
     );
-    setAgentConsoleCollapsed(inlineAgentContainer, true);
     updateActiveInlineAgentTrace((trace) => ({
       ...trace,
       status: 'error',
@@ -5296,16 +5353,20 @@ function getInlineAgentStepText(step: HTMLElement): string {
 }
 
 /**
- * True when a step's rendered body text is exactly the run's final answer
- * (same source turn, same clamp). Only then may the console clear the step
- * body — the answer area below renders it in full, so keeping it inside the
- * collapsed timeline would duplicate the deliverable. Distinct step notes
- * (budget-paused runs, legacy summary-split traces) are never deleted
- * (Issue #551 follow-up).
+ * True when a step's rendered body text shares its origin with the run's
+ * final answer: equality, or the step text is a prefix of the answer after
+ * normalizing truncation markers (a step clamped mid-artifact carries
+ * `...[truncated]` plus the salvage fence, the full answer does not). Only
+ * then may the step narration be REPLACED by the full answer — keeping both
+ * would duplicate the deliverable. Distinct step notes (budget-paused runs,
+ * legacy summary-split traces) never match (Issue #551 redesign).
  */
 function isInlineAgentStepTextTheFinalAnswer(stepText: string, answerText: string): boolean {
   if (!stepText || !answerText) return false;
-  return stepText === (clampText(answerText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '');
+  const normalizedStep = stripInlineAgentTruncationSuffix(stepText);
+  const normalizedAnswer = stripInlineAgentTruncationSuffix(answerText);
+  if (!normalizedStep || !normalizedAnswer) return false;
+  return normalizedStep === normalizedAnswer || normalizedAnswer.startsWith(normalizedStep);
 }
 
 function updateActiveInlineAgentTrace(
@@ -6651,8 +6712,8 @@ function renderRestoredInlineAgentTraces(): number {
     const target = findRestoredInlineAgentTarget(trace, messages, usedMessages);
     if (!target) continue;
 
-    const { container, answerText } = createRestoredInlineAgentContainer(trace);
-    mountRestoredInlineAgentContainer(target, container, trace, answerText);
+    const container = createRestoredInlineAgentContainer(trace);
+    mountRestoredInlineAgentContainer(target, container, trace);
     usedMessages.add(target);
     pendingRestoredInlineAgentTraceIds.delete(id);
   }
@@ -6694,13 +6755,13 @@ function findRestoredInlineAgentTarget(
   );
 }
 
-function createRestoredInlineAgentContainer(
-  trace: InlineAgentTraceRecord,
-): { container: HTMLElement; answerText: string } {
+function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTMLElement {
   const container = createAgentContainer(undefined, getAgentRendererLabels());
   container.setAttribute('data-restored', 'true');
   container.setAttribute('data-dpp-agent-trace-key', trace.id);
   container.setAttribute('data-dpp-agent-loop-id', trace.loopId);
+  const consoleBody = getAgentConsoleBody(container);
+  if (!consoleBody) return container;
 
   const restoredBudgetPaused = trace.status === 'complete' && isInlineAgentBudgetFinalText(
     trace.finalText,
@@ -6711,53 +6772,57 @@ function createRestoredInlineAgentContainer(
   const lastStepRecord = lastStepIndex === null
     ? null
     : sortedSteps[sortedSteps.length - 1];
+  // Stream redesign (Issue #551): the restored answer is the run's full final
+  // turn as the LAST narration segment — no separate answer area. New traces
+  // persist the code-blockified finalText; older traces persisted a raw
+  // summary/prefix (or the full raw turn) while the complete reply survived
+  // solely in the last step, so the resolver compares the two same-origin
+  // candidates with truncation markers normalized. A last step that IS the
+  // answer is replaced in place; budget notices and legacy summary-split
+  // traces keep their distinct step notes and append as a final segment.
+  const finalDisplayText = getInlineAgentDisplayFinalText(trace.finalText);
   const lastStepRenderText = lastStepRecord
-    ? clampText(
-        getInlineAgentDisplayStepText(lastStepRecord.text) || lastStepRecord.text,
-        INLINE_AGENT_STEP_RENDER_MAX_CHARS,
-      ) ?? ''
+    ? (getInlineAgentRestoredStepText(lastStepRecord.text) || lastStepRecord.text)
     : '';
-  // Display pivot (Issue #551 follow-up): the restored answer is the run's
-  // full final-turn reply, rendered unfolded below the console. Older traces
-  // persisted only a summary/prefix as finalText while the complete reply
-  // (e.g. a generated HTML document) survived solely in the last step — when
-  // one candidate is a prefix of the other, the longer one wins. A last step
-  // whose text IS the answer is cleared so the deliverable is not duplicated
-  // inside the collapsed timeline; budget notices and legacy summary-split
-  // traces keep their distinct step notes.
   const restoredAnswer = restoredBudgetPaused
-    ? { answer: getInlineAgentDisplayFinalText(trace.finalText), fromStep: false }
-    : resolveInlineAgentAnswerText(getInlineAgentDisplayFinalText(trace.finalText), lastStepRenderText);
+    ? { answer: finalDisplayText, fromStep: false }
+    : resolveInlineAgentAnswerText(finalDisplayText, lastStepRenderText);
   const restoredAnswerText = restoredAnswer.answer;
+  const lastStepIsAnswer = lastStepRecord !== null
+    && (restoredAnswer.fromStep
+      || isInlineAgentStepTextTheFinalAnswer(lastStepRenderText, restoredAnswerText));
 
-  const consoleBody = getAgentConsoleBody(container);
+  let lastStepReplaced = false;
   for (const step of sortedSteps) {
-    const stepEl = createAgentStepElement(step.index, getAgentRendererLabels());
-    const stepText = getInlineAgentDisplayStepText(step.text) || step.text;
+    const stepEl = createAgentStepElement(step.index);
+    const stepText = getInlineAgentRestoredStepText(step.text) || step.text;
     const renderStepText = clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '';
-    // Clear the last step's body only when it IS the restored final answer
-    // (equality, not just "has an answer"): budget notices and legacy
-    // summary-split traces keep their distinct step notes (Issue #551
-    // follow-up).
-    const stepIsFinalAnswer = step.index === lastStepIndex
-      && (restoredAnswer.fromStep
-        || isInlineAgentStepTextTheFinalAnswer(renderStepText, restoredAnswerText));
-    updateStepStreamText(stepEl, stepIsFinalAnswer ? '' : renderStepText);
-    for (const exec of step.toolExecutions) {
-      addToolResultToStep(stepEl, exec.name, exec.result, getAgentRendererLabels());
+    const stepIsFinalAnswer = step.index === lastStepIndex && lastStepIsAnswer;
+    if (renderStepText) {
+      updateStepStreamText(stepEl, stepIsFinalAnswer ? restoredAnswerText : renderStepText);
+      mountAgentNarration(stepEl, consoleBody, getAgentRendererLabels());
+      if (stepIsFinalAnswer) lastStepReplaced = true;
     }
-    addToolResultDetailsToStep(stepEl, step.toolExecutions);
+    for (const exec of step.toolExecutions) {
+      resolveAgentToolEntry(consoleBody, step.index, exec, getAgentRendererLabels());
+    }
     // A mid-flight step (streaming / executing tools) persisted by a page
     // refresh can never resume: render it as interrupted instead of a frozen
     // blinking state with no stop control (Issue #544).
     if (step.status === 'streaming' || step.status === 'executing_tools') {
-      updateStepStatus(stepEl, 'interrupted', contentT('content.agent.interrupted'));
+      updateStepStatus(stepEl, 'interrupted');
     } else {
-      updateStepStatus(stepEl, step.status, getInlineAgentStepStatusLabel(step));
+      updateStepStatus(stepEl, step.status);
     }
-    setAgentStepCollapsed(stepEl, step.collapsed);
-    consoleBody?.appendChild(stepEl);
   }
+  if (!lastStepReplaced && restoredAnswerText) {
+    appendInlineAgentNarration(container, restoredAnswerText, trace.loopId);
+  }
+  // A restored trace is a finished run: every tool group collapses to its
+  // one-line header, and HTML artifact previews run inline (Issue #551
+  // redesign).
+  collapseAllAgentToolGroups(consoleBody);
+  hydrateAgentArtifactPreviews(consoleBody);
 
   const elapsedSeconds = Math.max(0, Math.floor((trace.updatedAt - trace.createdAt) / 1000));
   if (trace.status === 'complete') {
@@ -6776,32 +6841,18 @@ function createRestoredInlineAgentContainer(
       elapsedSeconds,
     );
   }
-  setAgentConsoleCollapsed(container, true);
 
-  return { container, answerText: restoredAnswerText };
-}
-
-function getInlineAgentStepStatusLabel(step: InlineAgentTraceStepRecord): string {
-  if (step.status === 'complete') {
-    return step.toolExecutions.length > 0
-      ? contentT('content.agent.completeWithTools', { count: step.toolExecutions.length })
-      : contentT('content.agent.complete');
-  }
-  if (step.status === 'executing_tools') return contentT('content.agent.executingTools');
-  if (step.status === 'error') return contentT('content.agent.error');
-  return contentT('content.agent.streaming');
+  return container;
 }
 
 function mountRestoredInlineAgentContainer(
   message: Element,
   container: HTMLElement,
   trace: InlineAgentTraceRecord,
-  answerText: string,
 ): void {
   adoptMessageReasoningBlocks(message);
   const host = getAssistantResponseHost(message);
   host.appendChild(container);
-  appendInlineAgentFinalAnswer(container, answerText, trace.loopId);
 }
 
 function findRestoredToolBlock(id: string): Element | null {

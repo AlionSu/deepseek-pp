@@ -147,4 +147,38 @@ describe('renderInlineMarkdown', () => {
     expect(html).toContain('<blockquote>引用内容。</blockquote>');
     expect(html).toContain('正文。');
   });
+
+  it('renders 4-backtick fences and keeps 3-backtick runs as content', () => {
+    // Artifact deliverables (Issue #551) use a 4-backtick outer fence so the
+    // content may contain standard ``` fences. Code content is HTML-escaped.
+    const html = renderInlineMarkdown([
+      '````html',
+      '<div>partial</div>',
+      '```',
+      'inner',
+      '```',
+      '````',
+    ].join('\n'));
+
+    expect(html).toContain('<pre><code>&lt;div&gt;partial&lt;/div&gt;\n```\ninner\n```\n</code></pre>');
+    // No leftover raw fences.
+    expect(html).not.toContain('````');
+    expect(html).not.toContain('<table>');
+  });
+
+  it('auto-closes an unterminated trailing fence', () => {
+    // Streaming cuts and 100k-clamped persisted answers can end mid-block; the
+    // partial content renders as a code block instead of leaking backticks.
+    const html = renderInlineMarkdown('```html\n<div>partial');
+
+    expect(html).toContain('<pre><code>&lt;div&gt;partial</code></pre>');
+    expect(html).not.toContain('```');
+  });
+
+  it('keeps a lone trailing fence without content literal', () => {
+    const html = renderInlineMarkdown('text\n```');
+
+    expect(html).not.toContain('<pre>');
+    expect(html).toContain('text');
+  });
 });
