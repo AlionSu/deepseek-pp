@@ -3,10 +3,9 @@ import type {
   ConversationExport,
   ConversationExportArtifact,
   ExportedAttachment,
-  ExportedMessage,
 } from './types';
 
-export type SecondaryExportKind = 'message' | 'saved_items' | 'image_manifest';
+export type SecondaryExportKind = 'saved_items' | 'image_manifest';
 export type SecondaryExportFormat = 'markdown' | 'json' | 'html';
 
 export interface SecondaryExportArtifact {
@@ -15,24 +14,6 @@ export interface SecondaryExportArtifact {
   filename: string;
   mimeType: string;
   content: string;
-}
-
-export function createMessageMarkdownArtifact(message: Pick<ExportedMessage, 'id' | 'role' | 'content' | 'createdAt'>): SecondaryExportArtifact {
-  return {
-    kind: 'message',
-    format: 'markdown',
-    filename: `deepseek-message-${safeFilename(message.id)}.md`,
-    mimeType: 'text/markdown;charset=utf-8',
-    content: [
-      `# DeepSeek Message ${message.id}`,
-      '',
-      `- Role: ${message.role}`,
-      `- Created: ${message.createdAt ?? 'unknown'}`,
-      '',
-      message.content || '_No text content_',
-      '',
-    ].join('\n'),
-  };
 }
 
 export function createSavedItemsMarkdownArtifact(items: readonly SavedItem[]): SecondaryExportArtifact {

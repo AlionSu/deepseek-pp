@@ -1,4 +1,3 @@
-import { createMessageMarkdownArtifact } from '../../../core/export/secondary-artifacts';
 import {
   createBrowserDownloadManager,
   type BrowserDownloadManager,
@@ -11,42 +10,24 @@ export interface ContentUxPolishController {
 
 export interface ContentUxPolishLabels {
   codeDownloadButton: string;
-  messageMarkdownButton: string;
-  messageMarkdownTitle: string;
-  messageCopyButton: string;
-  messageCopyTitle: string;
-  messageCopyFailed: string;
 }
 
 const STYLE_ID = 'dpp-content-ux-polish-css';
 const CODE_BUTTON_CLASS = 'dpp-code-download';
-const MESSAGE_BUTTON_CLASS = 'dpp-message-download';
-const MESSAGE_COPY_CLASS = 'dpp-message-copy';
-const PRIMARY_MESSAGE_SELECTOR = [
-  '.ds-message',
-  '[data-message-id][data-message-role]',
-  '[data-message-author-role]',
-].join(', ');
-const VIRTUAL_MESSAGE_SELECTOR =
-  '.ds-virtual-list--printable .ds-virtual-list-visible-items > [data-virtual-list-item-key]';
-const MESSAGE_SELECTOR = `${PRIMARY_MESSAGE_SELECTOR}, ${VIRTUAL_MESSAGE_SELECTOR}`;
-const ASSISTANT_CONTENT_SELECTOR = '._74c0879, .ds-assistant-message-main-content';
 const POLISH_MOUNT_DELAY_MS = 50;
 const CODE_BUTTON_OFFSET_PX = 6;
-const MESSAGE_COPY_STATUS_MS = 1600;
 
 export function startContentUxPolish(
   getLabels: () => ContentUxPolishLabels,
 ): ContentUxPolishController {
   injectStyles();
   const codeButtons = new Map<HTMLElement, HTMLButtonElement>();
-  const copyFeedbackTimers = new Set<ReturnType<typeof setTimeout>>();
   const downloads = createBrowserDownloadManager();
   const syncCodeButtons = () => syncCodeButtonPositions(codeButtons);
-  const mount = () => mountPolish(document, getLabels(), codeButtons, copyFeedbackTimers, downloads);
+  const mount = () => mountPolish(document, getLabels(), codeButtons, downloads);
   const refreshLabels = () => applyPolishLabels(document, getLabels());
   mount();
-  const candidateMountScheduler = createCandidateMountScheduler(getLabels, copyFeedbackTimers, downloads);
+  const candidateMountScheduler = createCandidateMountScheduler(getLabels, downloads);
   const observer = new MutationObserver((mutations) => {
     for (const root of collectPolishCandidateRoots(mutations)) {
       candidateMountScheduler.schedule(root, codeButtons);
@@ -64,14 +45,11 @@ export function startContentUxPolish(
       observer.disconnect();
       candidateMountScheduler.cancel();
       downloads.stop();
-      copyFeedbackTimers.forEach((timer) => clearTimeout(timer));
-      copyFeedbackTimers.clear();
       window.removeEventListener('dpp:navigation', mount);
       window.removeEventListener('scroll', syncCodeButtons, true);
       window.removeEventListener('resize', syncCodeButtons);
       codeButtons.forEach((button) => button.remove());
       codeButtons.clear();
-      document.querySelectorAll(`.${MESSAGE_BUTTON_CLASS}, .${MESSAGE_COPY_CLASS}`).forEach((button) => button.remove());
       document.getElementById(STYLE_ID)?.remove();
     },
   };
@@ -93,11 +71,9 @@ function mountPolish(
   root: ParentNode,
   labels: ContentUxPolishLabels,
   codeButtons: Map<HTMLElement, HTMLButtonElement>,
-  copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
   downloads: BrowserDownloadManager,
 ): void {
   collectCodeBlocks(root).forEach((pre, index) => mountCodeDownload(pre, index, labels, codeButtons, downloads));
-  collectMessageNodes(root).forEach((message) => mountMessageActions(message, labels, copyFeedbackTimers, downloads));
   applyPolishLabels(root, labels);
   syncCodeButtonPositions(codeButtons);
 }
@@ -137,130 +113,15 @@ export function getCodeBlockText(pre: HTMLElement): string {
   return clone.textContent ?? '';
 }
 
-function collectMessageNodes(root: ParentNode): HTMLElement[] {
-  return queryIncludingRoot<HTMLElement>(root, MESSAGE_SELECTOR)
-    .filter((node) => !node.matches(VIRTUAL_MESSAGE_SELECTOR) || !node.querySelector(PRIMARY_MESSAGE_SELECTOR))
-    .filter((node) => !node.querySelector(`:scope > .${MESSAGE_BUTTON_CLASS}, :scope > .${MESSAGE_COPY_CLASS}`))
-    .filter((node) => node.textContent?.trim());
-}
-
-function mountMessageActions(
-  message: HTMLElement,
-  labels: ContentUxPolishLabels,
-  copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
-  downloads: BrowserDownloadManager,
-): void {
-  const markdownButton = document.createElement('button');
-  markdownButton.type = 'button';
-  markdownButton.className = MESSAGE_BUTTON_CLASS;
-  markdownButton.textContent = labels.messageMarkdownButton;
-  markdownButton.title = labels.messageMarkdownTitle;
-  markdownButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const artifact = createMessageMarkdownArtifact({
-      id: message.dataset.messageId || message.dataset.virtualListItemKey || `dom-${Date.now()}`,
-      role: getMessageRole(message),
-      content: getMessageText(message),
-      createdAt: null,
-    });
-    downloads.download(artifact.filename, new Blob([artifact.content], { type: artifact.mimeType }));
-  });
-  message.appendChild(markdownButton);
-
-  const copyButton = document.createElement('button');
-  copyButton.type = 'button';
-  copyButton.className = MESSAGE_COPY_CLASS;
-  copyButton.textContent = labels.messageCopyButton;
-  copyButton.title = labels.messageCopyTitle;
-  copyButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    void copyTextToClipboard(getMessageText(message)).catch((error) => {
-      console.warn('[DeepSeek++] copy full message output failed:', error);
-      showCopyFailure(copyButton, labels, copyFeedbackTimers);
-    });
-  });
-  message.appendChild(copyButton);
-}
-
-function showCopyFailure(
-  button: HTMLButtonElement,
-  labels: ContentUxPolishLabels,
-  timers: Set<ReturnType<typeof setTimeout>>,
-): void {
-  button.dataset.status = 'failed';
-  button.textContent = labels.messageCopyFailed;
-  const timer = setTimeout(() => {
-    timers.delete(timer);
-    delete button.dataset.status;
-    button.textContent = labels.messageCopyButton;
-    button.title = labels.messageCopyTitle;
-  }, MESSAGE_COPY_STATUS_MS);
-  timers.add(timer);
-}
-
-async function copyTextToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // writeText rejects when clipboard permission is denied or the document
-      // is unfocused; fall through to the legacy path before giving up.
-    }
-  }
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.select();
-  const copied = document.execCommand('copy');
-  textarea.remove();
-  if (!copied) {
-    throw new Error('Clipboard copy failed.');
-  }
-}
-
 function applyPolishLabels(root: ParentNode, labels: ContentUxPolishLabels): void {
   root.querySelectorAll<HTMLButtonElement>(`.${CODE_BUTTON_CLASS}`).forEach((button) => {
     button.textContent = labels.codeDownloadButton;
     button.title = labels.codeDownloadButton;
   });
-  root.querySelectorAll<HTMLButtonElement>(`.${MESSAGE_BUTTON_CLASS}`).forEach((button) => {
-    button.textContent = labels.messageMarkdownButton;
-    button.title = labels.messageMarkdownTitle;
-  });
-  root.querySelectorAll<HTMLButtonElement>(`.${MESSAGE_COPY_CLASS}`).forEach((button) => {
-    if (button.dataset.status === 'failed') return;
-    button.textContent = labels.messageCopyButton;
-    button.title = labels.messageCopyTitle;
-  });
-}
-
-function getMessageText(message: HTMLElement): string {
-  const clone = message.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll(`.${MESSAGE_BUTTON_CLASS}, .${MESSAGE_COPY_CLASS}`).forEach((node) => node.remove());
-  return clone.textContent?.trim() ?? '';
-}
-
-function normalizeRole(value: string | undefined): 'user' | 'assistant' | 'system' | 'tool' | 'unknown' {
-  if (value === 'user' || value === 'assistant' || value === 'system' || value === 'tool') return value;
-  return 'unknown';
-}
-
-function getMessageRole(message: HTMLElement): 'user' | 'assistant' | 'system' | 'tool' | 'unknown' {
-  const explicit = normalizeRole(message.dataset.messageRole ?? message.dataset.messageAuthorRole);
-  if (explicit !== 'unknown') return explicit;
-  if (message.querySelector(ASSISTANT_CONTENT_SELECTOR)) return 'assistant';
-  if (message.matches('.ds-message, [data-virtual-list-item-key]')) return 'user';
-  return 'unknown';
 }
 
 function createCandidateMountScheduler(
   getLabels: () => ContentUxPolishLabels,
-  copyFeedbackTimers: Set<ReturnType<typeof setTimeout>>,
   downloads: BrowserDownloadManager,
 ): { schedule(root: ParentNode, codeButtons: Map<HTMLElement, HTMLButtonElement>): void; cancel(): void } {
   const pending = new Set<ParentNode>();
@@ -280,7 +141,7 @@ function createCandidateMountScheduler(
         const labels = getLabels();
         for (const candidate of roots) {
           if (pendingCodeButtons) {
-            mountPolish(candidate, labels, pendingCodeButtons, copyFeedbackTimers, downloads);
+            mountPolish(candidate, labels, pendingCodeButtons, downloads);
           }
         }
         pendingCodeButtons = null;
@@ -313,12 +174,12 @@ function collectPolishCandidateRoots(mutations: readonly MutationRecord[]): Pare
 function getPolishCandidateRoot(node: Node): ParentNode | null {
   if (node.nodeType === Node.TEXT_NODE) {
     const parent = node.parentElement;
-    return parent?.closest(`pre, ${MESSAGE_SELECTOR}`) ?? null;
+    return parent?.closest('pre') ?? null;
   }
 
   if (!(node instanceof Element)) return null;
-  if (node.matches(`pre, ${MESSAGE_SELECTOR}`)) return node;
-  if (node.querySelector(`pre, ${MESSAGE_SELECTOR}`)) return node;
+  if (node.matches('pre')) return node;
+  if (node.querySelector('pre')) return node;
   return null;
 }
 
@@ -370,28 +231,17 @@ function injectStyles(): void {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .${CODE_BUTTON_CLASS}, .${MESSAGE_BUTTON_CLASS}, .${MESSAGE_COPY_CLASS} {
+    .${CODE_BUTTON_CLASS} {
       border: 1px solid rgba(0, 0, 0, 0.12);
       border-radius: 6px;
       background: rgba(255, 255, 255, 0.92);
       color: #334155;
       font: 11px/1.2 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
       cursor: pointer;
-    }
-    .${CODE_BUTTON_CLASS} {
       position: fixed;
       transform: translateX(-100%);
       z-index: 2147483647;
       padding: 4px 7px;
-    }
-    .${MESSAGE_BUTTON_CLASS}, .${MESSAGE_COPY_CLASS} {
-      float: right;
-      margin: 0 0 6px 8px;
-      padding: 3px 6px;
-    }
-    .${MESSAGE_COPY_CLASS}[data-status="failed"] {
-      border-color: rgba(220, 38, 38, 0.55);
-      color: #b91c1c;
     }
   `;
   document.head.appendChild(style);

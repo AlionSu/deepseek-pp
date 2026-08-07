@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createImageAttachmentManifestArtifact,
-  createMessageMarkdownArtifact,
   createSavedItemsJsonArtifact,
   createSavedItemsMarkdownArtifact,
 } from '../core/export/secondary-artifacts';
@@ -81,7 +80,7 @@ describe('Phase 5 product surface helpers', () => {
     expect(getCodeBlockText(blocks[0])).toBe('const ok: boolean = true;');
   });
 
-  it('renders injected content controls with provided localized labels', () => {
+  it('renders injected non-message controls with provided localized labels', () => {
     document.body.innerHTML = `
       <nav>
         <div><a href="https://chat.deepseek.com/a/chat/s/session-one">Release notes</a></div>
@@ -108,11 +107,6 @@ describe('Phase 5 product surface helpers', () => {
     }));
     const polish = startContentUxPolish(() => ({
       codeDownloadButton: '下载',
-      messageMarkdownButton: 'MD',
-      messageMarkdownTitle: '下载消息为 Markdown',
-      messageCopyButton: '复制',
-      messageCopyTitle: '复制完整对话输出',
-      messageCopyFailed: '复制失败',
     }));
 
     try {
@@ -126,17 +120,17 @@ describe('Phase 5 product surface helpers', () => {
       expect(document.querySelector('[data-dpp-history-status]')?.textContent).toBe('DeepSeek++：已显示 1/1');
       expect(document.querySelector<HTMLButtonElement>('.dpp-code-download')?.textContent).toBe('下载');
       expect(document.querySelector('pre')?.querySelector('.dpp-code-download')).toBeNull();
-      expect(document.querySelector<HTMLButtonElement>('.dpp-message-download')?.title).toBe('下载消息为 Markdown');
-      expect(document.querySelector<HTMLButtonElement>('.dpp-message-copy')?.title).toBe('复制完整对话输出');
-      expect(document.querySelector<HTMLButtonElement>('.dpp-message-copy')?.textContent).toBe('复制');
+      expect(document.querySelector('.dpp-message-download, .dpp-message-copy')).toBeNull();
     } finally {
       history.stop();
       polish.stop();
     }
   });
 
-  it('mounts message actions on the current printable virtual-list message shape', () => {
+  it('does not inject duplicate actions into current DeepSeek message shapes', async () => {
+    vi.useFakeTimers();
     document.body.innerHTML = `
+      <div class="ds-message" data-message-id="message-user" data-message-role="user">用户问题</div>
       <div class="ds-virtual-list ds-virtual-list--printable">
         <div class="ds-virtual-list-visible-items">
           <div data-virtual-list-item-key="2">
@@ -147,17 +141,20 @@ describe('Phase 5 product surface helpers', () => {
     `;
     const polish = startContentUxPolish(() => ({
       codeDownloadButton: '下载',
-      messageMarkdownButton: 'MD',
-      messageMarkdownTitle: '下载消息为 Markdown',
-      messageCopyButton: '复制',
-      messageCopyTitle: '复制完整对话输出',
-      messageCopyFailed: '复制失败',
     }));
 
     try {
-      const message = document.querySelector<HTMLElement>('[data-virtual-list-item-key="2"]')!;
-      expect(message.querySelectorAll('.dpp-message-download')).toHaveLength(1);
-      expect(message.querySelectorAll('.dpp-message-copy')).toHaveLength(1);
+      expect(document.querySelector('.dpp-message-download, .dpp-message-copy')).toBeNull();
+
+      const dynamicMessage = document.createElement('div');
+      dynamicMessage.className = 'ds-message';
+      dynamicMessage.textContent = '新增回复';
+      document.body.appendChild(dynamicMessage);
+      await Promise.resolve();
+      vi.advanceTimersByTime(60);
+
+      expect(document.querySelector('.dpp-message-download, .dpp-message-copy')).toBeNull();
+      expect(dynamicMessage.textContent).toBe('新增回复');
     } finally {
       polish.stop();
     }
@@ -185,11 +182,6 @@ describe('Phase 5 product surface helpers', () => {
     document.body.innerHTML = '<section id="stream"></section>';
     const polish = startContentUxPolish(() => ({
       codeDownloadButton: '下载',
-      messageMarkdownButton: 'MD',
-      messageMarkdownTitle: '下载消息为 Markdown',
-      messageCopyButton: '复制',
-      messageCopyTitle: '复制完整对话输出',
-      messageCopyFailed: '复制失败',
     }));
 
     try {
@@ -220,108 +212,6 @@ describe('Phase 5 product surface helpers', () => {
     } finally {
       polish.stop();
     }
-  });
-
-  it('copies full message output with clipboard fallback and visible failure state', async () => {
-    vi.useFakeTimers();
-    document.body.innerHTML = `
-      <div data-message-id="message-1" data-message-role="assistant">完整回复内容</div>
-    `;
-    const writeText = vi.fn(async () => undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      writable: true,
-      value: { writeText },
-    });
-    const execCommand = vi.fn(() => true);
-    Object.defineProperty(document, 'execCommand', {
-      configurable: true,
-      writable: true,
-      value: execCommand,
-    });
-
-    const polish = startContentUxPolish(() => ({
-      codeDownloadButton: '下载',
-      messageMarkdownButton: 'MD',
-      messageMarkdownTitle: '下载消息为 Markdown',
-      messageCopyButton: '复制',
-      messageCopyTitle: '复制完整对话输出',
-      messageCopyFailed: '复制失败',
-    }));
-
-    try {
-      const button = document.querySelector<HTMLButtonElement>('.dpp-message-copy')!;
-
-      button.click();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(writeText).toHaveBeenCalledWith('完整回复内容');
-      expect(execCommand).not.toHaveBeenCalled();
-      expect(button.textContent).toBe('复制');
-
-      // A writeText rejection (permission denied / unfocused document) falls
-      // back to the legacy path instead of failing silently.
-      writeText.mockRejectedValueOnce(new Error('denied'));
-      button.click();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(execCommand).toHaveBeenCalledTimes(1);
-      expect(button.textContent).toBe('复制');
-
-      // When both paths fail the button shows a visible failure state that
-      // restores itself instead of leaving the failure in the console only.
-      writeText.mockRejectedValueOnce(new Error('denied'));
-      execCommand.mockReturnValueOnce(false);
-      button.click();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(button.dataset.status).toBe('failed');
-      expect(button.textContent).toBe('复制失败');
-
-      vi.advanceTimersByTime(1600);
-      expect(button.dataset.status).toBeUndefined();
-      expect(button.textContent).toBe('复制');
-    } finally {
-      polish.stop();
-      delete (navigator as { clipboard?: unknown }).clipboard;
-      delete (document as { execCommand?: unknown }).execCommand;
-    }
-  });
-
-  it('clears pending copy feedback timers on stop', async () => {
-    vi.useFakeTimers();
-    document.body.innerHTML = `
-      <div data-message-id="message-1" data-message-role="assistant">完整回复内容</div>
-    `;
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      writable: true,
-      value: { writeText: vi.fn(async () => { throw new Error('denied'); }) },
-    });
-    Object.defineProperty(document, 'execCommand', {
-      configurable: true,
-      writable: true,
-      value: vi.fn(() => false),
-    });
-
-    const polish = startContentUxPolish(() => ({
-      codeDownloadButton: '下载',
-      messageMarkdownButton: 'MD',
-      messageMarkdownTitle: '下载消息为 Markdown',
-      messageCopyButton: '复制',
-      messageCopyTitle: '复制完整对话输出',
-      messageCopyFailed: '复制失败',
-    }));
-
-    const button = document.querySelector<HTMLButtonElement>('.dpp-message-copy')!;
-    button.click();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(button.dataset.status).toBe('failed');
-
-    polish.stop();
-    vi.advanceTimersByTime(1600);
-    expect(button.dataset.status).toBe('failed');
-    expect(button.textContent).toBe('复制失败');
-
-    delete (navigator as { clipboard?: unknown }).clipboard;
-    delete (document as { execCommand?: unknown }).execCommand;
   });
 
   it('filters official search results by DeepSeek++ history tags', async () => {
@@ -370,7 +260,7 @@ describe('Phase 5 product surface helpers', () => {
     }
   });
 
-  it('creates optional message, saved-item, and image export artifacts', () => {
+  it('creates optional saved-item and image export artifacts', () => {
     const savedItems: SavedItem[] = [{
       id: 'saved-1',
       syncId: 'sync-1',
@@ -382,12 +272,6 @@ describe('Phase 5 product surface helpers', () => {
       updatedAt: 2,
     }];
 
-    expect(createMessageMarkdownArtifact({
-      id: 'message-1',
-      role: 'assistant',
-      content: 'Hello',
-      createdAt: null,
-    }).content).toContain('Hello');
     expect(createSavedItemsMarkdownArtifact(savedItems).content).toContain('Summarize this.');
     expect(JSON.parse(createSavedItemsJsonArtifact(savedItems).content).items[0].id).toBe('saved-1');
     expect(createImageAttachmentManifestArtifact([{
