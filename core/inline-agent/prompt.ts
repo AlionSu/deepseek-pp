@@ -136,7 +136,6 @@ export function buildContinuationPrompt(
   return [
     translate(locale, 'prompt.inlineAgent.continuationIntro'),
     translate(locale, 'prompt.inlineAgent.continuationEnough'),
-    translate(locale, 'prompt.inlineAgent.finalAnswerContract'),
     translate(locale, 'prompt.inlineAgent.continuationNoPseudo'),
     '',
     '<original_task>',
@@ -166,7 +165,6 @@ export function buildNudgePrompt(
     translate(locale, 'prompt.inlineAgent.nudgeChoice'),
     translate(locale, 'prompt.inlineAgent.nudgeNextTool'),
     translate(locale, 'prompt.inlineAgent.nudgeComplete'),
-    translate(locale, 'prompt.inlineAgent.finalAnswerContract'),
     translate(locale, 'prompt.inlineAgent.nudgeCount', { count: nudgeCount }),
     '',
     '<original_task>',

@@ -13,7 +13,6 @@ export const prompt = {
   inlineAgent: {
     continuationIntro: '以下是工具续跑任务刚刚执行的工具结果。请像真正的 Agent 一样，基于原始任务和这些工具结果继续推进。',
     continuationEnough: '如果结果已经足够，请输出最终结论；只有确实需要更多信息、验证或文件修改时才继续调用工具。',
-    finalAnswerContract: '当任务完成时，你必须把给用户的完整最终答案写入 <task_complete> 的 summary 字段；signal 之前只能写简短的工作笔记，不得包含最终答案。',
     continuationNoPseudo: '不要要求用户点击继续，也不要输出伪工具调用 JSON；需要继续操作时只输出可执行 XML 工具标签。',
     failureRecovery: '至少一个工具执行失败。不要因为可恢复错误就停止；先阅读 summary/detail/error，并修正参数或改用合适的下一步继续完成任务。',
     nudgeNoTools: '上一轮回复没有包含任何可执行工具 XML，因此自动化续跑无法继续执行。',

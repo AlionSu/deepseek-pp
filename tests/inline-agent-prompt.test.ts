@@ -81,30 +81,40 @@ describe('inline-agent model prompts', () => {
     expect(nudge).toContain('<tool_results_so_far>');
   });
 
-  it('enforces the final-answer contract in both continuation and nudge prompts', () => {
+  it('keeps the completion-signal format without a final-answer split contract', () => {
+    // Issue #551 follow-up: the summary-split contract was reverted — models
+    // write real deliverables into the reply body, and the display layer
+    // renders the full body as the answer. The <task_complete> signal remains
+    // the termination marker only.
     const continuation = buildContinuationPrompt('查行情', [SUCCESS_EXECUTION], 'zh-CN');
-    expect(continuation).toContain('完整最终答案');
-    expect(continuation).toContain('<task_complete>');
+    expect(continuation).not.toContain('完整最终答案');
 
     const nudge = buildNudgePrompt('查行情', '我会继续。', [SUCCESS_EXECUTION], 1, 'zh-CN');
-    expect(nudge).toContain('完整最终答案');
-    expect(nudge).toContain('<task_complete>');
+    expect(nudge).toContain('<task_complete>{"summary":"..."}</task_complete>');
+    expect(nudge).not.toContain('完整最终答案');
 
     const enContinuation = buildContinuationPrompt('Research docs', [SUCCESS_EXECUTION], 'en');
-    expect(enContinuation).toContain('complete final answer for the user');
+    expect(enContinuation).not.toContain('complete final answer for the user');
   });
 
-  it('extracts the task_complete summary as the sole user-facing answer', () => {
+  it('renders the full pre-signal reply body as the user-facing answer', () => {
+    // Issue #551 follow-up: deliverables live in the reply body; the answer
+    // area shows the complete body, not just the signal summary.
     const text = [
       '我先整理一下刚才获取的信息。',
       '',
       '<task_complete>{"summary":"最终答案：任务已经完成。","artifacts":["demo.html"]}</task_complete>',
     ].join('\n');
 
+    expect(getInlineAgentAnswerText(text)).toBe('我先整理一下刚才获取的信息。');
+  });
+
+  it('falls back to the task_complete summary when the reply body is empty', () => {
+    const text = '<task_complete>{"summary":"最终答案：任务已经完成。"}</task_complete>';
     expect(getInlineAgentAnswerText(text)).toBe('最终答案：任务已经完成。');
   });
 
-  it('falls back to the full normalized text when the summary is empty', () => {
+  it('renders the reply body when the task_complete summary is empty', () => {
     const text = [
       '我先整理一下刚才获取的信息。',
       '<task_complete>{"summary":""}</task_complete>',

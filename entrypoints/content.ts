@@ -70,6 +70,7 @@ import {
   getInlineAgentAnswerText,
   getInlineAgentProcessText,
 } from '../core/inline-agent/display-text';
+import { findAssistantMessageByContentSnippet } from '../core/inline-agent/message-anchor';
 import type {
   InlineAgentStartPayload,
   InlineAgentStreamChunkMsg,
@@ -247,7 +248,10 @@ const TOKEN_SPEED_MOUNT_DEBOUNCE_MS = 500;
 const MULTIMODAL_MEDIA_MOUNT_DEBOUNCE_MS = 250;
 const INLINE_AGENT_TRACE_WRITE_DEBOUNCE_MS = 300;
 const INLINE_AGENT_STEP_RENDER_MAX_CHARS = 8000;
-const INLINE_AGENT_FINAL_RENDER_MAX_CHARS = 12000;
+// The final answer is first-class user-facing content: never folded and
+// effectively never truncated (Issue #551 follow-up). The generous residual
+// cap only guards the DOM/markdown renderer against pathological outputs.
+const INLINE_AGENT_FINAL_RENDER_MAX_CHARS = 100_000;
 const CLEANABLE_TEXT_DEEP_SCAN_MAX_CHARS = 120_000;
 const CLEANUP_MESSAGE_SCAN_LIMIT = 24;
 const THEME_BOOTSTRAP_RETRY_MS = 250;
@@ -3927,6 +3931,11 @@ function startInlineAgentIfNeeded(
   observeReportedPersistence(writeInlineAgentTrace(activeInlineAgentTrace));
 
   inlineAgentContainer = container;
+  // Stamp the live container with its trace id so the restore dedupe check
+  // (findRestoredInlineAgentTrace) recognizes it and never mounts a duplicate
+  // restored console next to the still-present live one (Issue #551
+  // follow-up).
+  container.setAttribute('data-dpp-agent-trace-key', activeInlineAgentTrace.id);
   mountInlineAgentContainer(target, container);
 
   // Visible "starting" feedback for the 2.5-6.5s wait before the first model
@@ -3997,7 +4006,10 @@ function findInlineAgentLiveTarget(
     if (byId) return byId;
   }
 
-  const byContent = findAssistantMessageByContentSnippet(messages, anchorContent, new Set());
+  // A message already hosting an agent console belongs to an earlier run; a
+  // fresh run never anchors into it (Issue #551 follow-up).
+  const claimed = new Set(messages.filter((message) => message.querySelector('.dpp-agent-container')));
+  const byContent = findAssistantMessageByContentSnippet(messages, anchorContent, claimed);
   if (byContent) return byContent;
 
   return messages[messages.length - 1] ?? null;
@@ -4349,6 +4361,16 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
       msg.finalText,
       (count) => contentT('content.agent.budgetReached', { count }),
     );
+    // Display pivot (Issue #551 follow-up): the full final-turn text is the
+    // user-facing answer rendered below the console; clear it from the last
+    // step body so the deliverable is not duplicated inside the collapsed
+    // process timeline. Budget-paused runs keep the step text because their
+    // final text is only the budget notice.
+    if (!budgetPaused && finalText) {
+      const steps = inlineAgentContainer.querySelectorAll('.dpp-agent-step');
+      const lastStep = steps[steps.length - 1];
+      if (lastStep) updateStepStreamText(lastStep as HTMLElement, '');
+    }
     renderTerminalAgentConsoleHeader(
       inlineAgentContainer,
       budgetPaused ? 'paused' : 'complete',
@@ -6681,31 +6703,33 @@ function findInlineAgentTargetByToolRecord(
   return null;
 }
 
-function findAssistantMessageByContentSnippet(
-  messages: Element[],
-  content: string,
-  usedMessages: Set<Element>,
-): Element | null {
-  const snippet = normalizeText(content).slice(0, 100);
-  if (snippet.length < 12) return null;
-
-  return messages.find((message) => {
-    if (usedMessages.has(message)) return false;
-    return normalizeText(message.textContent ?? '').includes(snippet);
-  }) ?? null;
-}
-
 function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTMLElement {
   const container = createAgentContainer(undefined, getAgentRendererLabels());
   container.setAttribute('data-restored', 'true');
   container.setAttribute('data-dpp-agent-trace-key', trace.id);
   container.setAttribute('data-dpp-agent-loop-id', trace.loopId);
 
+  // Display pivot (Issue #551 follow-up): when the run produced a real final
+  // answer it renders below the console, so the last step's text (the same
+  // final turn) is not duplicated inside the collapsed timeline. Keep it for
+  // budget-paused traces whose final text is only the budget notice.
+  const restoredAnswerText = getInlineAgentDisplayFinalText(trace.finalText);
+  const restoredBudgetPaused = trace.status === 'complete' && isInlineAgentBudgetFinalText(
+    trace.finalText,
+    (count) => contentT('content.agent.budgetReached', { count }),
+  );
+  const skipFinalStepText = restoredAnswerText.length > 0 && !restoredBudgetPaused;
+  const sortedSteps = [...trace.steps].sort((a, b) => a.index - b.index);
+  const lastStepIndex = sortedSteps.length > 0 ? sortedSteps[sortedSteps.length - 1].index : null;
+
   const consoleBody = getAgentConsoleBody(container);
-  for (const step of [...trace.steps].sort((a, b) => a.index - b.index)) {
+  for (const step of sortedSteps) {
     const stepEl = createAgentStepElement(step.index, getAgentRendererLabels());
     const stepText = getInlineAgentDisplayStepText(step.text) || step.text;
-    updateStepStreamText(stepEl, clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '');
+    const renderStepText = skipFinalStepText && step.index === lastStepIndex
+      ? ''
+      : clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '';
+    updateStepStreamText(stepEl, renderStepText);
     for (const exec of step.toolExecutions) {
       addToolResultToStep(stepEl, exec.name, exec.result, getAgentRendererLabels());
     }
@@ -6726,11 +6750,7 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
   if (trace.status === 'complete') {
     // A budget-paused trace persists status 'complete' with the budget notice
     // as its final text; restore it as paused, not as a success (Issue #541).
-    const budgetPaused = isInlineAgentBudgetFinalText(
-      trace.finalText,
-      (count) => contentT('content.agent.budgetReached', { count }),
-    );
-    renderTerminalAgentConsoleHeader(container, budgetPaused ? 'paused' : 'complete', trace.totalSteps, trace.totalTools, undefined, elapsedSeconds);
+    renderTerminalAgentConsoleHeader(container, restoredBudgetPaused ? 'paused' : 'complete', trace.totalSteps, trace.totalTools, undefined, elapsedSeconds);
   } else if (trace.status === 'error') {
     renderTerminalAgentConsoleHeader(container, 'error', trace.totalSteps, trace.totalTools, trace.error, elapsedSeconds);
   } else if (trace.status === 'stopping') {

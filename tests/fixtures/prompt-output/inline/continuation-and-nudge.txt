@@ -1,7 +1,6 @@
 continuation:
 These are the tool results just executed for the tool-continuation task. Continue like a real agent, using the original task and these tool results to move the work forward.
 If the results are enough, output the final answer. Only call more tools when more information, verification, or file changes are truly needed.
-When the task is complete, you MUST put the complete final answer for the user into the summary field of <task_complete>; text before the signal may only be brief working notes and must not contain the final answer.
 Do not ask the user to click continue, and do not output pseudo tool-call JSON. When more action is needed, output only executable XML tool tags.
 
 <original_task>
@@ -41,7 +40,6 @@ nudge:
 请根据原始任务和工具结果二选一：
 1. 如果任务仍未完成，本轮必须直接输出下一步可执行工具 XML。
 2. 如果任务已经完成，输出 <task_complete>{"summary":"..."}</task_complete>。
-当任务完成时，你必须把给用户的完整最终答案写入 <task_complete> 的 summary 字段；signal 之前只能写简短的工作笔记，不得包含最终答案。
 这是第 1 次无工具调用纠偏。
 
 <original_task>
