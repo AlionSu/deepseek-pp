@@ -12,6 +12,7 @@ import {
 import {
   getInlineAgentAnswerText,
   getInlineAgentProcessText,
+  resolveInlineAgentAnswerText,
 } from '../core/inline-agent/display-text';
 import { buildAutomationToolContinuationPrompt } from '../core/automation/runner';
 import type { ToolExecutionRecord } from '../core/types';
@@ -126,6 +127,27 @@ describe('inline-agent model prompts', () => {
   it('falls back to the full text when no task_complete signal exists', () => {
     expect(getInlineAgentAnswerText('正常回答内容。')).toBe('正常回答内容。');
     expect(getInlineAgentAnswerText('，用户想了解港股的走势。')).toBe('用户想了解港股的走势。');
+  });
+
+  it('resolves the longer reply when finalText is a prefix of the last step text', () => {
+    // Issue #551 follow-up: traces persisted by older builds stored only a
+    // summary/prefix as finalText while the complete reply (e.g. a generated
+    // HTML document) survived solely in the last step. The longer same-origin
+    // candidate is the answer, and the step body may be cleared.
+    const prefix = '搜索结果中，我已经收集了足够的数据。';
+    const full = prefix + '```html<html>完整交付物</html>```';
+    expect(resolveInlineAgentAnswerText(prefix, full)).toEqual({ answer: full, fromStep: true });
+    expect(resolveInlineAgentAnswerText(full, prefix)).toEqual({ answer: full, fromStep: false });
+    expect(resolveInlineAgentAnswerText(full, full)).toEqual({ answer: full, fromStep: false });
+  });
+
+  it('keeps finalText when the candidates are unrelated (budget notice, summary split)', () => {
+    expect(resolveInlineAgentAnswerText('已达到步骤预算，代理已暂停。', '最后一步的工作笔记。'))
+      .toEqual({ answer: '已达到步骤预算，代理已暂停。', fromStep: false });
+    expect(resolveInlineAgentAnswerText('最终答案。', ''))
+      .toEqual({ answer: '最终答案。', fromStep: false });
+    expect(resolveInlineAgentAnswerText('', '最后一步的完整回复。'))
+      .toEqual({ answer: '最后一步的完整回复。', fromStep: true });
   });
 
   it('keeps working notes in process text without the control block', () => {

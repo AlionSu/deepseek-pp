@@ -69,6 +69,7 @@ import {
 import {
   getInlineAgentAnswerText,
   getInlineAgentProcessText,
+  resolveInlineAgentAnswerText,
 } from '../core/inline-agent/display-text';
 import {
   elementHasMessageId,
@@ -4355,8 +4356,7 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
     inlineAgentContainerObserver?.disconnect();
     inlineAgentContainerObserver = null;
 
-    const finalText = getInlineAgentDisplayFinalText(msg.finalText);
-    appendInlineAgentFinalAnswer(inlineAgentContainer, finalText, msg.loopId);
+    const rawFinalText = getInlineAgentDisplayFinalText(msg.finalText);
 
     // Budget-exhausted loops end with the budget notice as their final text;
     // they are paused, not complete, so the console header must not claim
@@ -4365,16 +4365,25 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
       msg.finalText,
       (count) => contentT('content.agent.budgetReached', { count }),
     );
-    // Display pivot (Issue #551 follow-up): the full final-turn text is the
-    // user-facing answer rendered below the console; clear it from the last
-    // step body ONLY when the step text IS that answer (same source turn,
-    // same clamp), so the deliverable is not duplicated inside the collapsed
-    // process timeline. Budget-paused runs and legacy summary-split traces
-    // keep their step text because it differs from the rendered answer.
+    // Display pivot (Issue #551 follow-up): the full final-turn reply is the
+    // user-facing answer rendered unfolded below the console. Resolve it from
+    // the two same-origin candidates — the loop's resolved final text and the
+    // last step's streamed text; when one is a prefix of the other the longer
+    // one is the complete reply (a truncated resolution must not hide the
+    // deliverable inside the collapsed timeline). The last step body is
+    // cleared only when it IS that answer, so budget-paused runs and legacy
+    // summary-split traces keep their distinct step notes.
     const completedSteps = inlineAgentContainer.querySelectorAll('.dpp-agent-step');
     const lastCompletedStep = completedSteps[completedSteps.length - 1] as HTMLElement | undefined;
+    const lastCompletedStepText = lastCompletedStep ? getInlineAgentStepText(lastCompletedStep) : '';
+    const resolvedAnswer = budgetPaused
+      ? { answer: rawFinalText, fromStep: false }
+      : resolveInlineAgentAnswerText(rawFinalText, lastCompletedStepText);
+    const finalText = resolvedAnswer.answer;
+    appendInlineAgentFinalAnswer(inlineAgentContainer, finalText, msg.loopId);
     if (lastCompletedStep
-      && isInlineAgentStepTextTheFinalAnswer(getInlineAgentStepText(lastCompletedStep), finalText)) {
+      && (resolvedAnswer.fromStep
+        || isInlineAgentStepTextTheFinalAnswer(lastCompletedStepText, finalText))) {
       updateStepStreamText(lastCompletedStep, '');
     }
     renderTerminalAgentConsoleHeader(
@@ -6642,8 +6651,8 @@ function renderRestoredInlineAgentTraces(): number {
     const target = findRestoredInlineAgentTarget(trace, messages, usedMessages);
     if (!target) continue;
 
-    const container = createRestoredInlineAgentContainer(trace);
-    mountRestoredInlineAgentContainer(target, container, trace);
+    const { container, answerText } = createRestoredInlineAgentContainer(trace);
+    mountRestoredInlineAgentContainer(target, container, trace, answerText);
     usedMessages.add(target);
     pendingRestoredInlineAgentTraceIds.delete(id);
   }
@@ -6685,23 +6694,41 @@ function findRestoredInlineAgentTarget(
   );
 }
 
-function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTMLElement {
+function createRestoredInlineAgentContainer(
+  trace: InlineAgentTraceRecord,
+): { container: HTMLElement; answerText: string } {
   const container = createAgentContainer(undefined, getAgentRendererLabels());
   container.setAttribute('data-restored', 'true');
   container.setAttribute('data-dpp-agent-trace-key', trace.id);
   container.setAttribute('data-dpp-agent-loop-id', trace.loopId);
 
-  // Display pivot (Issue #551 follow-up): when the run produced a real final
-  // answer it renders below the console, so a last step whose text IS that
-  // answer is cleared to avoid duplicating the deliverable inside the
-  // collapsed timeline (equality check below keeps distinct step notes).
-  const restoredAnswerText = getInlineAgentDisplayFinalText(trace.finalText);
   const restoredBudgetPaused = trace.status === 'complete' && isInlineAgentBudgetFinalText(
     trace.finalText,
     (count) => contentT('content.agent.budgetReached', { count }),
   );
   const sortedSteps = [...trace.steps].sort((a, b) => a.index - b.index);
   const lastStepIndex = sortedSteps.length > 0 ? sortedSteps[sortedSteps.length - 1].index : null;
+  const lastStepRecord = lastStepIndex === null
+    ? null
+    : sortedSteps[sortedSteps.length - 1];
+  const lastStepRenderText = lastStepRecord
+    ? clampText(
+        getInlineAgentDisplayStepText(lastStepRecord.text) || lastStepRecord.text,
+        INLINE_AGENT_STEP_RENDER_MAX_CHARS,
+      ) ?? ''
+    : '';
+  // Display pivot (Issue #551 follow-up): the restored answer is the run's
+  // full final-turn reply, rendered unfolded below the console. Older traces
+  // persisted only a summary/prefix as finalText while the complete reply
+  // (e.g. a generated HTML document) survived solely in the last step — when
+  // one candidate is a prefix of the other, the longer one wins. A last step
+  // whose text IS the answer is cleared so the deliverable is not duplicated
+  // inside the collapsed timeline; budget notices and legacy summary-split
+  // traces keep their distinct step notes.
+  const restoredAnswer = restoredBudgetPaused
+    ? { answer: getInlineAgentDisplayFinalText(trace.finalText), fromStep: false }
+    : resolveInlineAgentAnswerText(getInlineAgentDisplayFinalText(trace.finalText), lastStepRenderText);
+  const restoredAnswerText = restoredAnswer.answer;
 
   const consoleBody = getAgentConsoleBody(container);
   for (const step of sortedSteps) {
@@ -6713,7 +6740,8 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
     // summary-split traces keep their distinct step notes (Issue #551
     // follow-up).
     const stepIsFinalAnswer = step.index === lastStepIndex
-      && isInlineAgentStepTextTheFinalAnswer(renderStepText, restoredAnswerText);
+      && (restoredAnswer.fromStep
+        || isInlineAgentStepTextTheFinalAnswer(renderStepText, restoredAnswerText));
     updateStepStreamText(stepEl, stepIsFinalAnswer ? '' : renderStepText);
     for (const exec of step.toolExecutions) {
       addToolResultToStep(stepEl, exec.name, exec.result, getAgentRendererLabels());
@@ -6750,7 +6778,7 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
   }
   setAgentConsoleCollapsed(container, true);
 
-  return container;
+  return { container, answerText: restoredAnswerText };
 }
 
 function getInlineAgentStepStatusLabel(step: InlineAgentTraceStepRecord): string {
@@ -6768,11 +6796,12 @@ function mountRestoredInlineAgentContainer(
   message: Element,
   container: HTMLElement,
   trace: InlineAgentTraceRecord,
+  answerText: string,
 ): void {
   adoptMessageReasoningBlocks(message);
   const host = getAssistantResponseHost(message);
   host.appendChild(container);
-  appendInlineAgentFinalAnswer(container, getInlineAgentDisplayFinalText(trace.finalText), trace.loopId);
+  appendInlineAgentFinalAnswer(container, answerText, trace.loopId);
 }
 
 function findRestoredToolBlock(id: string): Element | null {
