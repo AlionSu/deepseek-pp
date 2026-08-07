@@ -1,4 +1,5 @@
 import type { RequestBodyModification } from '../../../core/interceptor/fetch-hook';
+import type { DeepSeekAugmentableWebRoute } from '../../../core/deepseek/request-codec';
 import {
   BRIDGE_HANDSHAKE_TYPES,
   BRIDGE_READY_TYPE,
@@ -23,7 +24,11 @@ import type {
 
 export interface MainWorldBridgeController extends ContentCapabilityController {
   post(message: Record<string, unknown>): void;
-  requestAugmentedBody(body: string, requestId: string): Promise<RequestBodyModification | null>;
+  requestAugmentedBody(
+    body: string,
+    requestId: string,
+    route: DeepSeekAugmentableWebRoute,
+  ): Promise<RequestBodyModification | null>;
 }
 
 export interface MainWorldBridgeState {
@@ -262,6 +267,7 @@ export function createMainWorldBridgeController(
   const requestAugmentedBody = (
     body: string,
     requestId: string,
+    route: DeepSeekAugmentableWebRoute,
   ): Promise<RequestBodyModification | null> => {
     if (!scope?.active || !port) return Promise.resolve(null);
     const id = createSessionId();
@@ -271,7 +277,7 @@ export function createMainWorldBridgeController(
         reject(new Error('DeepSeek++ request augmentation timed out.'));
       }, REQUEST_TIMEOUT_MS);
       pendingRequests.set(id, { resolve, reject, timeout });
-      post({ type: 'AUGMENT_REQUEST_BODY', id, requestId, body });
+      post({ type: 'AUGMENT_REQUEST_BODY', id, requestId, route, body });
     });
   };
 

@@ -48,8 +48,8 @@ export default defineContentScript({
       },
     });
     updateHookState({
-      onRequestBody(body: string, requestId: string) {
-        return bridge.requestAugmentedBody(body, requestId);
+      onRequestBody(body, requestId, route) {
+        return bridge.requestAugmentedBody(body, requestId, route);
       },
       onHeadersCaptured(headers: Record<string, string> | null) {
         bridge.post({ type: 'HEADERS_CAPTURED', headers });

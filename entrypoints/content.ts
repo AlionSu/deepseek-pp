@@ -34,9 +34,19 @@ import {
 } from '../core/interceptor/tool-parser';
 import {
   augmentDecodedRequestBody,
-  decodeAugmentableDeepSeekRequestBody,
+  decodeAugmentableDeepSeekRequest,
   type DeepSeekRequestBody,
+  type DeepSeekRegenerateRequestBody,
 } from '../core/interceptor/request-augmentation';
+import { isDeepSeekAugmentableWebRoute } from '../core/deepseek/request-codec';
+import {
+  REGENERATE_AUTHORIZATION_METADATA_KEY,
+  createPersistedRegenerateAuthorizationMetadata,
+  createRegenerateAuthorizationScopeStore,
+  resolvePersistedRegenerateAuthorizationEvidence,
+  type RegenerateAuthorizationScope,
+  type RegeneratePromptOptionsSnapshot,
+} from '../core/interceptor/regenerate-authorization-scope';
 import { DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS, normalizeSkillAutoActivationSettings, type SkillAutoActivationSettings } from '../core/skill/auto-activation-settings';
 import { containsInternalPromptMarker, sanitizeInternalPromptText } from '../core/prompt';
 import { createRestoredArtifactToolResult } from '../core/artifact';
@@ -349,6 +359,10 @@ const pendingExternalToolPayloadWrites = new Map<string, Promise<void>>();
 const activeToolAuthorizations = new Map<string, ToolAuthorizationGrantSummary>();
 const toolAuthorizationRequestAliases = new Map<string, string>();
 const inlineAgentAuthorizationRequestKeys = new Map<string, string>();
+const activeToolAuthorizationRequestMetadata = new Map<string, {
+  activeLocalSkillDir?: string;
+}>();
+const regenerateAuthorizationScopes = createRegenerateAuthorizationScopeStore();
 const pendingToolAuthorizationCorrelations = new PendingAuthorizationCorrelations();
 const pendingToolExecutionTasksByRequest = new Map<string, Set<Promise<ToolCardResult>>>();
 const pendingStartedToolCallsByRequest = new PendingRequestRegistry<PendingStartedToolCall>();
@@ -806,6 +820,8 @@ async function stopToolCapability(): Promise<void> {
   activeToolAuthorizations.clear();
   toolAuthorizationRequestAliases.clear();
   inlineAgentAuthorizationRequestKeys.clear();
+  activeToolAuthorizationRequestMetadata.clear();
+  regenerateAuthorizationScopes.clear();
   pendingExternalToolPayloadWrites.clear();
   pendingToolExecutionTasksByRequest.clear();
   restoredRenderAttempts = 0;
@@ -1016,6 +1032,7 @@ async function dispatchMainWorldMessage(data: Record<string, unknown>): Promise<
       }
       case 'RESPONSE_COMPLETE': {
         const complete = normalizeResponseCompletePayload(data.payload, data.text);
+        rememberRegenerateAuthorizationScope(complete);
         const generation = ++responseGeneration;
         activeStreamingToolCount = 0;
         await waitForPendingToolExecutions(complete.requestId);
@@ -1175,12 +1192,18 @@ function handleContentRuntimeMessage(
 
 async function disconnectMainWorldRuntimeState(): Promise<void> {
   pendingToolAuthorizationCorrelations.terminateAll();
-  await closeAllContentToolAuthorizations();
+  try {
+    await closeAllContentToolAuthorizations();
+  } finally {
+    activeToolAuthorizationRequestMetadata.clear();
+    regenerateAuthorizationScopes.clear();
+  }
 }
 
 async function handleAugmentRequestBody(data: {
   id?: unknown;
   requestId?: unknown;
+  route?: unknown;
   body?: unknown;
 }): Promise<void> {
   const id = typeof data.id === 'string' ? data.id : '';
@@ -1194,14 +1217,24 @@ async function handleAugmentRequestBody(data: {
     if (typeof data.body !== 'string') {
       throw new Error('Request body must be a string.');
     }
-    const decodedBody = decodeAugmentableDeepSeekRequestBody(data.body);
-    if (!decodedBody) {
-      postToMainWorld({
-        type: 'AUGMENT_REQUEST_BODY_RESULT',
-        id,
-        ok: true,
-        result: null,
-      });
+    if (!isDeepSeekAugmentableWebRoute(data.route)) {
+      throw new Error('Request augmentation route is invalid.');
+    }
+    const decodedRequest = decodeAugmentableDeepSeekRequest(data.route, data.body);
+    if (!decodedRequest) {
+      postAugmentRequestPassthrough(id);
+      return;
+    }
+
+    const regenerateScope = decodedRequest.route === 'regenerate'
+      ? await resolveRegenerateAuthorizationScopeForRequest(decodedRequest.body)
+      : null;
+    if (decodedRequest.route === 'regenerate' && !regenerateScope) {
+      // A regenerate request carries no prompt or trusted descriptor scope. If
+      // the exact receiver-owned response scope is unavailable (for example
+      // after a full page reload), preserve the native request but do not grant
+      // the page/model a broader tool catalog.
+      postAugmentRequestPassthrough(id);
       return;
     }
     if (!mainRequestId) {
@@ -1216,6 +1249,49 @@ async function handleAugmentRequestBody(data: {
     tracksPendingAlias = true;
     requestId = crypto.randomUUID();
 
+    if (decodedRequest.route === 'regenerate') {
+      const scope = regenerateScope!;
+      authorization = await createContentToolAuthorization({
+        requestId,
+        trigger: 'manual_chat',
+        chatSessionId: decodedRequest.body.chat_session_id,
+        descriptorIds: scope.descriptorIds,
+        localSkillDir: scope.activeLocalSkillDir,
+      });
+      activateContentToolAuthorization({
+        mainRequestId,
+        requestId,
+        authorization,
+        activeLocalSkillDir: scope.activeLocalSkillDir,
+      });
+
+      const requestAlreadyEnded = pendingToolAuthorizationCorrelations.activate(mainRequestId);
+      tracksPendingAlias = false;
+      if (requestAlreadyEnded) {
+        throw new Error('Request ended before its tool authorization became active.');
+      }
+
+      postToMainWorld({
+        type: 'AUGMENT_REQUEST_BODY_RESULT',
+        id,
+        ok: true,
+        result: {
+          // Regenerate has no prompt to augment. Preserve the captured request
+          // bytes exactly and attach only extension-owned parser/authorization
+          // context outside the DeepSeek wire body.
+          body: data.body,
+          originalPrompt: scope.originalPrompt,
+          agentTaskPrompt: scope.agentTaskPrompt,
+          requestId,
+          toolDescriptors: authorization.descriptors,
+          promptOptions: scope.promptOptions,
+          activeLocalSkillDir: scope.activeLocalSkillDir,
+        },
+      });
+      return;
+    }
+
+    const decodedBody = decodedRequest.body;
     const bodyWithMultimodalMedia = await consumePendingMultimodalMediaForRequest(decodedBody, {
       onLongRunning(timeoutMs) {
         postToMainWorld({
@@ -1268,8 +1344,12 @@ async function handleAugmentRequestBody(data: {
       toolIntent: bodyWithMultimodalMedia.prompt.slice(0, 16_000),
       localSkillDir: result.activeLocalSkillDir,
     });
-    activeToolAuthorizations.set(requestId, authorization);
-    toolAuthorizationRequestAliases.set(mainRequestId, requestId);
+    activateContentToolAuthorization({
+      mainRequestId,
+      requestId,
+      authorization,
+      activeLocalSkillDir: result.activeLocalSkillDir,
+    });
 
     const requestAlreadyEnded = pendingToolAuthorizationCorrelations.activate(mainRequestId);
     tracksPendingAlias = false;
@@ -1293,12 +1373,7 @@ async function handleAugmentRequestBody(data: {
     if (authorization) await closeContentToolAuthorization(requestId);
     if (isExtensionInvalidatedError(error)) {
       invalidateExtensionContext();
-      postToMainWorld({
-        type: 'AUGMENT_REQUEST_BODY_RESULT',
-        id,
-        ok: true,
-        result: null,
-      });
+      postAugmentRequestPassthrough(id);
       return;
     }
 
@@ -1313,6 +1388,159 @@ async function handleAugmentRequestBody(data: {
       pendingToolAuthorizationCorrelations.finish(mainRequestId);
     }
   }
+}
+
+function postAugmentRequestPassthrough(id: string): void {
+  postToMainWorld({
+    type: 'AUGMENT_REQUEST_BODY_RESULT',
+    id,
+    ok: true,
+    result: null,
+  });
+}
+
+function activateContentToolAuthorization(input: {
+  mainRequestId: string;
+  requestId: string;
+  authorization: ToolAuthorizationGrantSummary;
+  activeLocalSkillDir?: string;
+}): void {
+  activeToolAuthorizations.set(input.requestId, input.authorization);
+  toolAuthorizationRequestAliases.set(input.mainRequestId, input.requestId);
+  activeToolAuthorizationRequestMetadata.set(input.requestId, {
+    ...(input.activeLocalSkillDir
+      ? { activeLocalSkillDir: input.activeLocalSkillDir }
+      : {}),
+  });
+}
+
+function rememberRegenerateAuthorizationScope(complete: ResponseCompletePayload): void {
+  if (!complete.requestId || complete.assistantMessageId == null) return;
+  const authoritativeRequestId = activeToolAuthorizations.has(complete.requestId)
+    ? complete.requestId
+    : toolAuthorizationRequestAliases.get(complete.requestId);
+  if (!authoritativeRequestId) return;
+  const authorization = activeToolAuthorizations.get(authoritativeRequestId);
+  const metadata = activeToolAuthorizationRequestMetadata.get(authoritativeRequestId);
+  if (!authorization) return;
+  // A grant created on /a/chat is intentionally unbound until the first tool
+  // execution observes the browser-owned /a/chat/s/:id route. The summary in
+  // this content realm remains null after background performs that binding,
+  // so recover the same browser-owned route here instead of dropping replay
+  // evidence for every newly created conversation.
+  const chatSessionId = authorization.chatSessionId ?? getCurrentChatSessionId();
+  if (!chatSessionId) return;
+
+  regenerateAuthorizationScopes.remember({
+    chatSessionId,
+    assistantMessageId: complete.assistantMessageId,
+    descriptorIds: authorization.descriptors.map((descriptor) => descriptor.id),
+    originalPrompt: complete.originalPrompt,
+    agentTaskPrompt: complete.agentTaskPrompt,
+    promptOptions: cloneRegeneratePromptOptions(complete.promptOptions),
+    activeLocalSkillDir: metadata?.activeLocalSkillDir,
+  });
+}
+
+async function resolveRegenerateAuthorizationScopeForRequest(
+  body: DeepSeekRegenerateRequestBody,
+): Promise<RegenerateAuthorizationScope | null> {
+  const liveScope = regenerateAuthorizationScopes.resolve(
+    body.chat_session_id,
+    body.child_message_id,
+  );
+  if (liveScope) return liveScope;
+
+  let persistedBlocks: PersistedToolBlock[];
+  try {
+    persistedBlocks = await readPersistedToolExecutionBlocks();
+  } catch (error) {
+    console.error('[DeepSeek++] persisted regenerate authorization evidence read failed', error);
+    return null;
+  }
+
+  const evidence = resolvePersistedRegenerateAuthorizationEvidence(
+    persistedBlocks,
+    body.chat_session_id,
+    body.child_message_id,
+  );
+  if (!evidence) return null;
+
+  const visiblePrompt = readVisibleRegeneratePrompt(
+    persistedBlocks,
+    body.chat_session_id,
+    body.child_message_id,
+  );
+  return {
+    chatSessionId: body.chat_session_id,
+    assistantMessageId: body.child_message_id,
+    descriptorIds: evidence.descriptorIds,
+    originalPrompt: visiblePrompt,
+    agentTaskPrompt: visiblePrompt,
+    promptOptions: evidence.promptOptions ?? createRegeneratePromptOptionsFromRequest(body),
+    activeLocalSkillDir: evidence.activeLocalSkillDir,
+  };
+}
+
+function createRegeneratePromptOptionsFromRequest(
+  body: DeepSeekRegenerateRequestBody,
+): RegeneratePromptOptionsSnapshot {
+  return {
+    modelType: currentModelType,
+    searchEnabled: body.search_enabled === true,
+    thinkingEnabled: body.thinking_enabled === true,
+    refFileIds: [],
+  };
+}
+
+function readVisibleRegeneratePrompt(
+  blocks: readonly PersistedToolBlock[],
+  chatSessionId: string,
+  assistantMessageId: number,
+): string {
+  const matchingBlock = [...blocks].reverse().find((block) =>
+    getToolRecordChatSessionId(block) === chatSessionId
+    && getToolRecordAssistantMessageId(block) === String(assistantMessageId)
+  );
+  const allMessages = Array.from(document.querySelectorAll<HTMLElement>('.ds-message'));
+  if (allMessages.length === 0) return '';
+
+  const assistantMessages = getAssistantMessages();
+  const target = matchingBlock
+    ? findRestoredToolTarget(matchingBlock, assistantMessages, new Set())
+    : assistantMessages.find((message) => elementHasMessageId(message, String(assistantMessageId))) ?? null;
+  const targetIndex = target ? allMessages.indexOf(target as HTMLElement) : allMessages.length;
+  for (let index = targetIndex - 1; index >= 0; index -= 1) {
+    const candidate = allMessages[index];
+    if (getAssistantContentHosts(candidate).length > 0) continue;
+    const prompt = extractVisibleUserMessageText(candidate);
+    if (prompt) return prompt;
+  }
+  return '';
+}
+
+function extractVisibleUserMessageText(message: HTMLElement): string {
+  const clone = message.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll([
+    '[class*="dpp-"]',
+    '[data-dpp-agent]',
+    '[data-dpp-body-text]',
+    '[data-dpp-tool-key]',
+    'button',
+    '[role="button"]',
+  ].join(',')).forEach((node) => node.remove());
+  return sanitizeInternalPromptText(clone.textContent?.trim() ?? '').slice(0, 64_000);
+}
+
+function cloneRegeneratePromptOptions(
+  promptOptions: ResponseCompletePayload['promptOptions'],
+): RegeneratePromptOptionsSnapshot {
+  return {
+    modelType: promptOptions.modelType,
+    searchEnabled: promptOptions.searchEnabled,
+    thinkingEnabled: promptOptions.thinkingEnabled,
+    refFileIds: [...promptOptions.refFileIds],
+  };
 }
 
 async function resolveProjectContextForRequestBody(
@@ -1386,6 +1614,7 @@ async function closeContentToolAuthorization(requestId: string): Promise<void> {
 
 function removeLocalToolAuthorization(requestId: string, authorizationId: string): void {
   activeToolAuthorizations.delete(requestId);
+  activeToolAuthorizationRequestMetadata.delete(requestId);
   for (const key of pendingExternalToolPayloadWrites.keys()) {
     if (key.startsWith(`${authorizationId}:`)) pendingExternalToolPayloadWrites.delete(key);
   }
@@ -5156,6 +5385,10 @@ async function persistToolBlockSession(session: ActiveToolBlockSession, fullText
   const content = fullText ? stripToolCalls(fullText, { descriptors: currentToolDescriptors }) : '';
   session.content = content || session.content;
   session.updatedAt = Date.now();
+  const replayChatSessionId = session.chatSessionId ?? getCurrentChatSessionId();
+  const regenerateScope = replayChatSessionId && complete?.assistantMessageId != null
+    ? regenerateAuthorizationScopes.resolve(replayChatSessionId, complete.assistantMessageId)
+    : null;
 
   const block: PersistedToolBlock = {
     id: session.id,
@@ -5172,6 +5405,12 @@ async function persistToolBlockSession(session: ActiveToolBlockSession, fullText
       toolCount: session.executions.length,
       mcpToolCount: session.executions.filter((execution) => execution.provider?.kind === 'mcp').length,
       updatedAt: session.updatedAt,
+      ...(regenerateScope
+        ? {
+            [REGENERATE_AUTHORIZATION_METADATA_KEY]:
+              createPersistedRegenerateAuthorizationMetadata(regenerateScope),
+          }
+        : {}),
     },
   };
 

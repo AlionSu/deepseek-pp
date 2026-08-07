@@ -3,7 +3,9 @@ import { DEFAULT_TOOL_DESCRIPTORS } from '../core/tool';
 import { createBrowserControlToolDescriptors } from '../core/browser-control/tool';
 import {
   augmentRequestBody,
+  decodeAugmentableDeepSeekRequest,
   decodeAugmentableDeepSeekRequestBody,
+  decodeDeepSeekRegenerateRequestBody,
   decodeDeepSeekRequestBody,
 } from '../core/interceptor/request-augmentation';
 import { buildPromptAugmentation, extractVisibleUserPrompt } from '../core/prompt';
@@ -34,6 +36,40 @@ describe('augmentRequestBody', () => {
     expect(decodeAugmentableDeepSeekRequestBody('{bad json}')).toBeNull();
     expect(decodeAugmentableDeepSeekRequestBody(JSON.stringify({ prompt: '' }))).toBeNull();
     expect(decodeAugmentableDeepSeekRequestBody(JSON.stringify({ prompt: 1 }))).toBeNull();
+  });
+
+  it('decodes the native promptless regenerate route without inventing a prompt', () => {
+    const rawBody = JSON.stringify({
+      chat_session_id: ' session-1 ',
+      child_message_id: 18,
+      search_enabled: false,
+      thinking_enabled: true,
+      user_options: null,
+      future_sibling: { keep: true },
+    });
+
+    expect(decodeDeepSeekRegenerateRequestBody(rawBody)).toEqual({
+      chat_session_id: 'session-1',
+      child_message_id: 18,
+      search_enabled: false,
+      thinking_enabled: true,
+      user_options: null,
+      future_sibling: { keep: true },
+    });
+    expect(decodeAugmentableDeepSeekRequest('regenerate', rawBody)).toEqual({
+      route: 'regenerate',
+      body: expect.objectContaining({
+        chat_session_id: 'session-1',
+        child_message_id: 18,
+      }),
+    });
+    expect(decodeAugmentableDeepSeekRequest('completion', rawBody)).toBeNull();
+    expect(decodeAugmentableDeepSeekRequest('regenerate', JSON.stringify({
+      chat_session_id: 'session-1',
+    }))).toBeNull();
+    expect(decodeAugmentableDeepSeekRequest('regenerate', JSON.stringify({
+      child_message_id: 18,
+    }))).toBeNull();
   });
 
   it('does not hide augmentation failures after the request body has decoded', () => {

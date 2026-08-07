@@ -7,16 +7,21 @@ describe('Content request augmentation boundary', () => {
     const start = source.indexOf('async function handleAugmentRequestBody');
     const end = source.indexOf('\nasync function resolveProjectContextForRequestBody', start);
     const handler = source.slice(start, end);
-    const decodeIndex = handler.indexOf('decodeAugmentableDeepSeekRequestBody(data.body)');
-    const passthroughIndex = handler.indexOf('if (!decodedBody)');
+    const routeIndex = handler.indexOf('isDeepSeekAugmentableWebRoute(data.route)');
+    const decodeIndex = handler.indexOf('decodeAugmentableDeepSeekRequest(data.route, data.body)');
+    const passthroughIndex = handler.indexOf('if (!decodedRequest)');
+    const replayScopeIndex = handler.indexOf('resolveRegenerateAuthorizationScopeForRequest(decodedRequest.body)');
     const correlationIndex = handler.indexOf('pendingToolAuthorizationCorrelations.begin');
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
+    expect(routeIndex).toBeGreaterThanOrEqual(0);
     expect(decodeIndex).toBeGreaterThanOrEqual(0);
+    expect(decodeIndex).toBeGreaterThan(routeIndex);
     expect(passthroughIndex).toBeGreaterThan(decodeIndex);
-    expect(handler.slice(passthroughIndex, correlationIndex)).toContain("type: 'AUGMENT_REQUEST_BODY_RESULT'");
-    expect(handler.slice(passthroughIndex, correlationIndex)).toContain('result: null');
+    expect(replayScopeIndex).toBeGreaterThan(passthroughIndex);
+    expect(replayScopeIndex).toBeLessThan(correlationIndex);
+    expect(handler.slice(passthroughIndex, correlationIndex)).toContain('postAugmentRequestPassthrough(id)');
     for (const privilegedOperation of [
       'pendingToolAuthorizationCorrelations.begin',
       'consumePendingMultimodalMediaForRequest',

@@ -7,6 +7,18 @@ import {
 export type DeepSeekWebRouteName = keyof typeof DEEPSEEK_WEB_ROUTES;
 export type DeepSeekHttpMethod = 'GET' | 'POST';
 
+export const DEEPSEEK_AUGMENTABLE_WEB_ROUTES = [
+  'completion',
+  'editMessage',
+  'regenerate',
+] as const satisfies readonly DeepSeekWebRouteName[];
+
+export type DeepSeekAugmentableWebRoute = typeof DEEPSEEK_AUGMENTABLE_WEB_ROUTES[number];
+
+const DEEPSEEK_AUGMENTABLE_WEB_ROUTE_SET = new Set<DeepSeekWebRouteName>(
+  DEEPSEEK_AUGMENTABLE_WEB_ROUTES,
+);
+
 export interface DeepSeekRoutePolicy {
   readonly route: DeepSeekWebRouteName;
   readonly method: DeepSeekHttpMethod;
@@ -84,6 +96,12 @@ export function matchDeepSeekWebRoute(
     }
   }
   return null;
+}
+
+export function isDeepSeekAugmentableWebRoute(
+  value: unknown,
+): value is DeepSeekAugmentableWebRoute {
+  return typeof value === 'string' && DEEPSEEK_AUGMENTABLE_WEB_ROUTE_SET.has(value as DeepSeekWebRouteName);
 }
 
 export function encodeDeepSeekRouteRequest(

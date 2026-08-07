@@ -1,7 +1,9 @@
 import { DEEPSEEK_BYPASS_HOOK_HEADER } from '../deepseek/contracts';
 import {
+  isDeepSeekAugmentableWebRoute,
   matchDeepSeekWebRoute,
   normalizeDeepSeekMessageId,
+  type DeepSeekAugmentableWebRoute,
 } from '../deepseek/request-codec';
 import type { ToolCall, ToolCallRestoreRecord, ToolCallSource, ToolDescriptor } from '../types';
 import { isInlineAgentContinuationRequest } from '../inline-agent/prompt';
@@ -50,7 +52,11 @@ const initialHookStateReady = new Promise<void>((resolve) => {
 
 interface HookState {
   toolDescriptors: ToolDescriptor[];
-  onRequestBody: (body: string, requestId: string) => Promise<RequestBodyModification | null>;
+  onRequestBody: (
+    body: string,
+    requestId: string,
+    route: DeepSeekAugmentableWebRoute,
+  ) => Promise<RequestBodyModification | null>;
   onHeadersCaptured: (headers: Record<string, string> | null) => void;
   onToolCallStarted: (call: ToolCall) => void;
   onToolCall: (call: ToolCall) => void;
@@ -147,13 +153,17 @@ interface RequestContextOverrides {
   originalPrompt?: string;
   agentTaskPrompt?: string;
   toolDescriptors?: ToolDescriptor[];
+  promptOptions?: ResponseCompletePayload['promptOptions'];
+  activeLocalSkillDir?: string;
 }
 
 export interface RequestBodyModification {
   body: string;
+  originalPrompt?: string;
   agentTaskPrompt: string;
   requestId?: string;
   toolDescriptors?: ToolDescriptor[];
+  promptOptions?: ResponseCompletePayload['promptOptions'];
   // The current request's active local skill skillDir computed at augment time;
   // travels with the request into RequestContext for cwd pinning during response-stream parsing (request-scoped isolation).
   activeLocalSkillDir?: string;
@@ -185,10 +195,7 @@ export function hookFetch(): () => void {
       return interceptHistoryResponse(originalFetch.call(this, input, init));
     }
 
-    if (
-      (route !== 'completion' && route !== 'editMessage' && route !== 'regenerate') ||
-      typeof init?.body !== 'string'
-    ) {
+    if (!isDeepSeekAugmentableWebRoute(route) || typeof init?.body !== 'string') {
       return originalFetch.call(this, input, init);
     }
 
@@ -202,7 +209,7 @@ export function hookFetch(): () => void {
     const fallbackToolDescriptors = [...hookState.toolDescriptors];
     let modified: RequestBodyModification | null;
     try {
-      modified = await hookState.onRequestBody(init.body, originalContext.requestId);
+      modified = await hookState.onRequestBody(init.body, originalContext.requestId, route);
     } catch (error) {
       hookState.onRequestTerminal({ requestId: originalContext.requestId });
       throw error;
@@ -211,9 +218,10 @@ export function hookFetch(): () => void {
     const requestContext = createRequestContext(requestBody, {
       requestId: originalContext.requestId,
       ...(modified?.requestId ? { requestId: modified.requestId } : {}),
-      originalPrompt: originalContext.originalPrompt,
+      originalPrompt: modified?.originalPrompt ?? originalContext.originalPrompt,
       agentTaskPrompt: modified?.agentTaskPrompt ?? originalContext.agentTaskPrompt,
       toolDescriptors: modified?.toolDescriptors ?? fallbackToolDescriptors,
+      ...(modified?.promptOptions ? { promptOptions: modified.promptOptions } : {}),
       ...(modified?.activeLocalSkillDir !== undefined
         ? { activeLocalSkillDir: modified.activeLocalSkillDir }
         : {}),
@@ -269,10 +277,7 @@ export function hookXHR(): () => void {
 
   XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
     const route = xhrRoutes.get(this);
-    if (
-      (route === 'completion' || route === 'editMessage' || route === 'regenerate') &&
-      typeof body === 'string'
-    ) {
+    if (isDeepSeekAugmentableWebRoute(route) && typeof body === 'string') {
       const xhr = this;
       const sendChatRequest = async () => {
         const originalContext = createRequestContext(body);
@@ -280,14 +285,18 @@ export function hookXHR(): () => void {
         try {
           hookState.onHeadersCaptured(captureDeepSeekClientHeaders(xhrHeaders.get(xhr)));
           const fallbackToolDescriptors = [...hookState.toolDescriptors];
-          const modified = await hookState.onRequestBody(body, originalContext.requestId);
+          const modified = await hookState.onRequestBody(body, originalContext.requestId, route);
           const requestBody = modified?.body ?? body;
           cancelResponseInterceptor = setupXHRResponseInterceptor(xhr, createRequestContext(requestBody, {
             requestId: originalContext.requestId,
             ...(modified?.requestId ? { requestId: modified.requestId } : {}),
-            originalPrompt: originalContext.originalPrompt,
+            originalPrompt: modified?.originalPrompt ?? originalContext.originalPrompt,
             agentTaskPrompt: modified?.agentTaskPrompt ?? originalContext.agentTaskPrompt,
             toolDescriptors: modified?.toolDescriptors ?? fallbackToolDescriptors,
+            ...(modified?.promptOptions ? { promptOptions: modified.promptOptions } : {}),
+            ...(modified?.activeLocalSkillDir !== undefined
+              ? { activeLocalSkillDir: modified.activeLocalSkillDir }
+              : {}),
           }));
           return origSend.call(xhr, requestBody);
         } catch (error) {
@@ -393,14 +402,12 @@ export function createRequestContext(bodyStr: string, overrides: RequestContextO
       agentTaskPrompt: overrides.agentTaskPrompt ?? bodyPrompt,
       chatSessionId: typeof body.chat_session_id === 'string' ? body.chat_session_id : null,
       parentMessageId: normalizeDeepSeekMessageId(body.parent_message_id),
-      promptOptions: {
-        modelType: typeof body.model_type === 'string' ? body.model_type : null,
-        searchEnabled: body.search_enabled === true,
-        thinkingEnabled: body.thinking_enabled === true,
-        refFileIds: Array.isArray(body.ref_file_ids) ? body.ref_file_ids.filter((item): item is string => typeof item === 'string') : [],
-      },
+      promptOptions: overrides.promptOptions ?? readRequestPromptOptions(body),
       suppressPageEvents: isInlineAgentContinuationRequest(originalPrompt, overrides.agentTaskPrompt ?? bodyPrompt),
       toolDescriptors: overrides.toolDescriptors ?? [...hookState.toolDescriptors],
+      ...(overrides.activeLocalSkillDir !== undefined
+        ? { activeLocalSkillDir: overrides.activeLocalSkillDir }
+        : {}),
     };
   } catch {
     return {
@@ -409,16 +416,27 @@ export function createRequestContext(bodyStr: string, overrides: RequestContextO
       agentTaskPrompt: overrides.agentTaskPrompt ?? overrides.originalPrompt ?? '',
       chatSessionId: null,
       parentMessageId: null,
-      promptOptions: {
-        modelType: null,
-        searchEnabled: false,
-        thinkingEnabled: false,
-        refFileIds: [],
-      },
+      promptOptions: overrides.promptOptions ?? readRequestPromptOptions(null),
       suppressPageEvents: isInlineAgentContinuationRequest(overrides.originalPrompt ?? '', overrides.agentTaskPrompt ?? ''),
       toolDescriptors: overrides.toolDescriptors ?? [...hookState.toolDescriptors],
+      ...(overrides.activeLocalSkillDir !== undefined
+        ? { activeLocalSkillDir: overrides.activeLocalSkillDir }
+        : {}),
     };
   }
+}
+
+function readRequestPromptOptions(
+  body: Record<string, unknown> | null,
+): ResponseCompletePayload['promptOptions'] {
+  return {
+    modelType: typeof body?.model_type === 'string' ? body.model_type : null,
+    searchEnabled: body?.search_enabled === true,
+    thinkingEnabled: body?.thinking_enabled === true,
+    refFileIds: Array.isArray(body?.ref_file_ids)
+      ? body.ref_file_ids.filter((item): item is string => typeof item === 'string')
+      : [],
+  };
 }
 
 function hasBypassHookHeader(headers: HeadersInit | undefined): boolean {
