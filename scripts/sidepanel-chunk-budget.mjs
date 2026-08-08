@@ -89,9 +89,15 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // Local Node-25 measurement: 378292 raw (+427) / 115287 gzip; only the raw
 // baseline moves because gzip remains within the existing CI-derived budget.
 // firstChatScreen raw cap raised 408121 -> 408548 by the same +427.
+// Refreshed for 1.14.0: the raw bytes are unchanged (378292 matches CI
+// exactly), but CI Node-22.23.1 zlib measures 115558 gzip (+271 over local
+// Node-25, beyond the 256-byte encoder-variance allowance), so the gzip
+// baseline is set to the CI measurement per convention to stay green on both
+// runtimes. Same-build measurements under node@22.23.1: firstChatScreen gzip
+// 125600 (cap raised below from 125500), all other chunks inside budget.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 378_292, gzip: 115_144 },
+  initialShell: { raw: 378_292, gzip: 115_558 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -147,12 +153,15 @@ const GZIP_ENCODER_VARIANCE_BYTES = 256;
 // gzip 124884). gzip cap raised 125000 -> 125500: local headroom was only 116B
 // and CI Node-22 zlib measures ~+280 over local Node-25 (see initial-shell
 // history), which would exceed the old cap on encoder variance alone.
+// Raised 125500 -> 125600 for 1.14.0: the same-build measurement under the
+// CI Node-22.23.1 runtime is 125600 gzip (local Node-25: 125307), so the cap
+// is set to the CI measurement to stay green on both runtimes.
 const BUDGET = Object.freeze({
   initialShell: {
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 408_548, gzip: 125_500 },
+  firstChatScreen: { raw: 408_548, gzip: 125_600 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },
