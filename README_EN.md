@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1131-release-highlights">1.13.1 Highlights</a>
+  <a href="#1140-release-highlights">1.14.0 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.13.1 Release Highlights](#1131-release-highlights)
+- [1.14.0 Release Highlights](#1140-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -305,7 +305,23 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.13.1 Release Highlights
+## 1.14.0 Release Highlights
+
+1.14.0 upgrades inline agent delivery and stabilizes streaming: final answers and chart/code deliverables now render through DeepSeek's native renderer, reasoning steps are shown per turn, and streaming and code-block rendering are more reliable.
+
+| Area | Main changes |
+|------|--------------|
+| Inline agent | Final answers render through the DeepSeek page natively, with mermaid/xychart chart cards, runnable html/svg/xml code blocks, and the native preview panel; the plugin-side artifact rendering flow is removed. |
+| Reasoning display | Thinking is captured and shown per turn and auto-folds into "thought · step N" rows when complete; the final answer renders in full with a much higher display cap, never folded or truncated. |
+| Stability | Fixes stream framing that could drop part of the reasoning/text delta, code-block blank-line collapsing that could break fenced content across frames, and code-run results lost after streaming re-renders; thinking-only turns are no longer resubmitted. |
+| Authorization | Native regenerate tool-call authorization is fixed; only successfully executed calls count as authorization evidence. |
+| Side panel | Web-stream reasoning is forwarded to the side-panel chat display. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.13.1 - 0.2.0)</summary>
+
+### 1.13.1 Release Highlights
 
 1.13.1 polishes the inline agent experience and stabilizes conversation export: inline agent output renders like the native Markdown, tool states are shown honestly, and HTML export and downloads are more reliable.
 
