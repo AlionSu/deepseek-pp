@@ -69,6 +69,11 @@ export function findAssistantMessageByContentSnippet(
 /**
  * True when the element or one of its descendants exposes the given DeepSeek
  * message id through a data attribute or an id suffix.
+ *
+ * Attribute values match only as a whole token (`value === messageId`) or as
+ * a `-`/`_`-separated suffix (`...-18`). A bare `endsWith` suffix match was a
+ * false-positive vector for numeric ids (looking up `34` matched `…-234` on an
+ * unrelated message and could anchor a console under the wrong reply).
  */
 export function elementHasMessageId(element: Element, messageId: string): boolean {
   const candidates = [
@@ -84,8 +89,15 @@ export function elementHasMessageId(element: Element, messageId: string): boolea
       candidate.getAttribute('data-ds-message-id'),
       candidate.getAttribute('id'),
     ];
-    return attributes.some((value) => value === messageId || value?.endsWith(`-${messageId}`));
+    const suffixPattern = new RegExp(
+      `(?:^|[-_])${escapeRegExp(messageId)}$`,
+    );
+    return attributes.some((value) => value === messageId || (value !== null && suffixPattern.test(value)));
   });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export interface InlineAgentRestoreAnchor {

@@ -166,6 +166,58 @@ describe('XmlToolStreamFilter', () => {
     expect(visible).toContain('```\n\n结束。');
     expect(visible).not.toContain('第二段。\n\n\n```');
   });
+
+  it('keeps fenced-code blank lines intact when the fence spans SSE frames', () => {
+    // The opening fence arrives in frame 1; frame 2 carries the interior
+    // blank-line run (PEP8-style two blank lines between top-level defs).
+    // Frame-local fence tracking collapsed these interior blank lines; the
+    // cross-frame fence state must preserve them.
+    const output = runFilter([
+      sseText('代码示例：\n```python\ndef a():\n    pass'),
+      sseText('\n\n\ndef b():\n    pass\n```\n结束。'),
+    ]);
+
+    const visible = readVisibleText(output);
+    expect(visible).toContain('def a():\n    pass\n\n\ndef b():\n    pass');
+    expect(visible).not.toContain('def a():\n    pass\n\ndef b()');
+  });
+
+  it('keeps a frame that is nothing but blank lines intact inside an open fence', () => {
+    const output = runFilter([
+      sseText('```html\n<section>'),
+      sseText('\n\n\n'),
+      sseText('</section>\n```'),
+    ]);
+
+    expect(readVisibleText(output)).toContain('<section>\n\n\n</section>');
+  });
+
+  it('keeps collapsing plain prose across frames outside fences', () => {
+    // The cross-frame fence state must not disable the intended prose
+    // collapse: a `\n\n\n` run in a later frame, with no fence open, still
+    // collapses to a single paragraph break.
+    const output = runFilter([
+      sseText('第一段。'),
+      sseText('\n\n\n第二段。\n\n\n第三段。'),
+    ]);
+
+    const visible = readVisibleText(output);
+    expect(visible).toBe('第一段。\n\n第二段。\n\n第三段。');
+    expect(visible).not.toContain('\n\n\n');
+  });
+
+  it('closes the fence state when the closing fence arrives in a later frame', () => {
+    // After the closing fence, a later `\n\n\n` prose run must collapse again.
+    const output = runFilter([
+      sseText('```\ncode\n\n\ninside\n```'),
+      sseText('\n\n\n后续段落。'),
+    ]);
+
+    const visible = readVisibleText(output);
+    expect(visible).toContain('```\ncode\n\n\ninside\n```');
+    expect(visible).toContain('```\n\n后续段落。');
+    expect(visible).not.toContain('inside\n```\n\n\n后续段落。');
+  });
 });
 
 function runFilter(chunks: string[]): string {

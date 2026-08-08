@@ -115,6 +115,38 @@ describe('Phase 5 product surface helpers', () => {
     downloads.stop();
   });
 
+  it('revokes every pending object URL and clears its timer on stop()', () => {
+    // stop() is the production teardown hook for the export capability: it
+    // must revoke still-pending leases immediately and suppress the pending
+    // timers (no revoke may fire after stop, and no URL may survive it).
+    vi.useFakeTimers();
+    const createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:download-1')
+      .mockReturnValueOnce('blob:download-2');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const downloads = createBrowserDownloadManager(30_000);
+
+    downloads.download('a.md', new Blob(['a'], { type: 'text/markdown' }));
+    downloads.download('b.md', new Blob(['b'], { type: 'text/markdown' }));
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    downloads.stop();
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:download-1');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:download-2');
+
+    // The pending timers were cleared: no late revoke fires after stop.
+    vi.advanceTimersByTime(60_000);
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+
+    // stop() is idempotent.
+    downloads.stop();
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
   it('filters official search results by DeepSeek++ history tags', async () => {
     storage.deepseek_pp_history_organizer = {
       tagsBySessionId: {

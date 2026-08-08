@@ -20,6 +20,7 @@ import {
   updateStepStatus,
   updateStepStreamText,
   hydrateAgentStepCodeRunners,
+  type AgentCodeRunResult,
   type InlineAgentRendererLabels,
 } from '../core/inline-agent/renderer';
 import type { ToolExecutionRecord } from '../core/types';
@@ -787,9 +788,67 @@ describe('inline agent renderer', () => {
     runButton?.dispatchEvent(new MouseEvent('click'));
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
 
     const output = step.querySelector<HTMLElement>('.dpp-agent-code-run-output');
     expect(output?.textContent).toContain('boom');
+  });
+
+  it('skips the DOM rebuild when a stream chunk repeats the identical clamped text', () => {
+    const step = createAgentStepElement(0);
+    updateStepStreamText(step, '```python\nprint(1)\n```\n\n正文。');
+    const pre = step.querySelector('pre[data-dpp-lang="python"]');
+    expect(pre).not.toBeNull();
+
+    // A later frame whose clamped display text is byte-identical (the step
+    // render clamp caps every frame once the display cap is reached) must
+    // not rebuild the body: element identity is preserved.
+    updateStepStreamText(step, '```python\nprint(1)\n```\n\n正文。');
+    expect(step.querySelector('pre[data-dpp-lang="python"]')).toBe(pre);
+    expect(step.querySelectorAll('pre[data-dpp-lang="python"]')).toHaveLength(1);
+    expect(step.querySelector('.dpp-agent-step-body')?.getAttribute('data-dpp-raw-text'))
+      .toBe('```python\nprint(1)\n```\n\n正文。');
+  });
+
+  it('preserves an in-flight code run across a step-body re-render', async () => {
+    const step = createAgentStepElement(0);
+    updateStepStreamText(step, '```python\nprint(1)\n```');
+
+    let resolveRun!: (result: AgentCodeRunResult) => void;
+    const runCode = vi.fn(
+      () => new Promise<AgentCodeRunResult>((resolve) => {
+        resolveRun = resolve;
+      }),
+    );
+    const labels = { codeRun: 'Run', codeRunning: 'Running…' };
+    hydrateAgentStepCodeRunners(step, runCode, labels);
+
+    const firstButton = step.querySelector<HTMLButtonElement>('.dpp-agent-code-run');
+    expect(firstButton).not.toBeNull();
+    firstButton?.dispatchEvent(new MouseEvent('click'));
+    expect(firstButton?.disabled).toBe(true);
+
+    // The stream pushes a new chunk: the body is rebuilt and the row is
+    // destroyed; re-hydration must restore the running state instead of a
+    // fresh enabled button.
+    updateStepStreamText(step, '```python\nprint(1)\n```\n\n更多正文。');
+    hydrateAgentStepCodeRunners(step, runCode, labels);
+    const rebuiltButton = step.querySelector<HTMLButtonElement>('.dpp-agent-code-run');
+    expect(rebuiltButton).not.toBeNull();
+    expect(rebuiltButton?.disabled).toBe(true);
+    expect(rebuiltButton?.textContent).toBe('Running…');
+
+    // The sandbox settles after the re-render: the output must land on the
+    // CURRENT row, not the destroyed one.
+    resolveRun({ ok: true, output: { stdout: '1' } });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const output = step.querySelector<HTMLElement>('.dpp-agent-code-run-output');
+    expect(output?.textContent).toContain('stdout:\n1');
+    expect(step.querySelector<HTMLButtonElement>('.dpp-agent-code-run')?.disabled).toBe(false);
+    expect(step.querySelector<HTMLButtonElement>('.dpp-agent-code-run')?.textContent).toBe('Run');
   });
 
   it('marks adopted native reasoning hosts flush with the agent stream', () => {

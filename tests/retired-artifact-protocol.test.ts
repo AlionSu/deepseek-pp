@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  containsRetiredArtifactProtocol,
-  stripRetiredArtifactProtocolBlocks,
-} from '../core/inline-agent/retired-artifact';
+import { stripRetiredArtifactProtocolBlocks } from '../core/inline-agent/retired-artifact';
 
 describe('stripRetiredArtifactProtocolBlocks', () => {
   it('strips a complete artifact_create block including its JSON body', () => {
@@ -81,21 +78,59 @@ describe('stripRetiredArtifactProtocolBlocks', () => {
 
     expect(stripRetiredArtifactProtocolBlocks(text)).toBe('p1\n\np2');
   });
-});
 
-describe('containsRetiredArtifactProtocol', () => {
-  it('detects open and close tags of both retired tools', () => {
-    expect(containsRetiredArtifactProtocol('<artifact_create>')).toBe(true);
-    expect(containsRetiredArtifactProtocol('</artifact_create>')).toBe(true);
-    expect(containsRetiredArtifactProtocol('<artifact_bundle_create>')).toBe(true);
-    expect(containsRetiredArtifactProtocol('</artifact_bundle_create>')).toBe(true);
+  it('keeps artifact tags inside fenced code blocks (example content, not protocol)', () => {
+    // A model showing the retired syntax inside a ```fence``` is teaching
+    // content: the tag and its surroundings pass through byte-for-byte.
+    const text = [
+      '这是旧协议的示例：',
+      '```xml',
+      '<artifact_create>{"filename":"a.html","content":"A"}</artifact_create>',
+      '```',
+      '以上是示例。',
+    ].join('\n');
+
+    expect(stripRetiredArtifactProtocolBlocks(text)).toBe(text);
   });
 
-  it('rejects plain text, fences, and empty input', () => {
-    expect(containsRetiredArtifactProtocol('```html\n<h1>x</h1>\n```')).toBe(false);
-    expect(containsRetiredArtifactProtocol('正常文本')).toBe(false);
-    expect(containsRetiredArtifactProtocol('')).toBe(false);
-    expect(containsRetiredArtifactProtocol(null)).toBe(false);
-    expect(containsRetiredArtifactProtocol(undefined)).toBe(false);
+  it('does not drop the remainder after an unclosed artifact tag inside a fence', () => {
+    const text = [
+      '```html',
+      '参考旧标签 <artifact_create> 已废弃',
+      '后面还有真实内容',
+      '```',
+      '最终答案保留。',
+    ].join('\n');
+
+    expect(stripRetiredArtifactProtocolBlocks(text)).toBe(text);
+  });
+
+  it('still strips outside-fence blocks after a closed fence', () => {
+    const text = [
+      '```html',
+      '<artifact_create>{"filename":"a.html","content":"A"}</artifact_create>',
+      '```',
+      '<artifact_create>{"filename":"b.html","content":"B"}</artifact_create>',
+      '结尾。',
+    ].join('\n');
+
+    expect(stripRetiredArtifactProtocolBlocks(text)).toBe(
+      [
+        '```html',
+        '<artifact_create>{"filename":"a.html","content":"A"}</artifact_create>',
+        '```',
+        '',
+        '结尾。',
+      ].join('\n'),
+    );
+  });
+
+  it('handles an unterminated fence: tags inside it stay visible', () => {
+    const text = [
+      '```html',
+      '<artifact_create>{"filename":"a.html","content":"A"}</artifact_create>',
+    ].join('\n');
+
+    expect(stripRetiredArtifactProtocolBlocks(text)).toBe(text);
   });
 });

@@ -61,7 +61,10 @@ export interface ChatRuntimeServiceDependencies {
   ): Promise<Record<string, string>>;
   submitWebPrompt(
     input: SubmitPromptInput,
-    callbacks: { onTextChunk?(text: string, fullText: string): void },
+    callbacks: {
+      onTextChunk?(text: string, fullText: string): void;
+      onReasoningChunk?(reasoning: string, fullReasoning: string): void;
+    },
     signal: AbortSignal,
   ): Promise<ModelTurn>;
   submitOfficialPrompt(
@@ -229,7 +232,19 @@ export function createChatRuntimeService(
       }, {
         onTextChunk(newText, fullText) {
           accumulated = fullText;
-          emitChunk(turn, { text: newText, done: false }, excludeTabId);
+          emitChunk(turn, { text: newText, done: false, phase: 'answer' }, excludeTabId);
+        },
+        // The web stream routes THINK-fragment deltas through the reasoning
+        // channel (they are excluded from the text channel since the
+        // stream-codec split); forward them like the official-API loop so the
+        // sidepanel keeps showing the thinking process.
+        onReasoningChunk(newText) {
+          emitChunk(turn, {
+            text: '',
+            reasoningText: newText,
+            done: false,
+            phase: 'reasoning',
+          }, excludeTabId);
         },
       }, turn.controller.signal);
       assertTurnActive(turn);

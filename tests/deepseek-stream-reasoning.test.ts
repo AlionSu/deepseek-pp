@@ -139,4 +139,58 @@ describe('DeepSeek web stream reasoning extraction', () => {
     expect(third).toEqual({ text: 'a', reasoning: null });
     expect(fourth).toEqual({ text: 'answer', reasoning: null });
   });
+
+  it('consumes the initial content of EVERY fragment in a multi-fragment APPEND', () => {
+    // A single APPEND event that carries a final THINK fragment and an
+    // opening RESPONSE fragment must not drop the earlier fragment's initial
+    // content (the previous implementation only consumed the last fragment).
+    const summary = createDeepSeekStreamSummary();
+    const state = getDeepSeekFragmentState(summary);
+    const split = splitDeepSeekResponseText(
+      {
+        p: 'response/fragments',
+        o: 'APPEND',
+        v: [
+          { id: 1, type: 'THINK', content: '前段思考', references: [], stage_id: 1 },
+          { id: 2, type: 'RESPONSE', content: '答案开头', references: [], stage_id: 1 },
+        ],
+      },
+      state,
+    );
+    expect(split).toEqual({ text: '答案开头', reasoning: '前段思考' });
+  });
+
+  it('consumes every fragment initial content in the first snapshot too', () => {
+    const summary = createDeepSeekStreamSummary();
+    const state = getDeepSeekFragmentState(summary);
+    const split = splitDeepSeekResponseText(
+      {
+        v: {
+          response: {
+            fragments: [
+              { id: 1, type: 'THINK', content: 'r1' },
+              { id: 2, type: 'RESPONSE', content: 'a1' },
+            ],
+          },
+        },
+      },
+      state,
+    );
+    expect(split).toEqual({ text: 'a1', reasoning: 'r1' });
+    // Later snapshots stay cumulative: no re-consumption.
+    const again = splitDeepSeekResponseText(
+      {
+        v: {
+          response: {
+            fragments: [
+              { id: 1, type: 'THINK', content: 'r1' },
+              { id: 2, type: 'RESPONSE', content: 'a1' },
+            ],
+          },
+        },
+      },
+      state,
+    );
+    expect(again).toEqual({ text: null, reasoning: null });
+  });
 });

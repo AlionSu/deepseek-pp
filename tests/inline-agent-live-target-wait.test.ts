@@ -86,4 +86,33 @@ describe("waitForInlineAgentLiveTarget", () => {
     await expect(aborted).resolves.toBeNull();
     expect(abortedStop).toHaveBeenCalledOnce();
   });
+
+  it("fails closed with null when the observing scope throws during installation", async () => {
+    // A content scope disposed between the initial find() and the observer
+    // installation (pagehide / SPA navigation) makes observe() throw. The
+    // wait must settle null instead of rejecting, and must not leak the
+    // abort listener.
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const removeSpy = vi.spyOn(controller.signal, "removeEventListener");
+    const clearScheduledTimeout = vi.fn();
+
+    await expect(
+      waitForInlineAgentLiveTarget({
+        find: () => null,
+        observe: () => {
+          throw new Error("content scope is disposed");
+        },
+        scheduleTimeout: vi.fn(() => 1),
+        clearScheduledTimeout,
+        signal: controller.signal,
+        timeoutMs: 1500,
+      }),
+    ).resolves.toBeNull();
+
+    // No timer was scheduled (the observe throw settles before the timer),
+    // and the abort listener installed before observe() is removed by settle.
+    expect(clearScheduledTimeout).not.toHaveBeenCalled();
+    expect(removeSpy).toHaveBeenCalled();
+  });
 });

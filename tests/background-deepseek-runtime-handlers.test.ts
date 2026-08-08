@@ -249,6 +249,47 @@ describe('interactive chat coordinator', () => {
     await waitForCall(dependencies.markChatLoopFinished);
   });
 
+  it('forwards web-backend reasoning deltas as reasoning-phase chunks', async () => {
+    const dependencies = createChatDependencies();
+    let captured: {
+      onTextChunk?(text: string, fullText: string): void;
+      onReasoningChunk?(reasoning: string, fullReasoning: string): void;
+    } | undefined;
+    vi.mocked(dependencies.submitWebPrompt).mockImplementationOnce(
+      (_input, callbacks) => {
+        captured = callbacks;
+        callbacks.onReasoningChunk?.('我', '我');
+        callbacks.onReasoningChunk?.('先分析', '我先分析');
+        callbacks.onTextChunk?.('答案', '答案');
+        return Promise.resolve(modelTurn('答案', 101));
+      },
+    );
+    const service = createChatRuntimeService(dependencies);
+
+    await expect(service.submitPrompt({ text: 'hello', refFileIds: [] }, 17))
+      .resolves.toEqual({ ok: true });
+
+    expect(captured?.onReasoningChunk).toBeDefined();
+    expect(dependencies.broadcastChunk).toHaveBeenNthCalledWith(1, {
+      text: '',
+      reasoningText: '我',
+      done: false,
+      phase: 'reasoning',
+    }, 17);
+    expect(dependencies.broadcastChunk).toHaveBeenNthCalledWith(2, {
+      text: '',
+      reasoningText: '先分析',
+      done: false,
+      phase: 'reasoning',
+    }, 17);
+    expect(dependencies.broadcastChunk).toHaveBeenNthCalledWith(3, {
+      text: '答案',
+      done: false,
+      phase: 'answer',
+    }, 17);
+    await waitForCall(dependencies.markChatLoopFinished);
+  });
+
   it('rejects concurrent turns and prevents late chunks after a session reset', async () => {
     const dependencies = createChatDependencies();
     let firstCallbacks: { onTextChunk?(text: string, fullText: string): void } | undefined;

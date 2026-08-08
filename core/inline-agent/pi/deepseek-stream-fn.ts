@@ -284,7 +284,14 @@ async function submitWithRetry(
           receivedAnyChunk = true;
           callbacks.onTextChunk(text, fullText);
         },
-        onReasoningChunk: callbacks.onReasoningChunk,
+        onReasoningChunk(reasoning, fullReasoning) {
+          // Reasoning deltas are streamed content too: a turn that only
+          // streamed thinking before timing out must NOT be resubmitted with
+          // the same parent_message_id (the server may have already committed
+          // the response, forking the conversation chain).
+          receivedAnyChunk = true;
+          callbacks.onReasoningChunk?.(reasoning, fullReasoning);
+        },
         onTokenSpeed: callbacks.onTokenSpeed,
       }, stepTimeout.signal);
       return {

@@ -930,7 +930,20 @@ function cloneParsedWithSanitizedInternalPrompt(
   return changed ? cloned : null;
 }
 
-function cloneParsedWithCollapsedBlankLines(parsed: any): any | null {
+/**
+ * Cross-frame fence state for blank-line collapsing. Fenced code blocks are
+ * streamed across many SSE frames; the opening ``` often arrives in an
+ * earlier frame than the interior blank-line runs, so the fence position must
+ * be carried between frames instead of being recomputed frame-locally.
+ */
+export interface BlankLineCollapseFenceState {
+  inFence: boolean;
+}
+
+function cloneParsedWithCollapsedBlankLines(
+  parsed: any,
+  fenceState: BlankLineCollapseFenceState,
+): any | null {
   const cloned = JSON.parse(JSON.stringify(parsed));
   let changed = false;
 
@@ -947,7 +960,7 @@ function cloneParsedWithCollapsedBlankLines(parsed: any): any | null {
     const text = getAnyDirectPatchText(node);
     if (text === null) return;
 
-    const collapsed = collapseExcessBlankLines(text);
+    const collapsed = collapseExcessBlankLines(text, fenceState);
     if (collapsed === text) return;
 
     setAnyDirectPatchText(node, collapsed);
@@ -965,26 +978,40 @@ function cloneParsedWithCollapsedBlankLines(parsed: any): any | null {
  * `\n\n\n`; collapsing matches how the DeepSeek page's own markdown renderer
  * displays paragraph spacing, while blank lines inside ``` fences are kept
  * intact for `<pre>` rendering.
+ *
+ * `fenceState` is the filter's cross-frame fence tracker: a fence opened in an
+ * earlier SSE frame protects the current frame's interior blank lines too,
+ * instead of the frame-local toggle collapsing them (the cross-frame code
+ * block corruption bug).
  */
-function collapseExcessBlankLines(text: string): string {
-  if (!text.includes("\n\n\n")) return text;
-  if (!text.includes("```")) return text.replace(/\n{3,}/g, "\n\n");
+function collapseExcessBlankLines(
+  text: string,
+  fenceState: BlankLineCollapseFenceState,
+): string {
+  if (!text.includes("```")) {
+    // No fence marker in this frame: collapse only while we are outside any
+    // code block. The `fenceState` carry makes a frame that only contains
+    // blank lines (inside a fence opened earlier) pass through untouched.
+    if (fenceState.inFence || !text.includes("\n\n\n")) return text;
+    return text.replace(/\n{3,}/g, "\n\n");
+  }
 
   let output = "";
-  let inFence = false;
   let cursor = 0;
   while (cursor < text.length) {
     const fenceIndex = text.indexOf("```", cursor);
     if (fenceIndex === -1) {
-      output += inFence
+      output += fenceState.inFence
         ? text.slice(cursor)
         : text.slice(cursor).replace(/\n{3,}/g, "\n\n");
       break;
     }
     const segment = text.slice(cursor, fenceIndex);
-    output += inFence ? segment : segment.replace(/\n{3,}/g, "\n\n");
+    output += fenceState.inFence
+      ? segment
+      : segment.replace(/\n{3,}/g, "\n\n");
     output += "```";
-    inFence = !inFence;
+    fenceState.inFence = !fenceState.inFence;
     cursor = fenceIndex + 3;
   }
   return output;
@@ -1096,6 +1123,14 @@ export class XmlToolStreamFilter {
    * emitted text instead of the (empty) current buffer.
    */
   private lastEmittedTextEndsWithNewline = false;
+  /**
+   * Cross-frame fenced-code state for blank-line collapsing: a fence opened
+   * in an earlier frame keeps protecting this frame's interior blank lines.
+   * One state per filter instance (one per intercepted response).
+   */
+  private readonly blankLineFenceState: BlankLineCollapseFenceState = {
+    inFence: false,
+  };
 
   constructor(
     descriptors: readonly ToolDescriptor[] = [],
@@ -1343,7 +1378,10 @@ export class XmlToolStreamFilter {
       parsed: any;
     },
   ) {
-    const modified = cloneParsedWithCollapsedBlankLines(entry.parsed);
+    const modified = cloneParsedWithCollapsedBlankLines(
+      entry.parsed,
+      this.blankLineFenceState,
+    );
     if (modified === null) {
       this.emit(controller, entry.block, entry.separator);
       return;
@@ -1472,7 +1510,10 @@ export class XmlToolStreamFilter {
         ) {
           const modified = cloneParsedWithTextPrefix(entry.parsed, keepChars);
           if (modified) {
-            const collapsed = cloneParsedWithCollapsedBlankLines(modified);
+            const collapsed = cloneParsedWithCollapsedBlankLines(
+              modified,
+              this.blankLineFenceState,
+            );
             const effective = collapsed ?? modified;
             this.emit(
               controller,
@@ -1676,11 +1717,30 @@ export async function interceptFetchResponse(
     { highWaterMark: 0 },
   );
 
-  return new Response(stream, {
-    headers: response.headers,
+  // The filtered body no longer matches the upstream byte length, and fetch
+  // already decompressed it: forwarding the stale `content-length` would make
+  // the page's reader truncate (or pad) the stream, and a forwarded
+  // `content-encoding` would make it try to decode already-plain bytes.
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  headers.delete('content-encoding');
+
+  const filteredResponse = new Response(stream, {
+    headers,
     status: response.status,
     statusText: response.statusText,
   });
+  // The Response constructor has no url option; preserve the final
+  // (post-redirect) URL so page/extension code that consults `response.url`
+  // still sees the real endpoint.
+  if (response.url) {
+    Object.defineProperty(filteredResponse, 'url', {
+      value: response.url,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return filteredResponse;
 }
 
 function attachResponseContextToTokenSpeedProgress(

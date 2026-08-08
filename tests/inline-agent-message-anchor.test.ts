@@ -176,4 +176,22 @@ describe('elementHasMessageId', () => {
     expect(elementHasMessageId(nested, '42')).toBe(true);
     expect(elementHasMessageId(nested, '43')).toBe(false);
   });
+
+  it('does not match a numeric id inside a longer suffix (token boundary)', () => {
+    // Looking up message id 34 must not match an unrelated element whose
+    // value merely ENDS with `-34` inside a longer id (e.g. `…-234`): the
+    // old bare endsWith match could anchor a console under the wrong message.
+    const nested = document.createElement('div');
+    const child = document.createElement('div');
+    child.id = 'ds-message-234';
+    nested.appendChild(child);
+    expect(elementHasMessageId(nested, '34')).toBe(false);
+    expect(elementHasMessageId(nested, '234')).toBe(true);
+
+    const underscore = document.createElement('div');
+    const underscored = document.createElement('div');
+    underscored.setAttribute('data-id', 'msg_18');
+    underscore.appendChild(underscored);
+    expect(elementHasMessageId(underscore, '18')).toBe(true);
+  });
 });

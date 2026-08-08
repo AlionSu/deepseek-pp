@@ -834,6 +834,13 @@ export function updateStepStreamText(step: HTMLElement, visibleText: string): vo
     step.remove();
     return;
   }
+  if (body.getAttribute('data-dpp-raw-text') === visibleText) {
+    // Byte-identical text (the step render clamp makes every later frame
+    // identical once the display cap is reached): skip the full markdown
+    // re-parse and DOM rebuild. Rebuilding also destroyed in-flight
+    // code-run rows, so skipping here is both cheaper and safer.
+    return;
+  }
   body.setAttribute('data-dpp-raw-text', visibleText);
   body.innerHTML = renderAgentStreamText(visibleText);
   followAgentStreamScroll(step);
@@ -903,6 +910,12 @@ function formatAgentCodeRunOutput(result: AgentCodeRunResult, labels?: Partial<I
  * {@link AGENT_RUNNABLE_CODE_LANGS}). Idempotent per block: re-running after
  * a stream update skips already-hydrated blocks. Never touches native
  * deliverables (html/svg/xml/mermaid or xychart shorthand).
+ *
+ * The step body is rebuilt on every stream chunk, which destroys hydrated
+ * rows. In-flight and completed runs are remembered in a bounded module-level
+ * map keyed by the code block's language+content hash, so a re-hydrated row
+ * restores the disabled button and the output instead of silently losing the
+ * sandbox result (the old rows wrote their output into detached nodes).
  */
 export function hydrateAgentStepCodeRunners(
   step: HTMLElement,
@@ -920,9 +933,12 @@ export function hydrateAgentStepCodeRunners(
     pre.setAttribute('data-dpp-code-run-ready', 'true');
 
     const code = pre.querySelector('code')?.textContent ?? '';
+    const key = getAgentCodeRunKey(code, runnerLang);
+    const restored = agentCodeRunStates.get(key);
 
     const row = document.createElement('div');
     row.className = 'dpp-agent-code-run-row';
+    row.dataset.dppRunKey = key;
 
     const button = document.createElement('button');
     button.type = 'button';
@@ -935,27 +951,90 @@ export function hydrateAgentStepCodeRunners(
 
     button.addEventListener('click', () => {
       if (button.disabled) return;
-      button.disabled = true;
-      const idleLabel = button.textContent;
-      button.textContent = labels?.codeRunning ?? 'Running…';
-      output.hidden = false;
-      output.textContent = '';
+      const state: AgentCodeRunState = { running: true, output: '' };
+      rememberAgentCodeRunState(key, state);
+      syncAgentCodeRunRow(step, key, state, labels);
       void runCode(code, runnerLang)
         .then((result) => {
-          output.textContent = formatAgentCodeRunOutput(result, labels);
+          state.output = formatAgentCodeRunOutput(result, labels);
         })
         .catch((error: unknown) => {
-          output.textContent = error instanceof Error ? error.message : String(error);
+          state.output = error instanceof Error ? error.message : String(error);
         })
         .finally(() => {
-          button.disabled = false;
-          button.textContent = idleLabel;
+          state.running = false;
+          // The row may have been destroyed and re-hydrated since the click;
+          // sync whatever row currently exists for this key inside the step.
+          syncAgentCodeRunRow(step, key, state, labels);
         });
     });
 
     row.appendChild(button);
     pre.insertAdjacentElement('afterend', row);
     row.insertAdjacentElement('afterend', output);
+    if (restored) syncAgentCodeRunRow(step, key, restored, labels);
+  }
+}
+
+/**
+ * Applies a remembered code-run state to the current row for `key` inside the
+ * step (a no-op when the row was destroyed and not re-hydrated yet).
+ */
+function syncAgentCodeRunRow(
+  step: HTMLElement,
+  key: string,
+  state: AgentCodeRunState,
+  labels?: Partial<InlineAgentRendererLabels>,
+): void {
+  const row = step.querySelector<HTMLElement>(`[data-dpp-run-key="${key}"]`);
+  if (!row) return;
+  const button = row.querySelector<HTMLButtonElement>('.dpp-agent-code-run');
+  // The output box is the row's following sibling (the row is inserted
+  // between the <pre> and the output box).
+  const output = row.nextElementSibling instanceof HTMLElement
+    && row.nextElementSibling.classList.contains('dpp-agent-code-run-output')
+    ? row.nextElementSibling
+    : null;
+  if (button) {
+    button.disabled = state.running;
+    button.textContent = state.running
+      ? (labels?.codeRunning ?? 'Running…')
+      : (labels?.codeRun ?? 'Run');
+  }
+  if (output) {
+    output.hidden = !state.running && !state.output;
+    output.textContent = state.output;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Code-run state registry (bounded): survives step-body re-renders.
+// ---------------------------------------------------------------------------
+
+interface AgentCodeRunState {
+  running: boolean;
+  output: string;
+}
+
+const AGENT_CODE_RUN_STATE_MAX = 64;
+const agentCodeRunStates = new Map<string, AgentCodeRunState>();
+
+function getAgentCodeRunKey(code: string, language: string): string {
+  let hash = 0x811c9dc5;
+  const input = `${language}\0${code}`;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function rememberAgentCodeRunState(key: string, state: AgentCodeRunState): void {
+  agentCodeRunStates.set(key, state);
+  while (agentCodeRunStates.size > AGENT_CODE_RUN_STATE_MAX) {
+    const oldest = agentCodeRunStates.keys().next().value;
+    if (typeof oldest !== 'string') break;
+    agentCodeRunStates.delete(oldest);
   }
 }
 

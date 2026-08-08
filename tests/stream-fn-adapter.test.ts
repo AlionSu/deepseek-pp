@@ -329,6 +329,39 @@ describe('createDeepSeekStreamFn', () => {
     }
   });
 
+  it('does not retry a timed-out step after reasoning was already received', async () => {
+    // A reasoning-only turn (THINK deltas, no answer text yet) is still
+    // streamed content: timing out must surface the interrupted-streaming
+    // error instead of resubmitting with the same parent_message_id and
+    // forking a response the server may have already committed.
+    vi.useFakeTimers();
+    adapterMocks.submitPromptStreaming.mockImplementation((_input, handlers, signal) => {
+      handlers.onReasoningChunk?.('我先分析', '我先分析');
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+
+    const deps = createDeps();
+    const streamFn = createDeepSeekStreamFn(deps);
+    const stream = await streamFn(TEST_MODEL, EMPTY_CONTEXT, {});
+    const events: AssistantMessageEvent[] = [];
+    const drain = (async () => {
+      for await (const event of stream) events.push(event);
+    })();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await drain;
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(1);
+    const last = events.at(-1);
+    expect(last?.type).toBe('error');
+    if (last?.type === 'error') {
+      expect(last.error.errorMessage).toBe(
+        'DeepSeek agent step timed out while streaming; the response was interrupted.',
+      );
+    }
+  });
+
   it('forwards token speed progress through the optional dep callback', async () => {
     const progress = { modelType: 'default', tokenSpeed: 42 };
     adapterMocks.submitPromptStreaming.mockImplementationOnce(async (_input, handlers) => {

@@ -54,7 +54,17 @@ export function waitForInlineAgentLiveTarget<
 
     const handleAbort = () => settle(null);
     options.signal.addEventListener("abort", handleAbort, { once: true });
-    stopObserving = options.observe(check);
+    try {
+      stopObserving = options.observe(check);
+    } catch {
+      // The observing scope can be disposed (pagehide / SPA navigation /
+      // reinjection) between the first synchronous lookup and the observer
+      // installation. Fail closed like an abort instead of rejecting the
+      // promise: the caller then surfaces the regular start-failed path and
+      // the abort listener installed above is removed by settle.
+      settle(null);
+      return;
+    }
     timer = options.scheduleTimeout(() => settle(null), options.timeoutMs);
 
     // Cover a mount that lands between the first synchronous lookup and the

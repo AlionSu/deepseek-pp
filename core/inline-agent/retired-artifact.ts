@@ -33,19 +33,47 @@ export const RETIRED_ARTIFACT_TOOL_NAMES: ReadonlySet<string> = new Set([
  * wrapper shape handled by the shared XML tag scanner) are dropped entirely;
  * an open tag without its close tag (stream cut, persisted clamp) drops the
  * remainder of the text — that remainder is protocol body, not user content.
- * Returns the input unchanged when no artifact tag is present.
+ *
+ * The strip is fence-aware: inside a fenced code block an artifact tag is
+ * model-visible example content (a model showing the retired syntax in a
+ * ```fence```), never an executable control protocol, so those tags pass
+ * through byte-for-byte and an unclosed tag there never swallows the rest of
+ * the answer. Returns the input unchanged when no artifact tag is present.
  */
 export function stripRetiredArtifactProtocolBlocks(text: string): string {
   if (!text) return text;
 
   let output = '';
   let cursor = 0;
+  let inFence = false;
   while (cursor < text.length) {
+    const fenceIndex = text.indexOf('```', cursor);
     const open = findFirstXmlToolTag(text, RETIRED_ARTIFACT_TOOL_NAMES, {
       closing: false,
       fromIndex: cursor,
     });
-    if (!open) break;
+    if (!open) {
+      // No more artifact tags: copy the rest (fence markers included).
+      output += text.slice(cursor);
+      break;
+    }
+    if (fenceIndex !== -1 && fenceIndex < open.index) {
+      // The next fence marker precedes the artifact tag: copy up to and
+      // including the marker, toggle the fence state, and keep scanning.
+      output += text.slice(cursor, fenceIndex + 3);
+      inFence = !inFence;
+      cursor = fenceIndex + 3;
+      continue;
+    }
+    if (inFence) {
+      // Inside a fenced code block the tag is example content: copy the tag
+      // itself and continue scanning from after it.
+      output += text.slice(cursor, open.endIndex);
+      cursor = open.endIndex;
+      continue;
+    }
+    // Outside any fence: drop the complete block — or, for an unclosed
+    // trailing block, the remainder of the text.
     output += text.slice(cursor, open.index);
     const close = findFirstXmlToolTag(text, new Set([open.name]), {
       closing: true,
@@ -60,16 +88,5 @@ export function stripRetiredArtifactProtocolBlocks(text: string): string {
     // The whole block is removed — nothing of the protocol may surface.
     cursor = close.endIndex;
   }
-  return output + text.slice(cursor);
-}
-
-/** True when `text` still contains any retired artifact-protocol tag. */
-export function containsRetiredArtifactProtocol(text: string | null | undefined): boolean {
-  if (typeof text !== 'string' || !text) return false;
-  return (
-    text.includes('<artifact_create') ||
-    text.includes('</artifact_create') ||
-    text.includes('<artifact_bundle_create') ||
-    text.includes('</artifact_bundle_create')
-  );
+  return output;
 }

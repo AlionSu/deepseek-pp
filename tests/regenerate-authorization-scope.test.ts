@@ -145,6 +145,28 @@ describe('regenerate authorization scope', () => {
     });
     expect(resolvePersistedRegenerateAuthorizationEvidence(records, 'session-1', 20)).toBeNull();
   });
+
+  it('excludes rejected and interrupted executions from the legacy fallback', () => {
+    // Rejected (tool_not_authorized) and interrupted executions carry a
+    // descriptorId in the persisted record, but they were never authorized;
+    // the regenerate replay scope must only contain successfully executed
+    // descriptors.
+    const records = [
+      createPersistedBlock({
+        id: 'with-rejections',
+        descriptorIds: [],
+        executions: [
+          { name: 'mcp:one', descriptorId: 'mcp:one', ok: true },
+          { name: 'mcp:rejected', descriptorId: 'mcp:rejected', ok: false },
+          { name: 'local:interrupted', descriptorId: 'local:interrupted', ok: false },
+        ],
+      }),
+    ];
+
+    expect(resolvePersistedRegenerateAuthorizationEvidence(records, 'session-1', 18)).toEqual({
+      descriptorIds: ['mcp:one'],
+    });
+  });
 });
 
 function createPersistedBlock(options: {
@@ -152,6 +174,7 @@ function createPersistedBlock(options: {
   chatSessionId?: string;
   assistantMessageId?: number;
   descriptorIds: string[];
+  executions?: Array<{ name: string; descriptorId: string; ok: boolean }>;
   metadata?: Record<string, unknown>;
 }): ToolCallRestoreRecord {
   const chatSessionId = options.chatSessionId ?? 'session-1';
@@ -161,7 +184,11 @@ function createPersistedBlock(options: {
     source: 'storage',
     url: `https://chat.deepseek.com/a/chat/s/${chatSessionId}`,
     createdAt: 1,
-    executions: options.descriptorIds.map((descriptorId) => ({
+    executions: options.executions?.map((execution) => ({
+      name: execution.name,
+      descriptorId: execution.descriptorId,
+      result: { ok: execution.ok, summary: 'done' },
+    })) ?? options.descriptorIds.map((descriptorId) => ({
       name: descriptorId,
       descriptorId,
       result: { ok: true, summary: 'done' },

@@ -50,25 +50,6 @@ export interface DeepSeekSseFrameDecoder {
   finish(): DeepSeekSseFrame[];
 }
 
-/**
- * Encodes one DeepSeek SSE event using the released page wire shape.
- *
- * Every payload line must be carried by an SSE `data:` field; emitting raw
- * JSON between event boundaries makes the page's eventsource parser treat the
- * JSON key as an unknown SSE field and fail the whole completion. The trailing
- * blank line is part of the frame contract and lets incremental parsers commit
- * the final event without waiting for transport EOF.
- */
-export function encodeDeepSeekSseEvent(event: SSEEvent): string {
-  const lines: string[] = [];
-  if (event.id !== undefined) lines.push(`id: ${event.id}`);
-  if (event.type && event.type !== 'message') lines.push(`event: ${event.type}`);
-  for (const line of event.data.split(/\r\n|\r|\n/)) {
-    lines.push(`data: ${line}`);
-  }
-  return `${lines.join('\n')}\n\n`;
-}
-
 export function createDeepSeekStreamSummary(): DeepSeekStreamSummary {
   return {
     assistantText: '',
@@ -476,6 +457,28 @@ function splitByType(type: DeepSeekResponseFragmentType | null, content: string)
     : { text: content, reasoning: null };
 }
 
+/**
+ * Consumes the initial `content` of every fragment in a fragment-creation
+ * (APPEND or first snapshot) event, routing each fragment's delta by its own
+ * type. Returns `{text: null, reasoning: null}` when no fragment carries
+ * content.
+ */
+function consumeFragmentsInitialContent(
+  fragments: readonly unknown[],
+  types: readonly DeepSeekResponseFragmentType[],
+): DeepSeekResponseTextSplit {
+  let text: string | null = null;
+  let reasoning: string | null = null;
+  fragments.forEach((fragment, index) => {
+    const content = extractFragmentText(fragment);
+    if (!content) return;
+    const part = splitByType(types[index] ?? null, content);
+    if (part.text) text = (text ?? '') + part.text;
+    if (part.reasoning) reasoning = (reasoning ?? '') + part.reasoning;
+  });
+  return { text, reasoning };
+}
+
 function fragmentTypeAt(state: DeepSeekFragmentState, index: number): DeepSeekResponseFragmentType | null {
   if (index === -1) index = state.currentIndex;
   if (index < 0 || index >= state.fragmentTypes.length) return null;
@@ -506,7 +509,10 @@ export function splitDeepSeekResponseText(
   // Fragment creation: `{"p":"response/fragments","o":"APPEND","v":[...]}`.
   // The appended fragments become the current ones; their initial `content`
   // is a real delta (the server only re-streams it here, not in later
-  // patches), routed by each fragment's own type.
+  // patches), routed by each fragment's own type. Every fragment's content is
+  // consumed — an APPEND that carries several fragments (for example a final
+  // THINK and an opening RESPONSE in one event) must not drop the earlier
+  // fragments' initial deltas.
   if (isFragmentsAppendPatch(parsed)) {
     const fragments = parsed.v as unknown[];
     const types: DeepSeekResponseFragmentType[] = fragments.map((fragment) =>
@@ -514,10 +520,7 @@ export function splitDeepSeekResponseText(
     state.fragmentTypes.push(...types);
     state.currentIndex = state.fragmentTypes.length - 1;
     state.observed = true;
-    const last = fragments[fragments.length - 1];
-    const content = extractFragmentText(last);
-    if (content) return splitByType(types[types.length - 1], content);
-    return { text: null, reasoning: null };
+    return consumeFragmentsInitialContent(fragments, types);
   }
 
   // Full response snapshot: `{"v":{"response":{...,"fragments":[...]}}}`.
@@ -527,14 +530,13 @@ export function splitDeepSeekResponseText(
   const snapshotFragments = getSnapshotFragments(parsed);
   if (snapshotFragments) {
     const firstObservation = !state.observed;
-    state.fragmentTypes = snapshotFragments.map((fragment) =>
+    const types: DeepSeekResponseFragmentType[] = snapshotFragments.map((fragment) =>
       String((fragment as Record<string, unknown> | null)?.type ?? 'RESPONSE'));
+    state.fragmentTypes = types;
     state.currentIndex = state.fragmentTypes.length - 1;
     state.observed = true;
     if (firstObservation) {
-      const last = snapshotFragments[snapshotFragments.length - 1];
-      const content = extractFragmentText(last);
-      if (content) return splitByType(state.fragmentTypes[state.currentIndex], content);
+      return consumeFragmentsInitialContent(snapshotFragments, types);
     }
     return { text: null, reasoning: null };
   }

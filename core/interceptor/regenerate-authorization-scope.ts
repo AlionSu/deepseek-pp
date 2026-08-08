@@ -110,8 +110,10 @@ export function createPersistedRegenerateAuthorizationMetadata(
  * Recover the narrowest extension-owned authorization evidence for an older
  * response. New records carry the exact descriptor scope captured at response
  * completion. Records written by older releases fall back to only the
- * descriptors that the extension actually executed for that exact assistant
- * message; they never expand to the current full catalog.
+ * descriptors that the extension actually EXECUTED for that exact assistant
+ * message (executions with a non-ok result — rejected, interrupted, or
+ * never-authorized calls — are excluded); they never expand to the current
+ * full catalog.
  */
 export function resolvePersistedRegenerateAuthorizationEvidence(
   records: readonly ToolCallRestoreRecord[],
@@ -135,7 +137,14 @@ export function resolvePersistedRegenerateAuthorizationEvidence(
 
   const descriptorIds = normalizeDescriptorIds(
     matching.flatMap((record) =>
-      record.executions?.map((execution) => execution.descriptorId ?? '') ?? []
+      (record.executions ?? [])
+        // Only successfully executed calls are evidence of prior
+        // authorization. Rejected (tool_not_authorized) and interrupted
+        // executions carry a descriptorId too but were never authorized, so
+        // replaying them would expand the regenerate grant beyond what the
+        // original run actually executed.
+        .filter((execution) => execution.result?.ok === true)
+        .map((execution) => execution.descriptorId ?? '')
     ),
   );
   return descriptorIds && descriptorIds.length > 0 ? { descriptorIds } : null;
