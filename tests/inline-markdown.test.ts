@@ -149,8 +149,9 @@ describe('renderInlineMarkdown', () => {
   });
 
   it('renders 4-backtick fences and keeps 3-backtick runs as content', () => {
-    // Artifact deliverables (Issue #551) use a 4-backtick outer fence so the
-    // content may contain standard ``` fences. Code content is HTML-escaped.
+    // 4-backtick outer fences let the content contain standard ``` fences.
+    // Code content is HTML-escaped and the fence language is preserved for
+    // the agent console's incremental run support.
     const html = renderInlineMarkdown([
       '````html',
       '<div>partial</div>',
@@ -160,7 +161,7 @@ describe('renderInlineMarkdown', () => {
       '````',
     ].join('\n'));
 
-    expect(html).toContain('<pre><code>&lt;div&gt;partial&lt;/div&gt;\n```\ninner\n```\n</code></pre>');
+    expect(html).toContain('<pre data-dpp-lang="html"><code>&lt;div&gt;partial&lt;/div&gt;\n```\ninner\n```\n</code></pre>');
     // No leftover raw fences.
     expect(html).not.toContain('````');
     expect(html).not.toContain('<table>');
@@ -171,7 +172,7 @@ describe('renderInlineMarkdown', () => {
     // partial content renders as a code block instead of leaking backticks.
     const html = renderInlineMarkdown('```html\n<div>partial');
 
-    expect(html).toContain('<pre><code>&lt;div&gt;partial</code></pre>');
+    expect(html).toContain('<pre data-dpp-lang="html"><code>&lt;div&gt;partial</code></pre>');
     expect(html).not.toContain('```');
   });
 
@@ -181,4 +182,53 @@ describe('renderInlineMarkdown', () => {
     expect(html).not.toContain('<pre>');
     expect(html).toContain('text');
   });
+  it('recognizes hyphenated fence languages without nesting later blocks', () => {
+    const html = renderInlineMarkdown([
+      '```xychart-beta',
+      'title First',
+      'line [1, 2]',
+      '```',
+      '',
+      'between',
+      '',
+      '```xychart-beta',
+      'title Second',
+      'bar [2, 1]',
+      '```',
+    ].join('\n'));
+
+    expect(html.match(/<pre data-dpp-lang="xychart-beta">/g)).toHaveLength(2);
+    expect(html).toContain('<p>between</p>');
+    expect(html).not.toContain('```xychart-beta');
+  });
+
+  it('can omit closed and streaming native fences while preserving surrounding text', () => {
+    const nativeLanguages = new Set(['html', 'xychart-beta']);
+    const complete = renderInlineMarkdown([
+      'before',
+      '````HTML',
+      '<div>native</div>',
+      '```',
+      'still code',
+      '````',
+      'after',
+      '```js',
+      'console.log(1)',
+      '```',
+    ].join('\n'), { omitFencedCodeLanguages: nativeLanguages });
+
+    expect(complete).toContain('<p>before</p>');
+    expect(complete).toContain('<p>after</p>');
+    expect(complete).not.toContain('&lt;div&gt;native&lt;/div&gt;');
+    expect(complete).not.toContain('still code');
+    expect(complete).toContain('<pre data-dpp-lang="js"><code>console.log(1)\n</code></pre>');
+
+    const streaming = renderInlineMarkdown(
+      'before\n```xychart-beta\ntitle Partial\nline [1',
+      { omitFencedCodeLanguages: nativeLanguages },
+    );
+    expect(streaming).toBe('<p>before</p>');
+    expect(streaming).not.toContain('<pre');
+  });
+
 });

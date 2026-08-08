@@ -1,33 +1,30 @@
 const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
-export function renderInlineMarkdown(text: string): string {
+export interface InlineMarkdownRenderOptions {
+  /**
+   * Fenced-code languages that belong to another renderer and must therefore
+   * remain absent from this HTML surface. The full source text is not mutated;
+   * callers keep it separately for native delivery and persistence.
+   */
+  omitFencedCodeLanguages?: ReadonlySet<string>;
+}
+
+export function renderInlineMarkdown(
+  text: string,
+  options: InlineMarkdownRenderOptions = {},
+): string {
   try {
     const codeBlocks: string[] = [];
     // Normalize CRLF/CR line endings to LF up front so the blank-line
     // handling below also works when the model output uses `\r\n`
     // (Issue: agent panel blank-line rendering).
-    let html = escapeHtml(text).replace(/\r\n?/g, '\n');
-
-    // Fenced code blocks with variable fence lengths (```..`````). Anchored
-    // at line starts so a 4-backtick run inside a 3-backtick block is content,
-    // not the closing fence; the closing fence must repeat the opener's exact
-    // run length (standard markdown). Artifact deliverables (Issue #551) use
-    // 4-backtick fences so their content may contain ``` freely.
-    html = html.replace(/^(`{3,})(\w*)\n([\s\S]*?)^\1[ \t]*$/gm, (_match, _fence, _lang, code) => {
-      const token = `@@DPP_CODE_BLOCK_${codeBlocks.length}@@`;
-      codeBlocks.push(`<pre><code>${code}</code></pre>`);
-      return token;
-    });
-    // An unterminated trailing fence (streaming cut, persisted text clamped
-    // mid-block) still renders as a code block instead of leaking raw
-    // backticks: close it at the end of the text. The truncation honesty for
-    // clamped content comes from clampText's own `...[truncated]` marker,
-    // which lands inside the block and renders as its last line.
-    html = html.replace(/^(`{3,})(\w*)\n([\s\S]*)$/m, (_match, _fence, _lang, code) => {
-      const token = `@@DPP_CODE_BLOCK_${codeBlocks.length}@@`;
-      codeBlocks.push(`<pre><code>${code}</code></pre>`);
-      return token;
-    });
+    const normalizedText = text.replace(/\r\n?/g, '\n');
+    let html = replaceFencedCodeBlocks(
+      normalizedText,
+      codeBlocks,
+      options.omitFencedCodeLanguages,
+    );
+    html = escapeHtml(html);
     html = renderMarkdownTables(html);
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -172,6 +169,77 @@ function renderBlockLayout(html: string): string {
   }
 
   return blocks.join('');
+}
+
+/**
+ * Replaces fenced code blocks with inert tokens before ordinary Markdown
+ * rendering. A small line scanner is used instead of a regex back-reference so
+ * language info strings such as `xychart-beta` and `c++` are recognized, and a
+ * closing fence is legal only when its backtick run exactly matches the opener.
+ *
+ * An unterminated fence consumes the remainder of the text. This is deliberate
+ * for streaming: ordinary code still renders as an auto-closed `<pre>`, while a
+ * caller-omitted native deliverable stays hidden from the first streamed byte
+ * and cannot flash as a plugin-owned grey code frame before its closing fence
+ * arrives.
+ */
+function replaceFencedCodeBlocks(
+  text: string,
+  codeBlocks: string[],
+  omitFencedCodeLanguages?: ReadonlySet<string>,
+): string {
+  const openerPattern = /^(`{3,})([^\n`]*)\n/gm;
+  let output = '';
+  let cursor = 0;
+  let opener: RegExpExecArray | null;
+
+  while ((opener = openerPattern.exec(text)) !== null) {
+    const [openingLine, fence, infoString] = opener;
+    const openingIndex = opener.index;
+    const contentStart = openingIndex + openingLine.length;
+    const closingPattern = new RegExp(`^${fence}[ \t]*$`, 'gm');
+    closingPattern.lastIndex = contentStart;
+    const closing = closingPattern.exec(text);
+    const language = getFenceLanguage(infoString);
+    const omit = Boolean(language && omitFencedCodeLanguages?.has(language));
+
+    output += text.slice(cursor, openingIndex);
+
+    if (!closing) {
+      if (!omit) {
+        output += createCodeBlockToken(text.slice(contentStart), language, codeBlocks);
+      }
+      cursor = text.length;
+      break;
+    }
+
+    if (!omit) {
+      output += createCodeBlockToken(
+        text.slice(contentStart, closing.index),
+        language,
+        codeBlocks,
+      );
+    }
+    cursor = closing.index + closing[0].length;
+    openerPattern.lastIndex = cursor;
+  }
+
+  return output + text.slice(cursor);
+}
+
+function getFenceLanguage(infoString: string): string {
+  return infoString.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? '';
+}
+
+function createCodeBlockToken(
+  code: string,
+  language: string,
+  codeBlocks: string[],
+): string {
+  const token = `@@DPP_CODE_BLOCK_${codeBlocks.length}@@`;
+  const langAttr = language ? ` data-dpp-lang="${escapeAttribute(language)}"` : '';
+  codeBlocks.push(`<pre${langAttr}><code>${escapeHtml(code)}</code></pre>`);
+  return token;
 }
 
 function renderMarkdownTables(html: string): string {

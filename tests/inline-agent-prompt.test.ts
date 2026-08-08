@@ -10,14 +10,16 @@ import {
   shouldNudge,
 } from '../core/inline-agent/prompt';
 import {
-  convertInlineAgentArtifactBlocks,
   getInlineAgentAnswerText,
+  getInlineAgentDisplayFinalText,
+  getInlineAgentDisplayStepText,
   getInlineAgentProcessText,
   resolveInlineAgentAnswerText,
   stripInlineAgentTruncationSuffix,
   summarizeInlineAgentToolParams,
-  INLINE_AGENT_TRUNCATION_MARKER,
 } from '../core/inline-agent/display-text';
+import { createArtifactToolDescriptors } from '../core/artifact';
+import type { ToolDescriptor } from '../core/types';
 import { buildAutomationToolContinuationPrompt } from '../core/automation/runner';
 import type { ToolExecutionRecord } from '../core/types';
 
@@ -76,6 +78,50 @@ describe('inline-agent model prompts', () => {
     expect(prompt).toContain('以下是工具续跑任务');
     expect(prompt).toContain('<tool_results>');
     expect(prompt).not.toContain('Continue like a real agent');
+  });
+
+  it('pins native xychart grammar and rejects invented chart syntax in continuations', () => {
+    const expectedGrammar = [
+      'title "ARR"',
+      'x-axis ["2024-01", "2024-02"]',
+      'y-axis "ARR ($B)" 0 --> 50',
+      'line [1, 2]',
+    ];
+    const invalidGrammar = [
+      'x-label',
+      'y-label',
+      'chart-type',
+      'data:',
+      'series:',
+      'xy ...',
+    ];
+
+    for (const locale of ['en', 'zh-CN'] as const) {
+      const continuation = buildContinuationPrompt(
+        locale === 'en' ? 'Build a chart' : '生成图表',
+        [SUCCESS_EXECUTION],
+        locale,
+      );
+      const nudge = buildNudgePrompt(
+        locale === 'en' ? 'Build a chart' : '生成图表',
+        locale === 'en' ? 'I will continue.' : '我会继续。',
+        [SUCCESS_EXECUTION],
+        1,
+        locale,
+      );
+
+      for (const syntax of expectedGrammar) {
+        expect(continuation).toContain(syntax);
+        expect(nudge).toContain(syntax);
+      }
+      for (const syntax of invalidGrammar) {
+        expect(continuation).toContain(syntax);
+        expect(nudge).toContain(syntax);
+      }
+      expect(continuation).toContain('```xychart-beta');
+      expect(continuation).not.toContain('<artifact_create>');
+      expect(continuation).not.toContain('<artifact_bundle_create>');
+    }
   });
 
   it('localizes nudge prompts without changing task_complete', () => {
@@ -165,112 +211,33 @@ describe('inline-agent model prompts', () => {
     expect(getInlineAgentProcessText('普通过程文本。')).toBe('普通过程文本。');
   });
 
-  it('converts artifact_create blocks into plain fenced code blocks', () => {
-    // Issue #551 stream redesign: the model delivers files as raw
-    // `<artifact_create>` XML text; the display layer must never show the raw
-    // JSON — the deliverable renders as its own code block.
+  it('retires the artifact conversion: display text passes markdown through untouched', () => {
+    // Issue (drop plugin artifact extension): the display layer no longer
+    // converts `<artifact_create>` / `<artifact_bundle_create>` XML into
+    // display shapes. The model delivers files as plain markdown fences that
+    // the DeepSeek native renderer takes over; any artifact XML that still
+    // arrives is stripped by the tool-call stripping layer (tool-parser), so
+    // display-text itself never sees or reshapes the protocol.
     const raw = [
       '我已经生成了文件。',
       '',
-      '<artifact_create>{"filename":"demo.html","content":"<h1>Hi</h1>\\n<p>你好</p>"}</artifact_create>',
+      '<artifact_create>{"filename":"demo.html","content":"<h1>Hi</h1>"}</artifact_create>',
     ].join('\n');
 
-    const converted = convertInlineAgentArtifactBlocks(raw);
+    // Answer/process extraction strips only the `<task_complete>` control
+    // block; artifact XML is NOT converted into any plugin-drawn shape.
+    expect(getInlineAgentAnswerText(raw)).toBe(raw);
+    expect(getInlineAgentProcessText(raw)).toBe(raw);
 
-    expect(converted).not.toContain('<artifact_create>');
-    expect(converted).not.toContain('{"filename"');
-    expect(converted).not.toContain('**demo.html**');
-    // Fixed 4-backtick fence + inferred language, content unescaped.
-    expect(converted).toContain('````html\n<h1>Hi</h1>\n<p>你好</p>\n````');
+    // Plain markdown fences pass through byte-for-byte.
+    const fences = '```html\n<h1>Hi</h1>\n```\n\n```xychart-beta\nline [1, 2, 3]\n```';
+    expect(getInlineAgentAnswerText(fences)).toBe(fences);
   });
 
-  it('lengthens the artifact fence when the content contains backticks', () => {
-    const withFence = '<artifact_create>{"filename":"a.md","content":"```js\\ncode\\n```"}</artifact_create>';
-    const converted = convertInlineAgentArtifactBlocks(withFence);
-    expect(converted).toContain('````\n```js\ncode\n```\n````');
-
-    const withQuad = '<artifact_create>{"filename":"b.md","content":"````\\nquad\\n````"}</artifact_create>';
-    const convertedQuad = convertInlineAgentArtifactBlocks(withQuad);
-    expect(convertedQuad).toContain('`````\n````\nquad\n````\n`````');
-  });
-
-  it('converts artifact_bundle_create into one code block per file', () => {
-    const raw = '<artifact_bundle_create>{"filename":"site.zip","files":[{"filename":"index.html","content":"<h1>首页</h1>"},{"filename":"app.js","content":"console.log(1)"}]}</artifact_bundle_create>';
-
-    const converted = convertInlineAgentArtifactBlocks(raw);
-
-    expect(converted).not.toContain('<artifact_bundle_create>');
-    expect(converted).not.toContain('**index.html**');
-    expect(converted).not.toContain('**app.js**');
-    expect(converted).toContain('````html\n<h1>首页</h1>\n````');
-    expect(converted).toContain('````\nconsole.log(1)\n````');
-  });
-
-  it('salvages truncated artifact fragments with an explicit truncation marker', () => {
-    // Historical traces clamped the step text at 8000 chars mid-artifact and
-    // lost the closing tag: the fragment is best-effort decoded into a code
-    // block with the same honest marker clampText uses.
-    const truncated = '<artifact_create>{"filename":"demo.html","content":"<h1>Hi</h1>\\n<p>part';
-
-    const converted = convertInlineAgentArtifactBlocks(truncated);
-
-    expect(converted).not.toContain('**demo.html**');
-    expect(converted).toContain('````html\n<h1>Hi</h1>\n<p>part');
-    expect(converted).toContain(`\n${INLINE_AGENT_TRUNCATION_MARKER}\n` + '````');
-    // The closing fence makes the salvaged block well-formed markdown.
-    expect(converted.trimEnd().endsWith('````')).toBe(true);
-  });
-
-  it('keeps incomplete artifact fragments hidden while streaming', () => {
-    const truncated = '<artifact_create>{"filename":"demo.html","content":"<h1>Hi</h1>\\n<p>part';
-
-    expect(convertInlineAgentArtifactBlocks(truncated, { partial: 'hide' })).toBe('');
-    // A complete block renders even in streaming mode.
-    const complete = '<artifact_create>{"filename":"demo.html","content":"done"}</artifact_create>';
-    expect(convertInlineAgentArtifactBlocks(complete, { partial: 'hide' })).toContain('````html\ndone\n````');
-  });
-
-  it('renders an open code block while streaming so the deliverable grows', () => {
-    // Issue #551 follow-up: during live streaming an incomplete artifact must
-    // show the partial content (as an open fence the markdown renderer closes
-    // at the end of the text) instead of hiding the whole block.
-    const partial = '<artifact_create>{"filename":"demo.html","content":"<h1>Hi</h1>\\n<p>part';
-
-    const converted = convertInlineAgentArtifactBlocks(partial, { partial: 'stream' });
-
-    expect(converted).not.toContain('**demo.html**');
-    expect(converted).toContain('````html\n<h1>Hi</h1>\n<p>part');
-    // No truncation marker and no closing fence while streaming.
-    expect(converted).not.toContain(INLINE_AGENT_TRUNCATION_MARKER);
-    expect(converted.trimEnd().endsWith('````')).toBe(false);
-
-    // Once the block is complete the closed form appears.
-    const complete = '<artifact_create>{"filename":"demo.html","content":"done"}</artifact_create>';
-    const completeConverted = convertInlineAgentArtifactBlocks(complete, { partial: 'stream' });
-    expect(completeConverted.trimEnd().endsWith('````')).toBe(true);
-    expect(completeConverted).not.toContain(INLINE_AGENT_TRUNCATION_MARKER);
-  });
-
-  it('keeps stream-mode partials prefix-compatible with the complete block', () => {
-    // The same-origin resolution must survive streaming open blocks: the open
-    // partial "**f**\n\n````html\n<p>fu" is a prefix of the closed complete
-    // block, so a clamped step still dedups against the final answer.
-    const rawFull = '<artifact_create>{"filename":"a.html","content":"<p>full</p>"}</artifact_create>';
-    const rawPartial = '<artifact_create>{"filename":"a.html","content":"<p>fu';
-    const full = convertInlineAgentArtifactBlocks(rawFull);
-    const partial = convertInlineAgentArtifactBlocks(rawPartial, { partial: 'stream' });
-
-    expect(full.startsWith(partial)).toBe(true);
-    expect(resolveInlineAgentAnswerText(full, partial)).toEqual({ answer: full, fromStep: false });
-  });
-
-  it('leaves non-artifact text untouched', () => {
-    expect(convertInlineAgentArtifactBlocks('普通文本。\n\n```js\nx\n```')).toBe('普通文本。\n\n```js\nx\n```');
-  });
-
-  it('strips truncation suffixes for same-origin comparison', () => {
+  it('keeps truncation-suffix normalization for same-origin answer resolution', () => {
+    // Legacy persisted texts (old salvage conversion, clamp cuts) still carry
+    // the marker + a trailing fence; the resolver normalizes both forms.
     expect(stripInlineAgentTruncationSuffix('abc\n...[truncated]')).toBe('abc');
-    // Salvaged block: marker inside, closing fence after.
     expect(stripInlineAgentTruncationSuffix('abc\n...[truncated]\n' + '````')).toBe('abc');
     expect(stripInlineAgentTruncationSuffix('abc')).toBe('abc');
     expect(stripInlineAgentTruncationSuffix('')).toBe('');
@@ -284,10 +251,11 @@ describe('inline-agent model prompts', () => {
     expect(resolveInlineAgentAnswerText('完整回答正文。', '完整回答正\n...[truncated]'))
       .toEqual({ answer: '完整回答正文。', fromStep: false });
 
-    // Code-blockified forms: a salvaged truncated artifact block ends with the
-    // marker + closing fence; the complete answer has the full content.
-    const answer = '**demo.html**\n\n````html\n<h1>Hi</h1>\n<p>完整</p>\n````';
-    const step = '**demo.html**\n\n````html\n<h1>Hi</h1>\n<p>完\n...[truncated]\n````';
+    // Code-blockified forms (legacy traces): a salvaged truncated block ends
+    // with the marker + closing fence; the complete answer has the full
+    // content.
+    const answer = '```html\n<h1>Hi</h1>\n<p>完整</p>\n```';
+    const step = '```html\n<h1>Hi</h1>\n<p>完\n...[truncated]\n```';
     expect(resolveInlineAgentAnswerText(answer, step))
       .toEqual({ answer, fromStep: false });
   });
@@ -445,6 +413,32 @@ describe('inline-agent model prompts', () => {
     expect(shouldNudge('查行情', [SUCCESS_EXECUTION], "Let's fetch the second page.")).toBe(true);
     expect(shouldNudge('查行情', [SUCCESS_EXECUTION], 'I will summarize the findings now.')).toBe(false);
 
+    // Issue (mid-output silent stop): common "让我…" / "我再…" phrasings
+    // promised continued tool work but were missed by the detector, so the
+    // loop ended on a sentence that read like a normal final answer. These
+    // must nudge exactly like the covered phrasings.
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '让我再抓取雪球那篇详尽的24个月梳理文章，获取更完整的月度数据。')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '让我先搜索一下最新行情。')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '我再抓取一次页面确认数据。')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '先让我调用 web_fetch 获取详情。')).toBe(true);
+    // Statements of what ALREADY happened do not nudge.
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '我已经获得了大量数据。')).toBe(false);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '让我来总结一下结论。')).toBe(false);
+
+    // Issue (artifact deliverable silently swallowed): turns whose visible
+    // tail promises a deliverable WITHOUT 我 ("现在为你创建…") were missed by
+    // the detector, so a turn that ended on an empty promise completed
+    // silently. These must nudge exactly like the 我-prefixed phrasings.
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '现在为你创建一份包含折线图和增速分析的可视化报告。')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '为你创建一个包含汇总分析和交互式折线图的 HTML 页面。')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '现在为您生成一份包含汇总分析的 HTML 页面。')).toBe(true);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '这就帮你绘制交互式折线图。')).toBe(true);
+    // Completed-delivery statements and past-tense claims do not nudge.
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '我已经为你创建好了 HTML 页面。')).toBe(false);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '这是我为你创建的报告。')).toBe(false);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '为你创建了文件。')).toBe(false);
+    expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '报告如下，已为你生成完毕。')).toBe(false);
+
     const answerAfterPlanning = [
       '要求查看贵金属走势，之前的搜索已经提供了一些结果。我需要基于这些结果给出一个全面的回答。',
       '为了更全面地获取信息，我将同时打开这些相关的链接。',
@@ -462,6 +456,53 @@ describe('inline-agent model prompts', () => {
 
     expect(shouldNudge('查行情', [SUCCESS_EXECUTION], answerAfterPlanning)).toBe(false);
     expect(shouldNudge('查行情', [SUCCESS_EXECUTION], '根据搜索结果，恒生指数今日下跌，市场风险偏好偏弱。')).toBe(false);
+  });
+
+  it('strips retired artifact protocol from display text while keeping fences and other tools', () => {
+    // Issue (artifact deliverable silently swallowed): the display layer must
+    // strip residual artifact XML (retired internal protocol) WITHOUT
+    // touching user-visible content — plain markdown fences and other tool
+    // calls pass through, and the stripped text is what the nudge decision
+    // runs on, so nothing is ever silently swallowed.
+    const descriptors: ToolDescriptor[] = [...createArtifactToolDescriptors('en')];
+    const raw = [
+      '我已经整理好数据。',
+      '',
+      '<artifact_create>{"filename":"report.html","content":"<h1>汇总</h1>"}</artifact_create>',
+      '',
+      '```html',
+      '<h1>最终交付</h1>',
+      '```',
+    ].join('\n');
+
+    const finalText = getInlineAgentDisplayFinalText(raw, descriptors);
+    expect(finalText).toContain('```html');
+    expect(finalText).toContain('<h1>最终交付</h1>');
+    expect(finalText).not.toContain('artifact_create');
+    expect(finalText).not.toContain('"filename"');
+    expect(finalText).toContain('我已经整理好数据。');
+
+    const stepText = getInlineAgentDisplayStepText(raw, descriptors);
+    expect(stepText).toContain('```html');
+    expect(stepText).not.toContain('artifact_create');
+  });
+
+  it('keeps plain fences byte-for-byte in display text (native renderer input)', () => {
+    const descriptors: ToolDescriptor[] = [];
+    const fences = [
+      '现在为你创建以下可视化报告：',
+      '',
+      '```xychart-beta',
+      'line [1, 2, 3]',
+      '```',
+      '',
+      '```html',
+      '<h1>Hello</h1>',
+      '```',
+    ].join('\n');
+
+    expect(getInlineAgentDisplayFinalText(fences, descriptors)).toBe(fences.trim());
+    expect(getInlineAgentDisplayStepText(fences, descriptors)).toBe(fences.trim());
   });
 });
 

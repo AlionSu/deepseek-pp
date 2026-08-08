@@ -43,16 +43,10 @@ export interface MainWorldBridgeControllerDependencies {
   readonly applyState: (state: MainWorldBridgeState) => void;
   readonly clearState: () => void;
   readonly reportError: (message: string, error?: unknown) => void;
-  /**
-   * Registers the pending agent final-answer replay in the fetch hook. The
-   * payload is the validated `AgentReplayRegistration` shape.
-   */
-  readonly onRegisterAgentReplay?: (payload: unknown) => void;
 }
 
 type PendingRequest = {
   resolve: (value: RequestBodyModification | null) => void;
-  reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
 };
 
@@ -110,7 +104,11 @@ export function createMainWorldBridgeController(
     dependencies.clearState();
     for (const pending of pendingRequests.values()) {
       scope?.clearTimeout(pending.timeout);
-      pending.reject(new Error('DeepSeek++ main/content bridge disconnected.'));
+      // Request augmentation is optional page enrichment. A content-script
+      // reinjection/extension reload must never strand a native DeepSeek
+      // request after XHR.open(): resolve as passthrough so the MAIN hook can
+      // send the original body unchanged while the bridge reconnects.
+      pending.resolve(null);
     }
     pendingRequests.clear();
     await currentRelease?.();
@@ -132,9 +130,35 @@ export function createMainWorldBridgeController(
     }, BRIDGE_REQUEST_INTERVAL_MS);
   };
 
+  const tryPost = (message: Record<string, unknown>): boolean => {
+    if (!scope?.active || !port) return false;
+    try {
+      port.postMessage({ source: MAIN_WORLD_SOURCE, ...message });
+      return true;
+    } catch (error) {
+      // MessagePort can become unusable before the peer's disconnect
+      // handshake reaches MAIN. Never let an optional bridge notification
+      // (notably HEADERS_CAPTURED) escape into fetch/XHR and strand the native
+      // request before send(). Detach synchronously, pass pending augmentation
+      // through unchanged, then request a clean bridge epoch.
+      dependencies.reportError(
+        '[DeepSeek++] main/content bridge post failed; reconnecting',
+        error,
+      );
+      const disconnect = disconnectBridge();
+      startBridgeRequests();
+      void disconnect.catch((disconnectError) => {
+        dependencies.reportError(
+          '[DeepSeek++] content bridge recovery failed',
+          disconnectError,
+        );
+      });
+      return false;
+    }
+  };
+
   const post = (message: Record<string, unknown>) => {
-    if (!scope?.active || !port) return;
-    port.postMessage({ source: MAIN_WORLD_SOURCE, ...message });
+    tryPost(message);
   };
 
   const extendRequestTimeout = (message: AugmentResultMessage) => {
@@ -151,7 +175,7 @@ export function createMainWorldBridgeController(
     );
     pending.timeout = scope.setTimeout(() => {
       pendingRequests.delete(message.id!);
-      pending.reject(new Error('DeepSeek++ request augmentation timed out.'));
+      pending.resolve(null);
     }, timeoutMs);
   };
 
@@ -163,8 +187,11 @@ export function createMainWorldBridgeController(
     scope.clearTimeout(pending.timeout);
     if (message.ok === false) {
       const error = message.error || 'DeepSeek++ request augmentation failed.';
-      if (isExtensionUnavailableMessage(error)) pending.resolve(null);
-      else pending.reject(new Error(error));
+      dependencies.reportError(
+        '[DeepSeek++] request augmentation failed; sending original request',
+        new Error(error),
+      );
+      pending.resolve(null);
       return;
     }
     pending.resolve(message.result ?? null);
@@ -197,11 +224,6 @@ export function createMainWorldBridgeController(
         break;
       case 'AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT':
         extendRequestTimeout(message);
-        break;
-      case 'REGISTER_AGENT_REPLAY':
-        dependencies.onRegisterAgentReplay?.(
-          (message as AugmentResultMessage & { payload?: unknown }).payload,
-        );
         break;
     }
   };
@@ -281,13 +303,20 @@ export function createMainWorldBridgeController(
   ): Promise<RequestBodyModification | null> => {
     if (!scope?.active || !port) return Promise.resolve(null);
     const id = createSessionId();
-    return new Promise<RequestBodyModification | null>((resolve, reject) => {
+    return new Promise<RequestBodyModification | null>((resolve) => {
       const timeout = scope!.setTimeout(() => {
         pendingRequests.delete(id);
-        reject(new Error('DeepSeek++ request augmentation timed out.'));
+        resolve(null);
       }, REQUEST_TIMEOUT_MS);
-      pendingRequests.set(id, { resolve, reject, timeout });
-      post({ type: 'AUGMENT_REQUEST_BODY', id, requestId, route, body });
+      pendingRequests.set(id, { resolve, timeout });
+      if (!tryPost({ type: 'AUGMENT_REQUEST_BODY', id, requestId, route, body })) {
+        const pending = pendingRequests.get(id);
+        if (pending) {
+          pendingRequests.delete(id);
+          scope?.clearTimeout(pending.timeout);
+          pending.resolve(null);
+        }
+      }
     });
   };
 
@@ -316,13 +345,6 @@ export function createMainWorldBridgeController(
     },
     stop,
   };
-}
-
-function isExtensionUnavailableMessage(message: string): boolean {
-  return message.includes('Extension context invalidated')
-    || message.includes('context invalidated')
-    || message.includes('Extension context is unavailable')
-    || message.includes('main/content bridge is not connected');
 }
 
 function normalizeToolDescriptors(value: unknown): ToolDescriptor[] {

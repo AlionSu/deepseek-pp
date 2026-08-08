@@ -11,7 +11,7 @@ import { isLocalIndexInstructions, buildLocalExecutionBoundary } from '../skill/
 import { selectImplicitSkill, type LocalSkillIndex } from '../skill/local-skill-scorer';
 import { absolutizeSkillReferences, joinUnderRoot } from '../skill/local-path-rewriter';
 import { DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS, type SkillAutoActivationSettings } from '../skill/auto-activation-settings';
-import { projectToolDescriptorsForNativeSearch } from '../tool';
+import { projectToolDescriptorsForNativeSearch, filterRetiredModelFacingTools } from '../tool';
 import type { Memory, ModelType, Skill, SystemPromptPreset, ToolDescriptor } from '../types';
 import { filterMemoriesByProjectScope } from '../memory/scope';
 import {
@@ -190,9 +190,16 @@ export function augmentDecodedRequestBody(
     body.model_type = state.modelType;
   }
 
-  const modelFacingToolDescriptors = projectToolDescriptorsForNativeSearch(
-    state.toolDescriptors,
-    body.search_enabled === true,
+  // Model-facing projection: retired tools (the artifact_create /
+  // artifact_bundle_create protocol) never reach the model's Available Tools,
+  // and when DeepSeek page-native search is enabled the extension-owned
+  // networking tools are projected out as well, so the schema and mandatory
+  // guidance disappear together (see projectToolDescriptorsForNativeSearch).
+  const modelFacingToolDescriptors = filterRetiredModelFacingTools(
+    projectToolDescriptorsForNativeSearch(
+      state.toolDescriptors,
+      body.search_enabled === true,
+    ),
   );
 
   const invocation = parseSkillCommand(originalPrompt);

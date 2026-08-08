@@ -239,6 +239,139 @@ describe('history cleanup', () => {
     expect(json.data.biz_data.chat_messages[1].content).toBe('回答已经整理完成。');
   });
 
+  it('restores inline-agent xychart shorthand through the native Mermaid path', () => {
+    const directChart = [
+      '```xychart-beta',
+      'title "Revenue"',
+      'line [1, 2, 3]',
+      '```',
+      '',
+      '```html',
+      '<h1>Native HTML</h1>',
+      '```',
+    ].join('\n');
+    const json = {
+      data: {
+        biz_data: {
+          chat_messages: [
+            {
+              message_id: 50,
+              message_role: 'user',
+              content: [
+                '以下是工具续跑任务刚刚执行的工具结果。请像真正的 Agent 一样继续推进。',
+                '<original_task>生成图表</original_task>',
+                '<tool_results>[]</tool_results>',
+              ].join('\n'),
+            },
+            {
+              message_id: 51,
+              message_role: 'assistant',
+              parent_message_id: 50,
+              fragments: [
+                { content: directChart.slice(0, 19) },
+                { content: directChart.slice(19) },
+              ],
+            },
+            {
+              message_id: 52,
+              message_role: 'assistant',
+              parent_message_id: 49,
+              content: directChart,
+            },
+          ],
+        },
+      },
+    };
+
+    stripToolCallsFromHistory(json, {
+      toolDescriptors: createDefaultToolDescriptors(),
+      onToolCallsRestored: () => undefined,
+    });
+
+    expect(json.data.biz_data.chat_messages[0].content).toBe(INLINE_AGENT_CONTINUATION_PLACEHOLDER);
+    const restoredFragments = json.data.biz_data.chat_messages[1].fragments as Array<{ content: string }>;
+    expect(restoredFragments.map((fragment: { content: string }) => fragment.content).join('')).toBe([
+      '```mermaid',
+      'xychart-beta',
+      'title "Revenue"',
+      'line [1, 2, 3]',
+      '```',
+      '',
+      '```html',
+      '<h1>Native HTML</h1>',
+      '```',
+    ].join('\n'));
+    expect(restoredFragments[1].content).toBe('');
+    // Non-agent history is outside the normalization boundary.
+    expect(json.data.biz_data.chat_messages[2].content).toBe(directChart);
+  });
+
+  it('preserves THINK and RESPONSE fragment roles while normalizing an inline-agent chart', () => {
+    const reasoning = '先核验数据，再输出图表。';
+    const response = [
+      '```xychart-beta',
+      'xychart-beta',
+      'title "Revenue"',
+      'line [1, 2, 3]',
+      '```',
+      '',
+      '```html',
+      '<h1>Native HTML</h1>',
+      '```',
+    ].join('\n');
+    const json = {
+      data: {
+        biz_data: {
+          chat_messages: [
+            {
+              message_id: 60,
+              message_role: 'user',
+              content: [
+                '以下是工具续跑任务刚刚执行的工具结果。请像真正的 Agent 一样继续推进。',
+                '<original_task>生成图表</original_task>',
+                '<tool_results>[]</tool_results>',
+              ].join('\n'),
+            },
+            {
+              message_id: 61,
+              message_role: 'assistant',
+              parent_message_id: 60,
+              fragments: [
+                { id: 1, type: 'THINK', content: reasoning },
+                { id: 2, type: 'RESPONSE', content: response.slice(0, 24) },
+                { id: 3, type: 'RESPONSE', content: response.slice(24) },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    stripToolCallsFromHistory(json, {
+      toolDescriptors: createDefaultToolDescriptors(),
+      onToolCallsRestored: () => undefined,
+    });
+
+    const fragments = json.data.biz_data.chat_messages[1].fragments as Array<{
+      type: string;
+      content: string;
+    }>;
+    expect(fragments[0]).toMatchObject({ type: 'THINK', content: reasoning });
+    expect(fragments.slice(1).map((fragment) => fragment.content).join('')).toBe([
+      '```mermaid',
+      'xychart-beta',
+      'title "Revenue"',
+      'line [1, 2, 3]',
+      '```',
+      '',
+      '```html',
+      '<h1>Native HTML</h1>',
+      '```',
+    ].join('\n'));
+    expect(fragments[1].type).toBe('RESPONSE');
+    expect(fragments[2]).toMatchObject({ type: 'RESPONSE', content: '' });
+  });
+
   it('preserves user-authored task_complete examples in restored history', () => {
     const content = '<task_complete>{"summary":"保留原始示例。","artifacts":[]}</task_complete>';
     const json = {

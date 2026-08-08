@@ -15,30 +15,39 @@ import type {
   ToolAuthorizationGrantSummary,
   ToolDescriptor,
   ToolExecutionRecord,
-} from '../core/types';
-import { getDeepSeekApiKey } from '../core/chat/api-key';
-import { normalizePetConfig } from '../core/pet/config';
-import { pickPetLine, type PetState } from '../core/pet/lines';
-import { createToolInvocationCatalog } from '../core/tool/invocation';
-import { projectToolDescriptorsForNativeSearch } from '../core/tool/native-search-projection';
-import { createLatestSyncGate, type LatestSyncLease } from '../core/tool/latest-sync';
-import { DEFAULT_PROMPT_INJECTION_SETTINGS, normalizePromptInjectionSettings } from '../core/prompt/settings';
-import { normalizeBackgroundConfig } from '../core/background/config';
-import { decodePersistedMemoryRecord } from '../core/memory/codec';
-import { decodeActivePreset } from '../core/preset/codec';
-import { decodeSkillLibrary } from '../core/skill/codec';
-import { decodeRuntimeResponse, isRuntimeFailure } from '../core/messaging/runtime-response';
+} from "../core/types";
+import { getDeepSeekApiKey } from "../core/chat/api-key";
+import { normalizePetConfig } from "../core/pet/config";
+import { pickPetLine, type PetState } from "../core/pet/lines";
+import { createToolInvocationCatalog } from "../core/tool/invocation";
+import { projectToolDescriptorsForNativeSearch } from "../core/tool/native-search-projection";
+import {
+  createLatestSyncGate,
+  type LatestSyncLease,
+} from "../core/tool/latest-sync";
+import {
+  DEFAULT_PROMPT_INJECTION_SETTINGS,
+  normalizePromptInjectionSettings,
+} from "../core/prompt/settings";
+import { normalizeBackgroundConfig } from "../core/background/config";
+import { decodePersistedMemoryRecord } from "../core/memory/codec";
+import { decodeActivePreset } from "../core/preset/codec";
+import { decodeSkillLibrary } from "../core/skill/codec";
+import {
+  decodeRuntimeResponse,
+  isRuntimeFailure,
+} from "../core/messaging/runtime-response";
 import {
   LEGACY_TOOL_CALLS_OPEN_TAG,
   stripToolCalls,
-} from '../core/interceptor/tool-parser';
+} from "../core/interceptor/tool-parser";
 import {
   augmentDecodedRequestBody,
   decodeAugmentableDeepSeekRequest,
   type DeepSeekRequestBody,
   type DeepSeekRegenerateRequestBody,
-} from '../core/interceptor/request-augmentation';
-import { isDeepSeekAugmentableWebRoute } from '../core/deepseek/request-codec';
+} from "../core/interceptor/request-augmentation";
+import { isDeepSeekAugmentableWebRoute } from "../core/deepseek/request-codec";
 import {
   REGENERATE_AUTHORIZATION_METADATA_KEY,
   createPersistedRegenerateAuthorizationMetadata,
@@ -46,38 +55,52 @@ import {
   resolvePersistedRegenerateAuthorizationEvidence,
   type RegenerateAuthorizationScope,
   type RegeneratePromptOptionsSnapshot,
-} from '../core/interceptor/regenerate-authorization-scope';
-import { DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS, normalizeSkillAutoActivationSettings, type SkillAutoActivationSettings } from '../core/skill/auto-activation-settings';
-import { containsInternalPromptMarker, sanitizeInternalPromptText } from '../core/prompt';
-import { createRestoredArtifactToolResult } from '../core/artifact';
-import { type ResponseCompletePayload, type ResponseTokenSpeedPayload } from '../core/interceptor/fetch-hook';
-import { shouldIgnoreEmptyTokenSpeedProgress } from '../core/deepseek/stream-metrics';
-import { readDeepSeekChatSessionId } from '../core/deepseek/chat-session';
-import { createUsageProgressWriteCoordinator } from '../core/usage/progress-write-coordinator';
-import { runInlineAgentLoop } from '../core/inline-agent/loop';
+} from "../core/interceptor/regenerate-authorization-scope";
+import {
+  DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS,
+  normalizeSkillAutoActivationSettings,
+  type SkillAutoActivationSettings,
+} from "../core/skill/auto-activation-settings";
+import {
+  containsInternalPromptMarker,
+  sanitizeInternalPromptText,
+} from "../core/prompt";
+import { createRestoredArtifactToolResult } from "../core/artifact";
+import {
+  type ResponseCompletePayload,
+  type ResponseTokenSpeedPayload,
+} from "../core/interceptor/fetch-hook";
+import { shouldIgnoreEmptyTokenSpeedProgress } from "../core/deepseek/stream-metrics";
+import { readDeepSeekChatSessionId } from "../core/deepseek/chat-session";
+import { createUsageProgressWriteCoordinator } from "../core/usage/progress-write-coordinator";
+import { runInlineAgentLoop } from "../core/inline-agent/loop";
+import { waitForInlineAgentLiveTarget } from "../core/inline-agent/live-target-wait";
+import {
+  isInlineAgentNativeHistoryBackedTrace,
+  shouldReloadInlineAgentNativeHistory,
+  type InlineAgentModelBackend,
+} from "../core/inline-agent/native-history";
 import {
   INCOMPLETE_TOOL_CALL_ERROR_CODE,
   selectContinuableToolExecutions,
-} from '../core/inline-agent/execution-policy';
+} from "../core/inline-agent/execution-policy";
 import {
   INLINE_AGENT_CONTINUATION_PLACEHOLDER,
-  buildContinuationPrompt,
   isInlineAgentContinuationRequest,
   isInlineAgentContinuationStructure,
   replaceTaskCompleteBlocks,
-} from '../core/inline-agent/prompt';
+} from "../core/inline-agent/prompt";
 import {
-  convertInlineAgentArtifactBlocks,
-  getInlineAgentAnswerText,
-  getInlineAgentProcessText,
+  getInlineAgentDisplayFinalText,
+  getInlineAgentDisplayStepText,
   resolveInlineAgentAnswerText,
   stripInlineAgentTruncationSuffix,
-} from '../core/inline-agent/display-text';
+} from "../core/inline-agent/display-text";
 import {
   elementHasMessageId,
   findAssistantMessageByContentSnippet,
   findInlineAgentRestoreTarget,
-} from '../core/inline-agent/message-anchor';
+} from "../core/inline-agent/message-anchor";
 import type {
   InlineAgentStartPayload,
   InlineAgentReasoningChunkMsg,
@@ -88,7 +111,7 @@ import type {
   InlineAgentLoopErrorMsg,
   InlineAgentTraceRecord,
   InlineAgentTraceStepRecord,
-} from '../core/inline-agent/types';
+} from "../core/inline-agent/types";
 import {
   injectInlineAgentStyles,
   removeInlineAgentStyles,
@@ -107,76 +130,80 @@ import {
   followAgentStreamBottom,
   renderAgentStreamText,
   adoptReasoningBlock,
+  hydrateAgentStepCodeRunners,
   getAgentConsoleBody,
   updateAgentConsoleHeader,
   createAgentStartingElement,
   isInlineAgentBudgetFinalText,
   type AgentConsolePhase,
-} from '../core/inline-agent/renderer';
-import { renderInlineMarkdown } from '../core/inline-agent/markdown';
+} from "../core/inline-agent/renderer";
+import { renderInlineMarkdown } from "../core/inline-agent/markdown";
 import {
   createTranslator,
   DEFAULT_LOCALE,
   type LocaleMessageKey,
   type MessageParams,
   type SupportedLocale,
-} from '../core/i18n';
+} from "../core/i18n";
 import {
   getResolvedLocaleState,
   watchLocalePreference,
-} from '../core/i18n/store';
+} from "../core/i18n/store";
 import {
   registerDefaultToolResultRenderers,
   renderToolResultWithRegistry,
-} from '../core/ui/tool-result-renderer';
-import { injectInjectedThemeStyles } from '../core/ui/injected-theme';
+} from "../core/ui/tool-result-renderer";
+import { injectInjectedThemeStyles } from "../core/ui/injected-theme";
 import {
   findPromptTextarea,
   insertTextIntoPromptTextarea,
-} from '../core/ui/prompt-text-insertion';
+} from "../core/ui/prompt-text-insertion";
 import {
   normalizeRestoredToolExecution,
   sanitizeToolExecutionForRestoreStorage,
-} from '../core/tool/execution-restore';
-import type {
-  PersistedToolExecutionBlock as PersistedToolBlock,
-} from '../core/tool/execution-block-codec';
+} from "../core/tool/execution-restore";
+import type { PersistedToolExecutionBlock as PersistedToolBlock } from "../core/tool/execution-block-codec";
 import {
   readPersistedToolExecutionBlocks,
   upsertPersistedToolExecutionBlock,
-} from '../core/tool/execution-block-store';
+} from "../core/tool/execution-block-store";
 import {
   readPersistedInlineAgentTraces,
   upsertPersistedInlineAgentTrace,
-} from '../core/inline-agent/trace-store';
+} from "../core/inline-agent/trace-store";
 import {
   chainExternalizedPayloadWrite,
   isExternalizedToolPayloadCall,
-} from '../core/tool/externalized-payload';
+} from "../core/tool/externalized-payload";
 import {
   createToolRestoreBlockId,
   createToolRestoreBlockUrl,
-} from '../core/tool/restore-block';
-import { PendingRequestRegistry } from '../core/tool/pending-request-registry';
-import { PendingAuthorizationCorrelations } from '../core/tool/pending-authorization-correlations';
-import { shouldRequestWebFetchPermission } from '../core/tool/web-fetch-permission';
+} from "../core/tool/restore-block";
+import { PendingRequestRegistry } from "../core/tool/pending-request-registry";
+import { PendingAuthorizationCorrelations } from "../core/tool/pending-authorization-correlations";
+import { shouldRequestWebFetchPermission } from "../core/tool/web-fetch-permission";
 import {
   MCP_CAPABILITY_TOOL_PROVIDER_ID,
   isMcpCapabilityDescriptor,
-} from '../core/mcp/capability-contract';
+} from "../core/mcp/capability-contract";
 import {
   BACKGROUND_RUNTIME_PATHNAMES,
   createExtensionRuntimeMessageContext,
   decodeRuntimeMessageEnvelope,
   RuntimeBoundaryError,
-} from '../core/messaging/runtime-boundary';
+} from "../core/messaging/runtime-boundary";
 import {
   isToolDescriptorRecord,
   isToolProviderIdentity,
-} from '../core/messaging/tool-record-codec';
-import { startDeepSeekHistoryOrganizer, type HistoryOrganizerController } from './content/adapters/history-organizer';
-import { startDeepSeekProjectSidebarOrganizer, type ProjectSidebarOrganizerController } from './content/adapters/project-sidebar-organizer';
-import { startContentUxPolish, type ContentUxPolishController } from './content/adapters/ux-polish';
+} from "../core/messaging/tool-record-codec";
+import {
+  startDeepSeekHistoryOrganizer,
+  type HistoryOrganizerController,
+} from "./content/adapters/history-organizer";
+import {
+  startDeepSeekProjectSidebarOrganizer,
+  type ProjectSidebarOrganizerController,
+} from "./content/adapters/project-sidebar-organizer";
 import {
   MULTIMODAL_MEDIA_IMAGE_MAX_BYTES,
   MULTIMODAL_MEDIA_MAX_ITEMS_PER_TURN,
@@ -188,74 +215,84 @@ import {
   type MultimodalMediaAnalyzeResponse,
   type MultimodalMediaInput,
   type MultimodalMediaKind,
-} from '../core/multimodal/media';
+} from "../core/multimodal/media";
 import {
   calculateMultimodalRequestAugmentationTimeoutMs,
   canUseMultimodalMediaInput,
-} from '../core/multimodal';
+} from "../core/multimodal";
 
-import { buildDeepSeekSessionUrl, createClientHeaders, rememberDeepSeekClientHeaders, saveClientHeadersToStorage } from '../core/deepseek/adapter';
+import {
+  buildDeepSeekSessionUrl,
+  createClientHeaders,
+  rememberDeepSeekClientHeaders,
+  saveClientHeadersToStorage,
+} from "../core/deepseek/adapter";
 import type {
   ConversationExportArtifact,
   ConversationExportContentScope,
   ConversationExportProgress,
   ConversationExportResult,
-} from '../core/export/types';
-import { createConversationExportArchiveArtifact } from '../core/export/zip';
-import type { ToolCallPayloadChunk } from '../core/interceptor/streaming-tool-call-parser';
+} from "../core/export/types";
+import { createConversationExportArchiveArtifact } from "../core/export/zip";
+import type { ToolCallPayloadChunk } from "../core/interceptor/streaming-tool-call-parser";
 import {
   replaceContentDocumentLifecycle,
   type ContentCapabilityController,
   type ContentDocumentLifecycle,
   type ContentResourceScope,
-} from './content/lifecycle';
+} from "./content/lifecycle";
 import {
   createIsolatedBridgeController,
   type IsolatedBridgeController,
-} from './content/controllers/isolated-bridge-controller';
-import { createDomCapabilityController } from './content/controllers/dom-capability-controller';
-import { createContentChatController } from './content/controllers/chat-controller';
+} from "./content/controllers/isolated-bridge-controller";
+import { createDomCapabilityController } from "./content/controllers/dom-capability-controller";
+import { createContentChatController } from "./content/controllers/chat-controller";
 import {
   createContentMutationHub,
   type ContentMutationHub,
-} from './content/controllers/mutation-hub';
-import { notifyContentAuthStatusChanged } from './content/auth-status-notifier';
-import { createContentPersistenceTracker } from './content/persistence-tracking';
-import { getRestoredMessageMutationAction } from './content/restored-message-targets';
-import { bindNewChatToolCallToBrowserSession } from './content/tool-session-binding';
+} from "./content/controllers/mutation-hub";
+import { notifyContentAuthStatusChanged } from "./content/auth-status-notifier";
+import { createContentPersistenceTracker } from "./content/persistence-tracking";
+import { getRestoredMessageMutationAction } from "./content/restored-message-targets";
+import { bindNewChatToolCallToBrowserSession } from "./content/tool-session-binding";
 import {
   createBrowserDownloadManager,
   type BrowserDownloadManager,
-} from './content/download-manager';
+} from "./content/download-manager";
 
-const TOOL_BLOCK_ID = 'dpp-tool-block';
-const TOOL_BLOCK_STYLE_ID = 'dpp-tool-block-css';
-const RESTORED_TOOL_UI_SELECTOR = '.dpp-tool-block, .dpp-artifact-results';
-const RESTORED_INLINE_AGENT_UI_SELECTOR = '.dpp-agent-container[data-restored="true"]';
-const ASSISTANT_RESPONSE_CONTENT_SELECTOR = '._74c0879, .ds-assistant-message-main-content';
-const REASONING_HOST_META_RE = /\b(?:reason|reasoning|think|thinking|thought)\b/i;
-const REASONING_HOST_TEXT_RE = /^(?:已(?:深度)?思考|深度思考|思考过程|思考中|正在思考|thinking|reasoning|thought)(?:[\s（(:：]|$)/i;
+const TOOL_BLOCK_ID = "dpp-tool-block";
+const TOOL_BLOCK_STYLE_ID = "dpp-tool-block-css";
+const RESTORED_TOOL_UI_SELECTOR = ".dpp-tool-block, .dpp-artifact-results";
+const RESTORED_INLINE_AGENT_UI_SELECTOR =
+  '.dpp-agent-container[data-restored="true"]';
+const ASSISTANT_RESPONSE_CONTENT_SELECTOR =
+  "._74c0879, .ds-assistant-message-main-content";
+const REASONING_HOST_META_RE =
+  /\b(?:reason|reasoning|think|thinking|thought)\b/i;
+const REASONING_HOST_TEXT_RE =
+  /^(?:已(?:深度)?思考|深度思考|思考过程|思考中|正在思考|thinking|reasoning|thought)(?:[\s（(:：]|$)/i;
 const REASONING_HOST_ANCESTOR_SCAN_DEPTH = 4;
-const TOKEN_SPEED_BADGE_ID = 'dpp-token-speed-badge';
-const TOKEN_SPEED_STYLE_ID = 'dpp-token-speed-css';
-const MULTIMODAL_MEDIA_BUTTON_ID = 'dpp-multimodal-media-button';
-const MULTIMODAL_MEDIA_FILE_INPUT_ID = 'dpp-multimodal-media-file-input';
-const MULTIMODAL_MEDIA_TRAY_ID = 'dpp-multimodal-media-tray';
-const MULTIMODAL_MEDIA_STATUS_ID = 'dpp-multimodal-media-status';
-const MULTIMODAL_MEDIA_STYLE_ID = 'dpp-multimodal-media-css';
-const EXPORT_ACTION_CLASS = 'dpp-export-action';
-const EXPORT_ACTION_STYLE_ID = 'dpp-export-action-css';
-const EXPORT_ACTION_TOAST_CLASS = 'dpp-export-toast';
-const CONTENT_TOAST_CLASS = 'dpp-content-toast';
-const CONTENT_TOAST_STYLE_ID = 'dpp-content-toast-css';
-const EXPORT_ACTION_MENU_CLASS = 'dpp-export-menu';
+const INLINE_AGENT_LIVE_TARGET_WAIT_MS = 1_500;
+const TOKEN_SPEED_BADGE_ID = "dpp-token-speed-badge";
+const TOKEN_SPEED_STYLE_ID = "dpp-token-speed-css";
+const MULTIMODAL_MEDIA_BUTTON_ID = "dpp-multimodal-media-button";
+const MULTIMODAL_MEDIA_FILE_INPUT_ID = "dpp-multimodal-media-file-input";
+const MULTIMODAL_MEDIA_TRAY_ID = "dpp-multimodal-media-tray";
+const MULTIMODAL_MEDIA_STATUS_ID = "dpp-multimodal-media-status";
+const MULTIMODAL_MEDIA_STYLE_ID = "dpp-multimodal-media-css";
+const EXPORT_ACTION_CLASS = "dpp-export-action";
+const EXPORT_ACTION_STYLE_ID = "dpp-export-action-css";
+const EXPORT_ACTION_TOAST_CLASS = "dpp-export-toast";
+const CONTENT_TOAST_CLASS = "dpp-content-toast";
+const CONTENT_TOAST_STYLE_ID = "dpp-content-toast-css";
+const EXPORT_ACTION_MENU_CLASS = "dpp-export-menu";
 const DEEPSEEK_ACTION_CONTROL_SELECTOR = 'button, [role="button"].ds-button';
 const EXPORT_ACTION_MOUNT_DEBOUNCE_MS = 250;
 const EXPORT_ACTION_RETRY_MS = 250;
 const EXPORT_ACTION_RETRY_LIMIT = 20;
 const EXPORT_ACTION_TOAST_VISIBLE_MS = 4000;
-const PET_HOST_ID = 'dpp-pet-host';
-const PET_STYLE_ID = 'dpp-pet-css';
+const PET_HOST_ID = "dpp-pet-host";
+const PET_STYLE_ID = "dpp-pet-css";
 const TOKEN_SPEED_BOOTSTRAP_RETRY_MS = 250;
 const TOKEN_SPEED_BOOTSTRAP_RETRY_LIMIT = 40;
 const TOKEN_SPEED_MOUNT_DEBOUNCE_MS = 500;
@@ -277,29 +314,46 @@ const PET_CUSTOM_EDGE_MARGIN_PX = 12;
 const PET_HEIGHT_RATIO = 1;
 const PET_FEEDBACK_DELAY_MS = 1400;
 const PET_SLEEP_DELAY_MS = 12000;
-const PET_SPRITE_PATH = 'pet/deepseek-whale-pet-states.png';
-const DEEPSEEK_POW_WASM_PATH = 'deepseek/sha3_wasm_bg.wasm';
+const PET_SPRITE_PATH = "pet/deepseek-whale-pet-states.png";
+const DEEPSEEK_POW_WASM_PATH = "deepseek/sha3_wasm_bg.wasm";
 const PET_BUBBLE_VISIBLE_MS = 6000;
 const PET_BUBBLE_REPEAT_MIN_MS = 8000;
 const PET_BUBBLE_REPEAT_MAX_MS = 12000;
 const PET_BUBBLE_RECENT_LIMIT = 3;
-type ExportResponse = ConversationExportResult | { ok: false; exportId?: string; error: string };
+type ExportResponse =
+  ConversationExportResult | { ok: false; exportId?: string; error: string };
 interface ResolvedProjectAugmentationContext {
   projectId: string;
   context: string | null;
 }
 
 interface ConversationExportFormatOption {
-  format: ConversationExportArtifact['format'];
+  format: ConversationExportArtifact["format"];
   labelKey: LocaleMessageKey;
   defaultChecked: boolean;
 }
 
 const CONVERSATION_EXPORT_FORMAT_OPTIONS: ConversationExportFormatOption[] = [
-  { format: 'html', labelKey: 'content.export.formatHtml', defaultChecked: true },
-  { format: 'markdown', labelKey: 'content.export.formatMarkdown', defaultChecked: false },
-  { format: 'pdf', labelKey: 'content.export.formatPdf', defaultChecked: false },
-  { format: 'image_manifest', labelKey: 'content.export.formatImageManifest', defaultChecked: false },
+  {
+    format: "html",
+    labelKey: "content.export.formatHtml",
+    defaultChecked: true,
+  },
+  {
+    format: "markdown",
+    labelKey: "content.export.formatMarkdown",
+    defaultChecked: false,
+  },
+  {
+    format: "pdf",
+    labelKey: "content.export.formatPdf",
+    defaultChecked: false,
+  },
+  {
+    format: "image_manifest",
+    labelKey: "content.export.formatImageManifest",
+    defaultChecked: false,
+  },
 ];
 
 interface ConversationExportScopeOption {
@@ -308,31 +362,37 @@ interface ConversationExportScopeOption {
 }
 
 const CONVERSATION_EXPORT_SCOPE_OPTIONS: ConversationExportScopeOption[] = [
-  { scope: 'full', labelKey: 'content.export.scopeFull' },
-  { scope: 'input-output', labelKey: 'content.export.scopeInputOutput' },
+  { scope: "full", labelKey: "content.export.scopeFull" },
+  { scope: "input-output", labelKey: "content.export.scopeInputOutput" },
 ];
 
-const CONVERSATION_EXPORT_SCOPE_STORAGE_KEY = 'dpp:export:content-scope';
+const CONVERSATION_EXPORT_SCOPE_STORAGE_KEY = "dpp:export:content-scope";
 
 function getStoredConversationExportScope(): ConversationExportContentScope {
   const stored = localStorage.getItem(CONVERSATION_EXPORT_SCOPE_STORAGE_KEY);
-  return stored === 'input-output' ? 'input-output' : 'full';
+  return stored === "input-output" ? "input-output" : "full";
 }
 
-function storeConversationExportScope(scope: ConversationExportContentScope): void {
+function storeConversationExportScope(
+  scope: ConversationExportContentScope,
+): void {
   localStorage.setItem(CONVERSATION_EXPORT_SCOPE_STORAGE_KEY, scope);
 }
 
-function getSelectedConversationExportScope(menu: HTMLElement): ConversationExportContentScope {
-  const checked = menu.querySelector<HTMLInputElement>('input[name="contentScope"]:checked');
-  return checked?.value === 'input-output' ? 'input-output' : 'full';
+function getSelectedConversationExportScope(
+  menu: HTMLElement,
+): ConversationExportContentScope {
+  const checked = menu.querySelector<HTMLInputElement>(
+    'input[name="contentScope"]:checked',
+  );
+  return checked?.value === "input-output" ? "input-output" : "full";
 }
 // These states keep rotating pet lines during long stays; other states speak once on entry.
 const PET_BUBBLE_LOOPING_STATES: ReadonlySet<PetState> = new Set<PetState>([
-  'idle',
-  'thinking',
-  'speaking',
-  'working',
+  "idle",
+  "thinking",
+  "speaking",
+  "working",
 ]);
 
 interface PetDragState {
@@ -379,23 +439,35 @@ let activeToolBlockSessionId: string | null = null;
 let activeStreamingToolCount = 0;
 const activeToolBlockSessions = new Map<string, ActiveToolBlockSession>();
 const pendingExternalToolPayloadWrites = new Map<string, Promise<void>>();
-const activeToolAuthorizations = new Map<string, ToolAuthorizationGrantSummary>();
+const activeToolAuthorizations = new Map<
+  string,
+  ToolAuthorizationGrantSummary
+>();
 const toolAuthorizationRequestAliases = new Map<string, string>();
 const inlineAgentAuthorizationRequestKeys = new Map<string, string>();
-const activeToolAuthorizationRequestMetadata = new Map<string, {
-  activeLocalSkillDir?: string;
-}>();
+const activeToolAuthorizationRequestMetadata = new Map<
+  string,
+  {
+    activeLocalSkillDir?: string;
+  }
+>();
 const regenerateAuthorizationScopes = createRegenerateAuthorizationScopeStore();
-const pendingToolAuthorizationCorrelations = new PendingAuthorizationCorrelations();
-const pendingToolExecutionTasksByRequest = new Map<string, Set<Promise<ToolCardResult>>>();
-const pendingStartedToolCallsByRequest = new PendingRequestRegistry<PendingStartedToolCall>();
+const pendingToolAuthorizationCorrelations =
+  new PendingAuthorizationCorrelations();
+const pendingToolExecutionTasksByRequest = new Map<
+  string,
+  Set<Promise<ToolCardResult>>
+>();
+const pendingStartedToolCallsByRequest =
+  new PendingRequestRegistry<PendingStartedToolCall>();
 let responseGeneration = 0;
 let tokenSpeedEl: HTMLElement | null = null;
 let tokenSpeedBootstrapTimer: ReturnType<typeof setTimeout> | null = null;
 let tokenSpeedBootstrapAttempts = 0;
 let tokenSpeedMountTimer: ReturnType<typeof setTimeout> | null = null;
-let lastTokenSpeedProgress: ResponseTokenSpeedPayload = createIdleTokenSpeedProgress();
-let tokenSpeedRouteKey = '';
+let lastTokenSpeedProgress: ResponseTokenSpeedPayload =
+  createIdleTokenSpeedProgress();
+let tokenSpeedRouteKey = "";
 const usageProgressWrites = createUsageProgressWriteCoordinator();
 let multimodalMediaMountTimer: ReturnType<typeof setTimeout> | null = null;
 let multimodalMediaButtonEl: HTMLButtonElement | null = null;
@@ -405,7 +477,7 @@ let multimodalMediaStatusEl: HTMLElement | null = null;
 let multimodalMediaBusy = false;
 let multimodalMediaInputEnabled = false;
 const pendingMultimodalMedia = new Map<string, PendingMultimodalMedia>();
-let toolBlockRouteKey = '';
+let toolBlockRouteKey = "";
 let exportActionMountTimer: ReturnType<typeof setTimeout> | null = null;
 let exportActionRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let exportActionRetryAttempts = 0;
@@ -415,8 +487,8 @@ let exportActionMenuEl: HTMLElement | null = null;
 let exportActionMenuButton: HTMLButtonElement | null = null;
 let exportActionMenuSessionId: string | null = null;
 let historyOrganizerController: HistoryOrganizerController | null = null;
-let projectSidebarOrganizerController: ProjectSidebarOrganizerController | null = null;
-let contentUxPolishController: ContentUxPolishController | null = null;
+let projectSidebarOrganizerController: ProjectSidebarOrganizerController | null =
+  null;
 const restoredToolRecords = new Map<string, ToolCallRestoreRecord>();
 const pendingRestoredToolRecordIds = new Set<string>();
 let restoredRenderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -454,12 +526,11 @@ let pendingInlineAgentStreamChunk: InlineAgentStreamChunkMsg | null = null;
 /** Reasoning deltas per step that arrived before the step's narration mounted. */
 const pendingAgentReasoningByStep = new Map<number, string>();
 /**
- * Model backend of the active inline-agent run (set at loop start, cleared at
- * loop end). The web backend can deliver the final answer through the page's
- * native chat flow; the official-API backend has no page session and keeps
- * the panel rendering.
+ * Current-turn-only backend authority. It is never persisted: web sessions
+ * delegate their completed final response to DeepSeek's real history renderer,
+ * while official-API sessions keep the extension-owned narration surface.
  */
-let activeAgentModelBackend: 'web' | 'official-api' | null = null;
+let activeAgentModelBackend: InlineAgentModelBackend | null = null;
 const restoredInlineAgentTraces = new Map<string, InlineAgentTraceRecord>();
 const pendingRestoredInlineAgentTraceIds = new Set<string>();
 let restoredInlineAgentRenderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -468,8 +539,10 @@ let currentMemories: Memory[] = [];
 let currentSkills: Skill[] = [];
 let currentActivePreset: SystemPromptPreset | null = null;
 let currentModelType: ModelType = null;
-let currentPromptSettings: PromptInjectionSettings = DEFAULT_PROMPT_INJECTION_SETTINGS;
-let currentSkillAutoActivation: SkillAutoActivationSettings = DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS;
+let currentPromptSettings: PromptInjectionSettings =
+  DEFAULT_PROMPT_INJECTION_SETTINGS;
+let currentSkillAutoActivation: SkillAutoActivationSettings =
+  DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS;
 let currentContentLocale: SupportedLocale = DEFAULT_LOCALE;
 let currentContentTranslator = createTranslator(DEFAULT_LOCALE);
 let currentToolDescriptors: ToolDescriptor[] = [];
@@ -513,40 +586,80 @@ async function refreshContentLocale(): Promise<void> {
 
 function refreshLocalizedContentSurfaces(): void {
   if (exportCapabilityScope?.active) {
-    setConversationExportButtonsStatus(activeConversationExportId ? 'running' : 'idle');
+    setConversationExportButtonsStatus(
+      activeConversationExportId ? "running" : "idle",
+    );
   }
-  if (exportCapabilityScope?.active && exportActionMenuEl && exportActionMenuButton) {
+  if (
+    exportCapabilityScope?.active &&
+    exportActionMenuEl &&
+    exportActionMenuButton
+  ) {
     showConversationExportMenu(exportActionMenuButton);
   }
   historyOrganizerController?.refreshLabels();
   projectSidebarOrganizerController?.refreshLabels();
-  contentUxPolishController?.refreshLabels();
-  if (tokenSpeedCapabilityScope?.active) renderTokenSpeedIndicator(lastTokenSpeedProgress);
+  if (tokenSpeedCapabilityScope?.active)
+    renderTokenSpeedIndicator(lastTokenSpeedProgress);
   if (toolCapabilityScope?.active) {
     renderActiveToolBlockForCurrentRoute();
     scheduleRenderRestoredToolBlocks();
   }
-  if (inlineAgentCapabilityScope?.active) scheduleRenderRestoredInlineAgentTraces();
+  if (inlineAgentCapabilityScope?.active)
+    scheduleRenderRestoredInlineAgentTraces();
   if (multimodalCapabilityScope?.active) renderMultimodalMediaTray();
 }
 
 function getAgentRendererLabels() {
   return {
-    starting: contentT('content.agent.starting'),
-    stop: contentT('content.agent.stop'),
+    starting: contentT("content.agent.starting"),
+    stop: contentT("content.agent.stop"),
     running: (stepNumber: number, toolCount: number, elapsedSeconds: number) =>
-      contentT('content.agent.running', { step: stepNumber + 1, tools: toolCount, seconds: elapsedSeconds }),
-    toolOk: contentT('content.toolBlock.summaries.executed'),
-    toolError: contentT('content.toolBlock.summaries.failed'),
-    consoleComplete: (totalSteps: number, totalTools: number, elapsedSeconds: number) =>
-      contentT('content.agent.consoleComplete', { steps: totalSteps, tools: totalTools, seconds: elapsedSeconds }),
-    consolePaused: (totalSteps: number, totalTools: number, elapsedSeconds: number) =>
-      contentT('content.agent.consolePaused', { steps: totalSteps, tools: totalTools, seconds: elapsedSeconds }),
-    consoleError: (totalSteps: number, totalTools: number, elapsedSeconds: number) =>
-      contentT('content.agent.consoleError', { steps: totalSteps, tools: totalTools, seconds: elapsedSeconds }),
-    toolGroup: (count: number) => contentT('content.agent.toolGroup', { count }),
-    reasoningStep: (stepNumber: number) => contentT('content.agent.reasoningStep', { step: stepNumber + 1 }),
-    reasoningNotPersisted: contentT('content.agent.reasoningNotPersisted'),
+      contentT("content.agent.running", {
+        step: stepNumber + 1,
+        tools: toolCount,
+        seconds: elapsedSeconds,
+      }),
+    toolOk: contentT("content.toolBlock.summaries.executed"),
+    toolError: contentT("content.toolBlock.summaries.failed"),
+    consoleComplete: (
+      totalSteps: number,
+      totalTools: number,
+      elapsedSeconds: number,
+    ) =>
+      contentT("content.agent.consoleComplete", {
+        steps: totalSteps,
+        tools: totalTools,
+        seconds: elapsedSeconds,
+      }),
+    consolePaused: (
+      totalSteps: number,
+      totalTools: number,
+      elapsedSeconds: number,
+    ) =>
+      contentT("content.agent.consolePaused", {
+        steps: totalSteps,
+        tools: totalTools,
+        seconds: elapsedSeconds,
+      }),
+    consoleError: (
+      totalSteps: number,
+      totalTools: number,
+      elapsedSeconds: number,
+    ) =>
+      contentT("content.agent.consoleError", {
+        steps: totalSteps,
+        tools: totalTools,
+        seconds: elapsedSeconds,
+      }),
+    toolGroup: (count: number) =>
+      contentT("content.agent.toolGroup", { count }),
+    reasoningStep: (stepNumber: number) =>
+      contentT("content.agent.reasoningStep", { step: stepNumber + 1 }),
+    reasoningNotPersisted: contentT("content.agent.reasoningNotPersisted"),
+    codeRun: contentT("content.agent.codeRun"),
+    codeRunning: contentT("content.agent.codeRunning"),
+    codeRunFailed: contentT("content.agent.codeRunFailed"),
   };
 }
 
@@ -582,52 +695,67 @@ function getAgentConsoleElapsedSeconds(): number {
 function renderRunningAgentConsoleHeader(): void {
   const container = inlineAgentContainer;
   if (!container) return;
-  updateAgentConsoleHeader(container, {
-    phase: 'running',
-    stepNumber: inlineAgentCurrentStep
-      ? Number(inlineAgentCurrentStep.getAttribute('data-step-index') ?? 0)
-      : 0,
-    toolCount: agentRunningToolCount,
-    totalSteps: 0,
-    totalTools: 0,
-    elapsedSeconds: agentConsoleElapsedSeconds,
-  }, getAgentRendererLabels());
+  updateAgentConsoleHeader(
+    container,
+    {
+      phase: "running",
+      stepNumber: inlineAgentCurrentStep
+        ? Number(inlineAgentCurrentStep.getAttribute("data-step-index") ?? 0)
+        : 0,
+      toolCount: agentRunningToolCount,
+      totalSteps: 0,
+      totalTools: 0,
+      elapsedSeconds: agentConsoleElapsedSeconds,
+    },
+    getAgentRendererLabels(),
+  );
 }
 
 function renderTerminalAgentConsoleHeader(
   container: HTMLElement,
-  phase: Exclude<AgentConsolePhase, 'starting' | 'running'>,
+  phase: Exclude<AgentConsolePhase, "starting" | "running">,
   totalSteps: number,
   totalTools: number,
   labelOverride?: string,
   elapsedSeconds: number = getAgentConsoleElapsedSeconds(),
 ): void {
-  updateAgentConsoleHeader(container, {
-    phase,
-    stepNumber: 0,
-    toolCount: agentRunningToolCount,
-    totalSteps,
-    totalTools,
-    elapsedSeconds,
-    labelOverride,
-  }, getAgentRendererLabels());
+  updateAgentConsoleHeader(
+    container,
+    {
+      phase,
+      stepNumber: 0,
+      toolCount: agentRunningToolCount,
+      totalSteps,
+      totalTools,
+      elapsedSeconds,
+      labelOverride,
+    },
+    getAgentRendererLabels(),
+  );
 }
 
 function getHistoryOrganizerLabels() {
   return {
-    enhancedSearchTitle: contentT('content.historyOrganizer.enhancedSearchTitle'),
-    tagFilterLabel: contentT('content.historyOrganizer.tagFilterLabel'),
-    tagPlaceholder: contentT('content.historyOrganizer.tagPlaceholder'),
-    currentTagsLabel: contentT('content.historyOrganizer.currentTagsLabel'),
-    currentTagsPlaceholder: contentT('content.historyOrganizer.currentTagsPlaceholder'),
-    emptySearchStatus: contentT('content.historyOrganizer.emptySearchStatus'),
+    enhancedSearchTitle: contentT(
+      "content.historyOrganizer.enhancedSearchTitle",
+    ),
+    tagFilterLabel: contentT("content.historyOrganizer.tagFilterLabel"),
+    tagPlaceholder: contentT("content.historyOrganizer.tagPlaceholder"),
+    currentTagsLabel: contentT("content.historyOrganizer.currentTagsLabel"),
+    currentTagsPlaceholder: contentT(
+      "content.historyOrganizer.currentTagsPlaceholder",
+    ),
+    emptySearchStatus: contentT("content.historyOrganizer.emptySearchStatus"),
     visibleStatus: (visibleCount: number, totalCount: number) =>
-      contentT('content.historyOrganizer.visibleStatus', { visible: visibleCount, total: totalCount }),
-    storageError: (action: 'load' | 'save', message: string) =>
+      contentT("content.historyOrganizer.visibleStatus", {
+        visible: visibleCount,
+        total: totalCount,
+      }),
+    storageError: (action: "load" | "save", message: string) =>
       contentT(
-        action === 'load'
-          ? 'content.historyOrganizer.loadError'
-          : 'content.historyOrganizer.saveError',
+        action === "load"
+          ? "content.historyOrganizer.loadError"
+          : "content.historyOrganizer.saveError",
         { message },
       ),
   };
@@ -635,48 +763,60 @@ function getHistoryOrganizerLabels() {
 
 function getProjectSidebarOrganizerLabels() {
   return {
-    title: contentT('content.projectSidebar.title'),
-    empty: contentT('content.projectSidebar.empty'),
-    expandProject: (name: string) => contentT('content.projectSidebar.expandProject', { name }),
-    collapseProject: (name: string) => contentT('content.projectSidebar.collapseProject', { name }),
-    showMore: contentT('content.projectSidebar.showMore'),
-    showLess: contentT('content.projectSidebar.showLess'),
-    moveCurrentToProject: (name: string) => contentT('content.projectSidebar.moveCurrentToProject', { name }),
-    removeCurrentFromProject: (name: string) => contentT('content.projectSidebar.removeCurrentFromProject', { name }),
-    joinProject: contentT('content.projectSidebar.joinProject'),
-    joinProjectNamed: (name: string) => contentT('content.projectSidebar.joinProjectNamed', { name }),
-    moveToProjectNamed: (name: string) => contentT('content.projectSidebar.moveToProjectNamed', { name }),
-    currentProjectNamed: (name: string) => contentT('content.projectSidebar.currentProjectNamed', { name }),
-    removeFromProjectNamed: (name: string) => contentT('content.projectSidebar.removeFromProjectNamed', { name }),
-    conversationActions: contentT('content.projectSidebar.conversationActions'),
-    newConversationInProject: (name: string) => contentT('content.projectSidebar.newConversationInProject', { name }),
-    useNextConversation: (name: string) => contentT('content.projectSidebar.useNextConversation', { name }),
-    cancelNextConversation: (name: string) => contentT('content.projectSidebar.cancelNextConversation', { name }),
-    pendingNextConversation: contentT('content.projectSidebar.pendingNextConversation'),
-    untitledConversation: contentT('content.conversation.untitled'),
-    operationFailed: (message: string) => contentT('content.projectSidebar.operationFailed', { message }),
+    title: contentT("content.projectSidebar.title"),
+    empty: contentT("content.projectSidebar.empty"),
+    expandProject: (name: string) =>
+      contentT("content.projectSidebar.expandProject", { name }),
+    collapseProject: (name: string) =>
+      contentT("content.projectSidebar.collapseProject", { name }),
+    showMore: contentT("content.projectSidebar.showMore"),
+    showLess: contentT("content.projectSidebar.showLess"),
+    moveCurrentToProject: (name: string) =>
+      contentT("content.projectSidebar.moveCurrentToProject", { name }),
+    removeCurrentFromProject: (name: string) =>
+      contentT("content.projectSidebar.removeCurrentFromProject", { name }),
+    joinProject: contentT("content.projectSidebar.joinProject"),
+    joinProjectNamed: (name: string) =>
+      contentT("content.projectSidebar.joinProjectNamed", { name }),
+    moveToProjectNamed: (name: string) =>
+      contentT("content.projectSidebar.moveToProjectNamed", { name }),
+    currentProjectNamed: (name: string) =>
+      contentT("content.projectSidebar.currentProjectNamed", { name }),
+    removeFromProjectNamed: (name: string) =>
+      contentT("content.projectSidebar.removeFromProjectNamed", { name }),
+    conversationActions: contentT("content.projectSidebar.conversationActions"),
+    newConversationInProject: (name: string) =>
+      contentT("content.projectSidebar.newConversationInProject", { name }),
+    useNextConversation: (name: string) =>
+      contentT("content.projectSidebar.useNextConversation", { name }),
+    cancelNextConversation: (name: string) =>
+      contentT("content.projectSidebar.cancelNextConversation", { name }),
+    pendingNextConversation: contentT(
+      "content.projectSidebar.pendingNextConversation",
+    ),
+    untitledConversation: contentT("content.conversation.untitled"),
+    operationFailed: (message: string) =>
+      contentT("content.projectSidebar.operationFailed", { message }),
     age: (timestamp: number) => formatContentAge(timestamp),
-  };
-}
-
-function getContentUxPolishLabels() {
-  return {
-    codeDownloadButton: contentT('content.uxPolish.downloadCode'),
   };
 }
 
 function formatContentAge(timestamp: number): string {
   const mins = Math.floor((Date.now() - timestamp) / 60000);
-  if (mins < 1) return contentT('content.projectSidebar.age.justNow');
-  if (mins < 60) return contentT('content.projectSidebar.age.minutesAgo', { count: mins });
+  if (mins < 1) return contentT("content.projectSidebar.age.justNow");
+  if (mins < 60)
+    return contentT("content.projectSidebar.age.minutesAgo", { count: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return contentT('content.projectSidebar.age.hoursAgo', { count: hours });
-  return contentT('content.projectSidebar.age.daysAgo', { count: Math.floor(hours / 24) });
+  if (hours < 24)
+    return contentT("content.projectSidebar.age.hoursAgo", { count: hours });
+  return contentT("content.projectSidebar.age.daysAgo", {
+    count: Math.floor(hours / 24),
+  });
 }
 
 export default defineContentScript({
-  matches: ['*://chat.deepseek.com/*'],
-  runAt: 'document_start',
+  matches: ["*://chat.deepseek.com/*"],
+  runAt: "document_start",
   async main() {
     extensionContextValid = true;
     const controllers = createContentCapabilityControllers();
@@ -685,7 +825,7 @@ export default defineContentScript({
       onError: reportContentLifecycleError,
     });
     if (!extensionContextValid) {
-      await lifecycle.dispose('extension-invalidated');
+      await lifecycle.dispose("extension-invalidated");
       return;
     }
     contentDocumentLifecycle = lifecycle;
@@ -693,7 +833,9 @@ export default defineContentScript({
 });
 
 function createContentCapabilityControllers(): readonly ContentCapabilityController[] {
-  const chatController = createContentChatController({ dispatch: dispatchMainWorldMessage });
+  const chatController = createContentChatController({
+    dispatch: dispatchMainWorldMessage,
+  });
   const mutationHub = createContentMutationHub({
     reportError: reportContentLifecycleError,
   });
@@ -714,41 +856,89 @@ function createContentCapabilityControllers(): readonly ContentCapabilityControl
     // Start transport before DOM capabilities; chat ingress starts last so reverse
     // teardown gates new dispatch before aborting work and closing authorizations.
     bridgeController,
-    createDomCapability('theme', startThemeCapability, stopThemeCapability),
-    createDomCapability('mutation-hub', (scope) => mutationHub.start(scope), () => mutationHub.stop()),
-    createDomCapability('token-speed', (scope) => startTokenSpeedCapability(scope, mutationHub), stopTokenSpeedCapability),
-    createDomCapability('tool', (scope) => startToolCapability(scope, mutationHub), stopToolCapability),
-    createDomCapability('inline-agent', (scope) => startInlineAgentCapability(scope, mutationHub), stopInlineAgentCapability),
-    createDomCapability('multimodal', (scope) => startMultimodalCapability(scope, mutationHub), stopMultimodalCapability),
-    createDomCapability('export', (scope) => startExportCapability(scope, mutationHub), stopExportCapability),
-    createDomCapability('history', startHistoryCapability, stopHistoryCapability),
-    createDomCapability('project', startProjectCapability, stopProjectCapability),
-    createDomCapability('ux-polish', startUxPolishCapability, stopUxPolishCapability),
-    createDomCapability('background', (scope) => startBackgroundCapability(scope, mutationHub), stopBackgroundCapability),
-    createDomCapability('pet', startPetCapability, stopPetCapability),
+    createDomCapability("theme", startThemeCapability, stopThemeCapability),
+    createDomCapability(
+      "mutation-hub",
+      (scope) => mutationHub.start(scope),
+      () => mutationHub.stop(),
+    ),
+    createDomCapability(
+      "token-speed",
+      (scope) => startTokenSpeedCapability(scope, mutationHub),
+      stopTokenSpeedCapability,
+    ),
+    createDomCapability(
+      "tool",
+      (scope) => startToolCapability(scope, mutationHub),
+      stopToolCapability,
+    ),
+    createDomCapability(
+      "inline-agent",
+      (scope) => startInlineAgentCapability(scope, mutationHub),
+      stopInlineAgentCapability,
+    ),
+    createDomCapability(
+      "multimodal",
+      (scope) => startMultimodalCapability(scope, mutationHub),
+      stopMultimodalCapability,
+    ),
+    createDomCapability(
+      "export",
+      (scope) => startExportCapability(scope, mutationHub),
+      stopExportCapability,
+    ),
+    createDomCapability(
+      "history",
+      startHistoryCapability,
+      stopHistoryCapability,
+    ),
+    createDomCapability(
+      "project",
+      startProjectCapability,
+      stopProjectCapability,
+    ),
+    createDomCapability(
+      "background",
+      (scope) => startBackgroundCapability(scope, mutationHub),
+      stopBackgroundCapability,
+    ),
+    createDomCapability("pet", startPetCapability, stopPetCapability),
     chatController,
   ];
 }
 
 function createRuntimeStateCapability(): ContentCapabilityController {
   return {
-    id: 'runtime-state',
+    id: "runtime-state",
     async start(scope) {
       runtimeStateCapabilityScope = scope;
-      const isCurrent = () => runtimeStateCapabilityScope === scope && scope.active;
+      const isCurrent = () =>
+        runtimeStateCapabilityScope === scope && scope.active;
       registerDefaultToolResultRenderers();
       await refreshContentLocale();
       if (!isCurrent()) return;
-      scope.addCleanup('listener', watchLocalePreference(() => {
-        if (!isCurrent()) return;
-        void refreshContentLocale()
-          .then(() => {
-            if (isCurrent()) return loadAndSyncRuntimeState(undefined, isCurrent);
-          })
-          .catch((error) => console.error('[DeepSeek++] content locale refresh failed', error));
-      }));
-      scope.addCleanup('listener', installExtensionInvalidationGuards());
-      scope.addCleanup('listener', addRuntimeMessageListener(handleContentRuntimeMessage));
+      scope.addCleanup(
+        "listener",
+        watchLocalePreference(() => {
+          if (!isCurrent()) return;
+          void refreshContentLocale()
+            .then(() => {
+              if (isCurrent())
+                return loadAndSyncRuntimeState(undefined, isCurrent);
+            })
+            .catch((error) =>
+              console.error(
+                "[DeepSeek++] content locale refresh failed",
+                error,
+              ),
+            );
+        }),
+      );
+      scope.addCleanup("listener", installExtensionInvalidationGuards());
+      scope.addCleanup(
+        "listener",
+        addRuntimeMessageListener(handleContentRuntimeMessage),
+      );
       void loadAndSyncRuntimeState(undefined, isCurrent);
     },
     stop() {
@@ -771,7 +961,7 @@ function createDomCapability(
 }
 
 function reportContentLifecycleError(error: unknown): void {
-  console.error('[DeepSeek++] content lifecycle failed', error);
+  console.error("[DeepSeek++] content lifecycle failed", error);
 }
 
 const contentPersistenceTracker = createContentPersistenceTracker({
@@ -788,16 +978,26 @@ function observeReportedPersistence(operation: Promise<unknown>): void {
   void operation.catch(() => undefined);
 }
 
-function isToolEpochActive(scope: ContentResourceScope, epoch: number): boolean {
-  return toolCapabilityScope === scope
-    && toolCapabilityEpoch === epoch
-    && scope.active;
+function isToolEpochActive(
+  scope: ContentResourceScope,
+  epoch: number,
+): boolean {
+  return (
+    toolCapabilityScope === scope &&
+    toolCapabilityEpoch === epoch &&
+    scope.active
+  );
 }
 
-function isInlineAgentEpochActive(scope: ContentResourceScope, epoch: number): boolean {
-  return inlineAgentCapabilityScope === scope
-    && inlineAgentCapabilityEpoch === epoch
-    && scope.active;
+function isInlineAgentEpochActive(
+  scope: ContentResourceScope,
+  epoch: number,
+): boolean {
+  return (
+    inlineAgentCapabilityScope === scope &&
+    inlineAgentCapabilityEpoch === epoch &&
+    scope.active
+  );
 }
 
 function startThemeCapability(): void {
@@ -806,8 +1006,8 @@ function startThemeCapability(): void {
 
 function stopThemeCapability(): void {
   stopDeepSeekThemeSync();
-  document.getElementById('dpp-injected-theme-css')?.remove();
-  document.body.classList.remove('dpp-theme-dark', 'dpp-theme-light');
+  document.getElementById("dpp-injected-theme-css")?.remove();
+  document.body.classList.remove("dpp-theme-dark", "dpp-theme-light");
 }
 
 function startTokenSpeedCapability(
@@ -824,7 +1024,7 @@ function stopTokenSpeedCapability(): void {
   tokenSpeedCapabilityScope = null;
   stopTokenSpeedIndicatorBootstrap();
   stopTokenSpeedIndicatorMountSubscription();
-  tokenSpeedRouteKey = '';
+  tokenSpeedRouteKey = "";
   removeTokenSpeedIndicator();
   document.getElementById(TOKEN_SPEED_STYLE_ID)?.remove();
 }
@@ -843,7 +1043,7 @@ function startToolCapability(
 async function stopToolCapability(): Promise<void> {
   toolCapabilityScope = null;
   toolCapabilityEpoch += 1;
-  toolBlockRouteKey = '';
+  toolBlockRouteKey = "";
   stopRenderedToolCallCleaner();
   finishActivePermissionRequest(false);
   if (restoredRenderTimer) {
@@ -858,7 +1058,9 @@ async function stopToolCapability(): Promise<void> {
     errors.push(error);
   }
   try {
-    await finalizePendingToolStarts(pendingStartedToolCallsByRequest.drainAll());
+    await finalizePendingToolStarts(
+      pendingStartedToolCallsByRequest.drainAll(),
+    );
   } catch (error) {
     errors.push(error);
   }
@@ -883,11 +1085,16 @@ async function stopToolCapability(): Promise<void> {
   pendingExternalToolPayloadWrites.clear();
   pendingToolExecutionTasksByRequest.clear();
   restoredRenderAttempts = 0;
-  document.querySelectorAll('.dpp-tool-block, .dpp-artifact-results').forEach((node) => node.remove());
+  document
+    .querySelectorAll(".dpp-tool-block, .dpp-artifact-results")
+    .forEach((node) => node.remove());
   document.getElementById(PERMISSION_BANNER_STYLE_ID)?.remove();
   document.getElementById(TOOL_BLOCK_STYLE_ID)?.remove();
   if (errors.length > 0) {
-    throw new AggregateError(errors, 'Content tool capability teardown failed.');
+    throw new AggregateError(
+      errors,
+      "Content tool capability teardown failed.",
+    );
   }
 }
 
@@ -926,14 +1133,18 @@ async function stopInlineAgentCapability(): Promise<void> {
   restoredInlineAgentTraces.clear();
   pendingRestoredInlineAgentTraceIds.clear();
   restoredInlineAgentRenderAttempts = 0;
-  document.querySelectorAll('.dpp-agent-container').forEach((node) => node.remove());
+  document
+    .querySelectorAll(".dpp-agent-container")
+    .forEach((node) => node.remove());
   stopAgentConsoleTimer();
   removeInlineAgentStyles();
   if (contentToastTimer) {
     clearTimeout(contentToastTimer);
     contentToastTimer = null;
   }
-  document.querySelectorAll(`.${CONTENT_TOAST_CLASS}`).forEach((node) => node.remove());
+  document
+    .querySelectorAll(`.${CONTENT_TOAST_CLASS}`)
+    .forEach((node) => node.remove());
   document.getElementById(CONTENT_TOAST_STYLE_ID)?.remove();
 }
 
@@ -942,17 +1153,19 @@ function startMultimodalCapability(
   mutationHub: ContentMutationHub,
 ): void {
   multimodalCapabilityScope = scope;
-  scope.addCleanup('cleanup', mutationHub.subscribe({
-    matches: (mutations) => (
-      multimodalCapabilityScope === scope
-      && scope.active
-      && mutations.some(mutationMayAffectPromptControls)
-    ),
-    handle: scheduleMultimodalMediaMount,
-  }));
-  void refreshMultimodalMediaInputAvailability(() => (
-    multimodalCapabilityScope === scope && scope.active
-  ));
+  scope.addCleanup(
+    "cleanup",
+    mutationHub.subscribe({
+      matches: (mutations) =>
+        multimodalCapabilityScope === scope &&
+        scope.active &&
+        mutations.some(mutationMayAffectPromptControls),
+      handle: scheduleMultimodalMediaMount,
+    }),
+  );
+  void refreshMultimodalMediaInputAvailability(
+    () => multimodalCapabilityScope === scope && scope.active,
+  );
 }
 
 function stopMultimodalCapability(): void {
@@ -968,14 +1181,16 @@ function startExportCapability(
   exportCapabilityScope = scope;
   exportDownloadManager?.stop();
   exportDownloadManager = createBrowserDownloadManager();
-  scope.addCleanup('cleanup', mutationHub.subscribe({
-    matches: (mutations) => (
-      exportCapabilityScope === scope
-      && scope.active
-      && mutations.some(mutationMayAffectConversationExportActions)
-    ),
-    handle: scheduleConversationExportActionMount,
-  }));
+  scope.addCleanup(
+    "cleanup",
+    mutationHub.subscribe({
+      matches: (mutations) =>
+        exportCapabilityScope === scope &&
+        scope.active &&
+        mutations.some(mutationMayAffectConversationExportActions),
+      handle: scheduleConversationExportActionMount,
+    }),
+  );
   startConversationExportActionInjector();
 }
 
@@ -987,7 +1202,9 @@ function stopExportCapability(): void {
 }
 
 function startHistoryCapability(): void {
-  historyOrganizerController = startDeepSeekHistoryOrganizer(getHistoryOrganizerLabels);
+  historyOrganizerController = startDeepSeekHistoryOrganizer(
+    getHistoryOrganizerLabels,
+  );
 }
 
 function stopHistoryCapability(): void {
@@ -996,7 +1213,9 @@ function stopHistoryCapability(): void {
 }
 
 function startProjectCapability(): void {
-  projectSidebarOrganizerController = startDeepSeekProjectSidebarOrganizer(getProjectSidebarOrganizerLabels);
+  projectSidebarOrganizerController = startDeepSeekProjectSidebarOrganizer(
+    getProjectSidebarOrganizerLabels,
+  );
 }
 
 function stopProjectCapability(): void {
@@ -1004,31 +1223,27 @@ function stopProjectCapability(): void {
   projectSidebarOrganizerController = null;
 }
 
-function startUxPolishCapability(): void {
-  contentUxPolishController = startContentUxPolish(getContentUxPolishLabels);
-}
-
-function stopUxPolishCapability(): void {
-  contentUxPolishController?.stop();
-  contentUxPolishController = null;
-}
-
 function startBackgroundCapability(
   scope: ContentResourceScope,
   mutationHub: ContentMutationHub,
 ): void {
   backgroundCapabilityScope = scope;
-  scope.addCleanup('cleanup', mutationHub.subscribe({
-    matches: (mutations) => (
-      backgroundCapabilityScope === scope
-      && scope.active
-      && document.body.classList.contains('dpp-bg-active')
-      && mutations.some((mutation) => mutation.type === 'childList')
-    ),
-    handle: patchContainerBackgrounds,
-  }));
-  void sendRuntimeMessage<BackgroundConfig | null>({ type: 'GET_BACKGROUND' }).then((config) => {
-    if (backgroundCapabilityScope === scope && scope.active) applyBackground(config ?? null);
+  scope.addCleanup(
+    "cleanup",
+    mutationHub.subscribe({
+      matches: (mutations) =>
+        backgroundCapabilityScope === scope &&
+        scope.active &&
+        document.body.classList.contains("dpp-bg-active") &&
+        mutations.some((mutation) => mutation.type === "childList"),
+      handle: patchContainerBackgrounds,
+    }),
+  );
+  void sendRuntimeMessage<BackgroundConfig | null>({
+    type: "GET_BACKGROUND",
+  }).then((config) => {
+    if (backgroundCapabilityScope === scope && scope.active)
+      applyBackground(config ?? null);
   });
 }
 
@@ -1039,9 +1254,12 @@ function stopBackgroundCapability(): void {
 
 function startPetCapability(scope: ContentResourceScope): void {
   petCapabilityScope = scope;
-  void sendRuntimeMessage<PetConfig | null>({ type: 'GET_PET' }).then((config) => {
-    if (petCapabilityScope === scope && scope.active) applyPetConfig(config ?? null);
-  });
+  void sendRuntimeMessage<PetConfig | null>({ type: "GET_PET" }).then(
+    (config) => {
+      if (petCapabilityScope === scope && scope.active)
+        applyPetConfig(config ?? null);
+    },
+  );
 }
 
 function stopPetCapability(): void {
@@ -1051,41 +1269,51 @@ function stopPetCapability(): void {
   document.getElementById(PET_STYLE_ID)?.remove();
 }
 
-async function dispatchMainWorldMessage(data: Record<string, unknown>): Promise<void> {
+async function dispatchMainWorldMessage(
+  data: Record<string, unknown>,
+): Promise<void> {
   try {
     switch (data.type) {
-      case 'TOOL_CALL_STARTED': {
+      case "TOOL_CALL_STARTED": {
         showPendingToolExecution(data.data as ToolCall);
         break;
       }
-      case 'TOOL_CALL': {
+      case "TOOL_CALL": {
         const call = ensureToolCallId(data.data as ToolCall);
-        setPetState('working');
+        setPetState("working");
         void runToolExecution(call);
         break;
       }
-      case 'TOOL_CALL_CHUNK': {
+      case "TOOL_CALL_CHUNK": {
         await appendExternalToolPayloadChunk(data.data as ToolCallPayloadChunk);
         break;
       }
-      case 'RESTORE_TOOL_CALLS': {
+      case "RESTORE_TOOL_CALLS": {
         rememberRestoredToolRecords(data.records as ToolCallRestoreRecord[]);
         break;
       }
-      case 'MEMORIES_USED': {
-        await sendRuntimeMessage({ type: 'TOUCH_MEMORIES', payload: { ids: data.ids as number[] } });
+      case "MEMORIES_USED": {
+        await sendRuntimeMessage({
+          type: "TOUCH_MEMORIES",
+          payload: { ids: data.ids as number[] },
+        });
         break;
       }
-      case 'HEADERS_CAPTURED': {
-        await persistDeepSeekClientHeaders(normalizeCapturedClientHeaders(data.headers));
+      case "HEADERS_CAPTURED": {
+        await persistDeepSeekClientHeaders(
+          normalizeCapturedClientHeaders(data.headers),
+        );
         break;
       }
-      case 'NAVIGATION_CHANGED': {
+      case "NAVIGATION_CHANGED": {
         handleContentNavigation();
         break;
       }
-      case 'RESPONSE_COMPLETE': {
-        const complete = normalizeResponseCompletePayload(data.payload, data.text);
+      case "RESPONSE_COMPLETE": {
+        const complete = normalizeResponseCompletePayload(
+          data.payload,
+          data.text,
+        );
         rememberRegenerateAuthorizationScope(complete);
         const generation = ++responseGeneration;
         activeStreamingToolCount = 0;
@@ -1093,10 +1321,14 @@ async function dispatchMainWorldMessage(data: Record<string, unknown>): Promise<
         await finalizeInterruptedToolStarts(complete.requestId);
         if (generation !== responseGeneration) break;
         const session = getActiveToolBlockSessionForComplete(complete);
-        const completedExecutions = session ? [...session.executions] : [...toolExecutions];
+        const completedExecutions = session
+          ? [...session.executions]
+          : [...toolExecutions];
         if (session && session.executions.length > 0) {
           await persistToolBlockSession(session, complete.text, complete);
-          const renderedBlock = (findRestoredToolBlock(session.id) as HTMLElement | null) ?? toolBlockEl;
+          const renderedBlock =
+            (findRestoredToolBlock(session.id) as HTMLElement | null) ??
+            toolBlockEl;
           collapseToolBlock(renderedBlock);
           activeToolBlockSessions.delete(session.id);
           if (activeToolBlockSessionId === session.id) {
@@ -1106,7 +1338,12 @@ async function dispatchMainWorldMessage(data: Record<string, unknown>): Promise<
           }
         } else if (toolExecutions.length > 0) {
           const fallbackSession = getCurrentRouteActiveToolBlockSession();
-          if (fallbackSession) await persistToolBlockSession(fallbackSession, complete.text, complete);
+          if (fallbackSession)
+            await persistToolBlockSession(
+              fallbackSession,
+              complete.text,
+              complete,
+            );
           collapseToolBlock(toolBlockEl);
           toolExecutions = [];
           toolBlockEl = null;
@@ -1115,10 +1352,14 @@ async function dispatchMainWorldMessage(data: Record<string, unknown>): Promise<
         schedulePetIdle();
         break;
       }
-      case 'REQUEST_TERMINAL': {
-        const requestId = (data.payload as { requestId?: unknown } | undefined)?.requestId;
-        if (typeof requestId !== 'string') break;
-        if (activeToolAuthorizations.has(requestId) || toolAuthorizationRequestAliases.has(requestId)) {
+      case "REQUEST_TERMINAL": {
+        const requestId = (data.payload as { requestId?: unknown } | undefined)
+          ?.requestId;
+        if (typeof requestId !== "string") break;
+        if (
+          activeToolAuthorizations.has(requestId) ||
+          toolAuthorizationRequestAliases.has(requestId)
+        ) {
           pendingToolAuthorizationCorrelations.terminate(requestId);
           await waitForPendingToolExecutions(requestId);
           await finalizeInterruptedToolStarts(requestId);
@@ -1128,7 +1369,7 @@ async function dispatchMainWorldMessage(data: Record<string, unknown>): Promise<
         }
         break;
       }
-      case 'RESPONSE_TOKEN_SPEED': {
+      case "RESPONSE_TOKEN_SPEED": {
         const progress = normalizeResponseTokenSpeedPayload(data.payload);
         if (progress) {
           updateTokenSpeedIndicator(progress);
@@ -1139,7 +1380,8 @@ async function dispatchMainWorldMessage(data: Record<string, unknown>): Promise<
     }
   } catch (error) {
     if (isExtensionInvalidatedError(error)) invalidateExtensionContext();
-    else console.error('[DeepSeek++] main-world message handling failed', error);
+    else
+      console.error("[DeepSeek++] main-world message handling failed", error);
   }
 }
 
@@ -1159,7 +1401,7 @@ function handleContentRuntimeMessage(
   try {
     createExtensionRuntimeMessageContext(sender, {
       runtimeId: chrome.runtime.id,
-      extensionOrigin: chrome.runtime.getURL('/'),
+      extensionOrigin: chrome.runtime.getURL("/"),
       allowedPathnames: BACKGROUND_RUNTIME_PATHNAMES,
     });
   } catch (error) {
@@ -1168,77 +1410,98 @@ function handleContentRuntimeMessage(
     if (error instanceof RuntimeBoundaryError) return undefined;
     throw error;
   }
-  if (message.type === 'STATE_UPDATED') {
+  if (message.type === "STATE_UPDATED") {
     try {
       syncToMainWorld(
-        decodeRuntimeMemories(message.memories, 'memoryUpdate'),
-        decodeSkillLibrary(message.skills, 'skillUpdate'),
-        decodeActivePreset(message.activePreset, 'activePresetUpdate'),
+        decodeRuntimeMemories(message.memories, "memoryUpdate"),
+        decodeSkillLibrary(message.skills, "skillUpdate"),
+        decodeActivePreset(message.activePreset, "activePresetUpdate"),
         message.modelType,
         currentToolDescriptors,
         normalizePromptInjectionSettings(message.promptSettings),
         normalizeSkillAutoActivationSettings(message.skillAutoActivation),
       );
     } catch (error) {
-      console.error('[DeepSeek++] memory state update rejected', error);
+      console.error("[DeepSeek++] memory state update rejected", error);
     }
-  } else if (message.type === 'TOOL_DESCRIPTORS_UPDATED') {
+  } else if (message.type === "TOOL_DESCRIPTORS_UPDATED") {
     const syncLease = toolDescriptorSyncGate.begin();
     try {
       const descriptors = decodeToolDescriptors(message.toolDescriptors);
-      syncLease.commit(() => syncToMainWorld(
-        currentMemories,
-        currentSkills,
-        currentActivePreset,
-        currentModelType,
-        descriptors,
-        currentPromptSettings,
-      ));
+      syncLease.commit(() =>
+        syncToMainWorld(
+          currentMemories,
+          currentSkills,
+          currentActivePreset,
+          currentModelType,
+          descriptors,
+          currentPromptSettings,
+        ),
+      );
     } catch (error) {
       syncLease.commit(() => reportToolDescriptorSyncFailure(error));
     }
-  } else if (message.type === 'MCP_SERVERS_UPDATED') {
+  } else if (message.type === "MCP_SERVERS_UPDATED") {
     const scope = multimodalCapabilityScope;
     if (scope && Array.isArray(message.servers)) {
-      setMultimodalMediaInputEnabled(shouldEnableMultimodalMediaInput(message.servers));
+      setMultimodalMediaInputEnabled(
+        shouldEnableMultimodalMediaInput(message.servers),
+      );
     } else if (scope) {
-      void refreshMultimodalMediaInputAvailability(() => (
-        multimodalCapabilityScope === scope && scope.active
-      ));
+      void refreshMultimodalMediaInputAvailability(
+        () => multimodalCapabilityScope === scope && scope.active,
+      );
     }
     const runtimeScope = runtimeStateCapabilityScope;
     if (runtimeScope) {
-      void refreshToolDescriptorsFromBackground(() => (
-        runtimeStateCapabilityScope === runtimeScope && runtimeScope.active
-      ));
+      void refreshToolDescriptorsFromBackground(
+        () =>
+          runtimeStateCapabilityScope === runtimeScope && runtimeScope.active,
+      );
     }
-  } else if (message.type === 'BACKGROUND_UPDATED') {
+  } else if (message.type === "BACKGROUND_UPDATED") {
     if (backgroundCapabilityScope?.active) {
       applyBackground(message.config as BackgroundConfig | null);
     }
-  } else if (message.type === 'PET_UPDATED') {
-    if (petCapabilityScope?.active) applyPetConfig(message.config as PetConfig | null);
-  } else if (message.type === 'REFRESH_DEEPSEEK_AUTH') {
+  } else if (message.type === "PET_UPDATED") {
+    if (petCapabilityScope?.active)
+      applyPetConfig(message.config as PetConfig | null);
+  } else if (message.type === "REFRESH_DEEPSEEK_AUTH") {
     persistDeepSeekClientHeaders()
       .then((hasToken) => sendResponse({ ok: hasToken, hasToken }))
-      .catch((error) => sendResponse({
-        ok: false,
-        hasToken: false,
-        error: error instanceof Error ? error.message : String(error),
-      }));
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          hasToken: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     return true;
-  } else if (message.type === 'DEEPSEEK_EXPORT_PROGRESS') {
+  } else if (message.type === "DEEPSEEK_EXPORT_PROGRESS") {
     if (exportCapabilityScope?.active) {
-      updateConversationExportProgress(message.progress as ConversationExportProgress | undefined);
+      updateConversationExportProgress(
+        message.progress as ConversationExportProgress | undefined,
+      );
     }
-  } else if (message.type === 'INSERT_PROMPT_TEXT') {
-    sendResponse(insertPromptText(typeof message.text === 'string' ? message.text : ''));
+  } else if (message.type === "INSERT_PROMPT_TEXT") {
+    sendResponse(
+      insertPromptText(typeof message.text === "string" ? message.text : ""),
+    );
     return true;
-  } else if (message.type === 'GET_CURRENT_DEEPSEEK_CONVERSATION') {
+  } else if (message.type === "GET_CURRENT_DEEPSEEK_CONVERSATION") {
     const conversationId = getCurrentChatSessionId();
-    sendResponse(conversationId
-      ? { ok: true, conversation: { conversationId, title: getCurrentConversationTitle(), url: location.href } }
-      : { ok: false, error: 'no_current_conversation' });
+    sendResponse(
+      conversationId
+        ? {
+            ok: true,
+            conversation: {
+              conversationId,
+              title: getCurrentConversationTitle(),
+              url: location.href,
+            },
+          }
+        : { ok: false, error: "no_current_conversation" },
+    );
     return true;
   }
   return undefined;
@@ -1260,30 +1523,37 @@ async function handleAugmentRequestBody(data: {
   route?: unknown;
   body?: unknown;
 }): Promise<void> {
-  const id = typeof data.id === 'string' ? data.id : '';
-  const mainRequestId = typeof data.requestId === 'string' ? data.requestId : '';
+  const id = typeof data.id === "string" ? data.id : "";
+  const mainRequestId =
+    typeof data.requestId === "string" ? data.requestId : "";
   if (!id) return;
 
   let authorization: ToolAuthorizationGrantSummary | null = null;
-  let requestId = '';
+  let requestId = "";
   let tracksPendingAlias = false;
   try {
-    if (typeof data.body !== 'string') {
-      throw new Error('Request body must be a string.');
+    if (typeof data.body !== "string") {
+      throw new Error("Request body must be a string.");
     }
     if (!isDeepSeekAugmentableWebRoute(data.route)) {
-      throw new Error('Request augmentation route is invalid.');
+      throw new Error("Request augmentation route is invalid.");
     }
-    const decodedRequest = decodeAugmentableDeepSeekRequest(data.route, data.body);
+    const decodedRequest = decodeAugmentableDeepSeekRequest(
+      data.route,
+      data.body,
+    );
     if (!decodedRequest) {
       postAugmentRequestPassthrough(id);
       return;
     }
 
-    const regenerateScope = decodedRequest.route === 'regenerate'
-      ? await resolveRegenerateAuthorizationScopeForRequest(decodedRequest.body)
-      : null;
-    if (decodedRequest.route === 'regenerate' && !regenerateScope) {
+    const regenerateScope =
+      decodedRequest.route === "regenerate"
+        ? await resolveRegenerateAuthorizationScopeForRequest(
+            decodedRequest.body,
+          )
+        : null;
+    if (decodedRequest.route === "regenerate" && !regenerateScope) {
       // A regenerate request carries no prompt or trusted descriptor scope. If
       // the exact receiver-owned response scope is unavailable (for example
       // after a full page reload), preserve the native request but do not grant
@@ -1292,22 +1562,22 @@ async function handleAugmentRequestBody(data: {
       return;
     }
     if (!mainRequestId) {
-      throw new Error('Request authorization identity is missing.');
+      throw new Error("Request authorization identity is missing.");
     }
     if (
       toolAuthorizationRequestAliases.has(mainRequestId) ||
       !pendingToolAuthorizationCorrelations.begin(mainRequestId)
     ) {
-      throw new Error('Request authorization correlation is already active.');
+      throw new Error("Request authorization correlation is already active.");
     }
     tracksPendingAlias = true;
     requestId = crypto.randomUUID();
 
-    if (decodedRequest.route === 'regenerate') {
+    if (decodedRequest.route === "regenerate") {
       const scope = regenerateScope!;
       authorization = await createContentToolAuthorization({
         requestId,
-        trigger: 'manual_chat',
+        trigger: "manual_chat",
         chatSessionId: decodedRequest.body.chat_session_id,
         descriptorIds: scope.descriptorIds,
         localSkillDir: scope.activeLocalSkillDir,
@@ -1319,14 +1589,17 @@ async function handleAugmentRequestBody(data: {
         activeLocalSkillDir: scope.activeLocalSkillDir,
       });
 
-      const requestAlreadyEnded = pendingToolAuthorizationCorrelations.activate(mainRequestId);
+      const requestAlreadyEnded =
+        pendingToolAuthorizationCorrelations.activate(mainRequestId);
       tracksPendingAlias = false;
       if (requestAlreadyEnded) {
-        throw new Error('Request ended before its tool authorization became active.');
+        throw new Error(
+          "Request ended before its tool authorization became active.",
+        );
       }
 
       postToMainWorld({
-        type: 'AUGMENT_REQUEST_BODY_RESULT',
+        type: "AUGMENT_REQUEST_BODY_RESULT",
         id,
         ok: true,
         result: {
@@ -1346,25 +1619,28 @@ async function handleAugmentRequestBody(data: {
     }
 
     const decodedBody = decodedRequest.body;
-    const bodyWithMultimodalMedia = await consumePendingMultimodalMediaForRequest(decodedBody, {
-      onLongRunning(timeoutMs) {
-        postToMainWorld({
-          type: 'AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT',
-          id,
-          timeoutMs,
-        });
-      },
-    });
+    const bodyWithMultimodalMedia =
+      await consumePendingMultimodalMediaForRequest(decodedBody, {
+        onLongRunning(timeoutMs) {
+          postToMainWorld({
+            type: "AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT",
+            id,
+            timeoutMs,
+          });
+        },
+      });
     // Authorize first (without dir) for the augment's tool-descriptor filtering below.
     authorization = await createContentToolAuthorization({
       requestId,
-      trigger: 'manual_chat',
+      trigger: "manual_chat",
       chatSessionId: readRequestChatSessionId(bodyWithMultimodalMedia),
       toolIntent: bodyWithMultimodalMedia.prompt.slice(0, 16_000),
     });
     activeToolAuthorizations.set(requestId, authorization);
     toolAuthorizationRequestAliases.set(mainRequestId, requestId);
-    const project = await resolveProjectContextForRequestBody(bodyWithMultimodalMedia);
+    const project = await resolveProjectContextForRequestBody(
+      bodyWithMultimodalMedia,
+    );
 
     const result = augmentDecodedRequestBody(bodyWithMultimodalMedia, {
       memories: currentMemories,
@@ -1382,7 +1658,10 @@ async function handleAugmentRequestBody(data: {
 
     currentRequestMessageCount = result.messageCount;
     if (result.usedMemoryIds.length > 0) {
-      await sendRuntimeMessage({ type: 'TOUCH_MEMORIES', payload: { ids: result.usedMemoryIds } });
+      await sendRuntimeMessage({
+        type: "TOUCH_MEMORIES",
+        payload: { ids: result.usedMemoryIds },
+      });
     }
 
     // Review #2: obtain the trusted activeLocalSkillDir from the augment result
@@ -1393,7 +1672,7 @@ async function handleAugmentRequestBody(data: {
     await closeContentToolAuthorization(requestId);
     authorization = await createContentToolAuthorization({
       requestId,
-      trigger: 'manual_chat',
+      trigger: "manual_chat",
       chatSessionId: readRequestChatSessionId(bodyWithMultimodalMedia),
       toolIntent: bodyWithMultimodalMedia.prompt.slice(0, 16_000),
       localSkillDir: result.activeLocalSkillDir,
@@ -1405,14 +1684,17 @@ async function handleAugmentRequestBody(data: {
       activeLocalSkillDir: result.activeLocalSkillDir,
     });
 
-    const requestAlreadyEnded = pendingToolAuthorizationCorrelations.activate(mainRequestId);
+    const requestAlreadyEnded =
+      pendingToolAuthorizationCorrelations.activate(mainRequestId);
     tracksPendingAlias = false;
     if (requestAlreadyEnded) {
-      throw new Error('Request ended before its tool authorization became active.');
+      throw new Error(
+        "Request ended before its tool authorization became active.",
+      );
     }
 
     postToMainWorld({
-      type: 'AUGMENT_REQUEST_BODY_RESULT',
+      type: "AUGMENT_REQUEST_BODY_RESULT",
       id,
       ok: true,
       result: {
@@ -1432,7 +1714,7 @@ async function handleAugmentRequestBody(data: {
     }
 
     postToMainWorld({
-      type: 'AUGMENT_REQUEST_BODY_RESULT',
+      type: "AUGMENT_REQUEST_BODY_RESULT",
       id,
       ok: false,
       error: error instanceof Error ? error.message : String(error),
@@ -1446,7 +1728,7 @@ async function handleAugmentRequestBody(data: {
 
 function postAugmentRequestPassthrough(id: string): void {
   postToMainWorld({
-    type: 'AUGMENT_REQUEST_BODY_RESULT',
+    type: "AUGMENT_REQUEST_BODY_RESULT",
     id,
     ok: true,
     result: null,
@@ -1468,21 +1750,28 @@ function activateContentToolAuthorization(input: {
   });
 }
 
-function rememberRegenerateAuthorizationScope(complete: ResponseCompletePayload): void {
+function rememberRegenerateAuthorizationScope(
+  complete: ResponseCompletePayload,
+): void {
   if (!complete.requestId || complete.assistantMessageId == null) return;
-  const authoritativeRequestId = activeToolAuthorizations.has(complete.requestId)
+  const authoritativeRequestId = activeToolAuthorizations.has(
+    complete.requestId,
+  )
     ? complete.requestId
     : toolAuthorizationRequestAliases.get(complete.requestId);
   if (!authoritativeRequestId) return;
   const authorization = activeToolAuthorizations.get(authoritativeRequestId);
-  const metadata = activeToolAuthorizationRequestMetadata.get(authoritativeRequestId);
+  const metadata = activeToolAuthorizationRequestMetadata.get(
+    authoritativeRequestId,
+  );
   if (!authorization) return;
   // A grant created on /a/chat is intentionally unbound until the first tool
   // execution observes the browser-owned /a/chat/s/:id route. The summary in
   // this content realm remains null after background performs that binding,
   // so recover the same browser-owned route here instead of dropping replay
   // evidence for every newly created conversation.
-  const chatSessionId = authorization.chatSessionId ?? getCurrentChatSessionId();
+  const chatSessionId =
+    authorization.chatSessionId ?? getCurrentChatSessionId();
   if (!chatSessionId) return;
 
   regenerateAuthorizationScopes.remember({
@@ -1509,7 +1798,10 @@ async function resolveRegenerateAuthorizationScopeForRequest(
   try {
     persistedBlocks = await readPersistedToolExecutionBlocks();
   } catch (error) {
-    console.error('[DeepSeek++] persisted regenerate authorization evidence read failed', error);
+    console.error(
+      "[DeepSeek++] persisted regenerate authorization evidence read failed",
+      error,
+    );
     return null;
   }
 
@@ -1531,7 +1823,8 @@ async function resolveRegenerateAuthorizationScopeForRequest(
     descriptorIds: evidence.descriptorIds,
     originalPrompt: visiblePrompt,
     agentTaskPrompt: visiblePrompt,
-    promptOptions: evidence.promptOptions ?? createRegeneratePromptOptionsFromRequest(body),
+    promptOptions:
+      evidence.promptOptions ?? createRegeneratePromptOptionsFromRequest(body),
     activeLocalSkillDir: evidence.activeLocalSkillDir,
   };
 }
@@ -1552,42 +1845,58 @@ function readVisibleRegeneratePrompt(
   chatSessionId: string,
   assistantMessageId: number,
 ): string {
-  const matchingBlock = [...blocks].reverse().find((block) =>
-    getToolRecordChatSessionId(block) === chatSessionId
-    && getToolRecordAssistantMessageId(block) === String(assistantMessageId)
+  const matchingBlock = [...blocks]
+    .reverse()
+    .find(
+      (block) =>
+        getToolRecordChatSessionId(block) === chatSessionId &&
+        getToolRecordAssistantMessageId(block) === String(assistantMessageId),
+    );
+  const allMessages = Array.from(
+    document.querySelectorAll<HTMLElement>(".ds-message"),
   );
-  const allMessages = Array.from(document.querySelectorAll<HTMLElement>('.ds-message'));
-  if (allMessages.length === 0) return '';
+  if (allMessages.length === 0) return "";
 
   const assistantMessages = getAssistantMessages();
   const target = matchingBlock
     ? findRestoredToolTarget(matchingBlock, assistantMessages, new Set())
-    : assistantMessages.find((message) => elementHasMessageId(message, String(assistantMessageId))) ?? null;
-  const targetIndex = target ? allMessages.indexOf(target as HTMLElement) : allMessages.length;
+    : (assistantMessages.find((message) =>
+        elementHasMessageId(message, String(assistantMessageId)),
+      ) ?? null);
+  const targetIndex = target
+    ? allMessages.indexOf(target as HTMLElement)
+    : allMessages.length;
   for (let index = targetIndex - 1; index >= 0; index -= 1) {
     const candidate = allMessages[index];
     if (getAssistantContentHosts(candidate).length > 0) continue;
     const prompt = extractVisibleUserMessageText(candidate);
     if (prompt) return prompt;
   }
-  return '';
+  return "";
 }
 
 function extractVisibleUserMessageText(message: HTMLElement): string {
   const clone = message.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll([
-    '[class*="dpp-"]',
-    '[data-dpp-agent]',
-    '[data-dpp-body-text]',
-    '[data-dpp-tool-key]',
-    'button',
-    '[role="button"]',
-  ].join(',')).forEach((node) => node.remove());
-  return sanitizeInternalPromptText(clone.textContent?.trim() ?? '').slice(0, 64_000);
+  clone
+    .querySelectorAll(
+      [
+        '[class*="dpp-"]',
+        "[data-dpp-agent]",
+        "[data-dpp-body-text]",
+        "[data-dpp-tool-key]",
+        "button",
+        '[role="button"]',
+      ].join(","),
+    )
+    .forEach((node) => node.remove());
+  return sanitizeInternalPromptText(clone.textContent?.trim() ?? "").slice(
+    0,
+    64_000,
+  );
 }
 
 function cloneRegeneratePromptOptions(
-  promptOptions: ResponseCompletePayload['promptOptions'],
+  promptOptions: ResponseCompletePayload["promptOptions"],
 ): RegeneratePromptOptionsSnapshot {
   return {
     modelType: promptOptions.modelType,
@@ -1600,35 +1909,39 @@ function cloneRegeneratePromptOptions(
 async function resolveProjectContextForRequestBody(
   body: Readonly<DeepSeekRequestBody>,
 ): Promise<ResolvedProjectAugmentationContext | null> {
-  const sessionId = typeof body.chat_session_id === 'string' && body.chat_session_id.trim()
-    ? body.chat_session_id.trim()
-    : getCurrentChatSessionId();
+  const sessionId =
+    typeof body.chat_session_id === "string" && body.chat_session_id.trim()
+      ? body.chat_session_id.trim()
+      : getCurrentChatSessionId();
   if (!sessionId) return null;
 
   const bindPendingProject = body.parent_message_id === null;
-  const project = await sendRuntimeMessageStrict<ResolvedProjectAugmentationContext | null>({
-    type: 'GET_PROJECT_CONTEXT_FOR_CONVERSATION',
-    payload: {
-      bindPendingProject,
-      conversation: {
-        conversationId: sessionId,
-        title: getCurrentConversationTitle(),
-        url: buildDeepSeekSessionUrl(sessionId),
+  const project =
+    await sendRuntimeMessageStrict<ResolvedProjectAugmentationContext | null>({
+      type: "GET_PROJECT_CONTEXT_FOR_CONVERSATION",
+      payload: {
+        bindPendingProject,
+        conversation: {
+          conversationId: sessionId,
+          title: getCurrentConversationTitle(),
+          url: buildDeepSeekSessionUrl(sessionId),
+        },
       },
-    },
-  });
+    });
   return project ?? null;
 }
 
-function readRequestChatSessionId(body: Readonly<DeepSeekRequestBody>): string | null {
-  return typeof body.chat_session_id === 'string' && body.chat_session_id.trim()
+function readRequestChatSessionId(
+  body: Readonly<DeepSeekRequestBody>,
+): string | null {
+  return typeof body.chat_session_id === "string" && body.chat_session_id.trim()
     ? body.chat_session_id.trim()
     : getCurrentChatSessionId();
 }
 
 async function createContentToolAuthorization(input: {
   requestId: string;
-  trigger: 'manual_chat' | 'agent_run';
+  trigger: "manual_chat" | "agent_run";
   chatSessionId: string | null;
   runId?: string;
   descriptorIds?: string[];
@@ -1637,7 +1950,7 @@ async function createContentToolAuthorization(input: {
   localSkillDir?: string;
 }): Promise<ToolAuthorizationGrantSummary> {
   return sendRuntimeMessageStrict<ToolAuthorizationGrantSummary>({
-    type: 'CREATE_TOOL_AUTHORIZATION',
+    type: "CREATE_TOOL_AUTHORIZATION",
     payload: input,
   });
 }
@@ -1655,7 +1968,7 @@ async function closeContentToolAuthorization(requestId: string): Promise<void> {
   }
   try {
     await sendRuntimeMessageStrict({
-      type: 'CLOSE_TOOL_AUTHORIZATION',
+      type: "CLOSE_TOOL_AUTHORIZATION",
       payload: { authorizationId: authorization.id },
     });
     removeLocalToolAuthorization(authoritativeRequestId, authorization.id);
@@ -1666,11 +1979,15 @@ async function closeContentToolAuthorization(requestId: string): Promise<void> {
   }
 }
 
-function removeLocalToolAuthorization(requestId: string, authorizationId: string): void {
+function removeLocalToolAuthorization(
+  requestId: string,
+  authorizationId: string,
+): void {
   activeToolAuthorizations.delete(requestId);
   activeToolAuthorizationRequestMetadata.delete(requestId);
   for (const key of pendingExternalToolPayloadWrites.keys()) {
-    if (key.startsWith(`${authorizationId}:`)) pendingExternalToolPayloadWrites.delete(key);
+    if (key.startsWith(`${authorizationId}:`))
+      pendingExternalToolPayloadWrites.delete(key);
   }
   for (const [alias, target] of toolAuthorizationRequestAliases) {
     if (target === requestId) toolAuthorizationRequestAliases.delete(alias);
@@ -1681,16 +1998,23 @@ function removeLocalToolAuthorization(requestId: string, authorizationId: string
 }
 
 async function closeAllContentToolAuthorizations(): Promise<void> {
-  const results = await Promise.allSettled([...activeToolAuthorizations.keys()].map(async (requestId) => {
-    await waitForPendingToolExecutions(requestId);
-    await finalizeInterruptedToolStarts(requestId);
-    await closeContentToolAuthorization(requestId);
-  }));
+  const results = await Promise.allSettled(
+    [...activeToolAuthorizations.keys()].map(async (requestId) => {
+      await waitForPendingToolExecutions(requestId);
+      await finalizeInterruptedToolStarts(requestId);
+      await closeContentToolAuthorization(requestId);
+    }),
+  );
   const errors = results
-    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason);
   if (errors.length > 0) {
-    throw new AggregateError(errors, 'Failed to close content tool authorizations.');
+    throw new AggregateError(
+      errors,
+      "Failed to close content tool authorizations.",
+    );
   }
 }
 
@@ -1705,7 +2029,7 @@ async function loadAndSyncRuntimeState(
   const descriptorResultPromise = (async () => {
     try {
       const value = await sendRuntimeMessageStrict<ToolDescriptor[]>({
-        type: 'GET_TOOL_DESCRIPTORS',
+        type: "GET_TOOL_DESCRIPTORS",
       });
       return { ok: true as const, descriptors: decodeToolDescriptors(value) };
     } catch (error) {
@@ -1714,19 +2038,31 @@ async function loadAndSyncRuntimeState(
   })();
 
   const runtimeStateSync = Promise.all([
-    sendRuntimeMessageStrict<unknown>({ type: 'GET_MEMORIES' })
-      .then((value) => decodeRuntimeMemories(value, 'memoryResponse')),
-    sendRuntimeMessageStrict<unknown>({ type: 'GET_SKILLS' })
-      .then((value) => decodeSkillLibrary(value, 'skillResponse')),
-    sendRuntimeMessageStrict(
-      { type: 'GET_ACTIVE_PRESET' },
-      (value) => decodeActivePreset(value, 'activePresetResponse'),
+    sendRuntimeMessageStrict<unknown>({ type: "GET_MEMORIES" }).then((value) =>
+      decodeRuntimeMemories(value, "memoryResponse"),
     ),
-    sendRuntimeMessage<ModelType>({ type: 'GET_MODEL_TYPE' }),
-    sendRuntimeMessage<PromptInjectionSettings>({ type: 'GET_PROMPT_INJECTION_SETTINGS' }),
-    sendRuntimeMessage<SkillAutoActivationSettings>({ type: 'GET_SKILL_AUTO_ACTIVATION_SETTINGS' }),
+    sendRuntimeMessageStrict<unknown>({ type: "GET_SKILLS" }).then((value) =>
+      decodeSkillLibrary(value, "skillResponse"),
+    ),
+    sendRuntimeMessageStrict({ type: "GET_ACTIVE_PRESET" }, (value) =>
+      decodeActivePreset(value, "activePresetResponse"),
+    ),
+    sendRuntimeMessage<ModelType>({ type: "GET_MODEL_TYPE" }),
+    sendRuntimeMessage<PromptInjectionSettings>({
+      type: "GET_PROMPT_INJECTION_SETTINGS",
+    }),
+    sendRuntimeMessage<SkillAutoActivationSettings>({
+      type: "GET_SKILL_AUTO_ACTIVATION_SETTINGS",
+    }),
   ]).then(
-    ([memories, skills, activePreset, modelType, promptSettings, skillAutoActivation]) => {
+    ([
+      memories,
+      skills,
+      activePreset,
+      modelType,
+      promptSettings,
+      skillAutoActivation,
+    ]) => {
       if (!isCurrent()) return;
       syncToMainWorld(
         memories,
@@ -1739,7 +2075,8 @@ async function loadAndSyncRuntimeState(
       );
     },
     (error: unknown) => {
-      if (isCurrent()) console.error('[DeepSeek++] runtime state sync failed', error);
+      if (isCurrent())
+        console.error("[DeepSeek++] runtime state sync failed", error);
     },
   );
 
@@ -1758,7 +2095,8 @@ async function loadAndSyncRuntimeState(
       });
     } else {
       syncLease.commit(() => {
-        if (isCurrent()) reportToolDescriptorSyncFailure(descriptorResult.error);
+        if (isCurrent())
+          reportToolDescriptorSyncFailure(descriptorResult.error);
       });
     }
   });
@@ -1772,7 +2110,9 @@ async function refreshToolDescriptorsFromBackground(
   const syncLease = toolDescriptorSyncGate.begin();
   try {
     const descriptors = decodeToolDescriptors(
-      await sendRuntimeMessageStrict<ToolDescriptor[]>({ type: 'GET_TOOL_DESCRIPTORS' }),
+      await sendRuntimeMessageStrict<ToolDescriptor[]>({
+        type: "GET_TOOL_DESCRIPTORS",
+      }),
     );
     syncLease.commit(() => {
       if (!isCurrent()) return;
@@ -1796,12 +2136,12 @@ function hasLiveExtensionContext(): boolean {
   if (!extensionContextValid) return false;
 
   try {
-    if (typeof chrome === 'undefined') {
+    if (typeof chrome === "undefined") {
       invalidateExtensionContext();
       return false;
     }
     const runtime = chrome.runtime;
-    if (!runtime?.id || typeof runtime.sendMessage !== 'function') {
+    if (!runtime?.id || typeof runtime.sendMessage !== "function") {
       invalidateExtensionContext();
       return false;
     }
@@ -1816,25 +2156,28 @@ function hasLiveExtensionContext(): boolean {
 
 function installExtensionInvalidationGuards(): () => void {
   const suppressInvalidation = (event: PromiseRejectionEvent | ErrorEvent) => {
-    const error = 'reason' in event ? event.reason : event.error ?? event.message;
+    const error =
+      "reason" in event ? event.reason : (event.error ?? event.message);
     if (!isExtensionInvalidatedError(error)) return;
     invalidateExtensionContext();
     event.preventDefault();
   };
 
-  window.addEventListener('unhandledrejection', suppressInvalidation);
-  window.addEventListener('error', suppressInvalidation);
+  window.addEventListener("unhandledrejection", suppressInvalidation);
+  window.addEventListener("error", suppressInvalidation);
   return () => {
-    window.removeEventListener('unhandledrejection', suppressInvalidation);
-    window.removeEventListener('error', suppressInvalidation);
+    window.removeEventListener("unhandledrejection", suppressInvalidation);
+    window.removeEventListener("error", suppressInvalidation);
   };
 }
 
 function isExtensionInvalidatedError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes('Extension context invalidated') ||
-    message.includes('context invalidated') ||
-    message.includes('Extension context is unavailable');
+  return (
+    message.includes("Extension context invalidated") ||
+    message.includes("context invalidated") ||
+    message.includes("Extension context is unavailable")
+  );
 }
 
 function invalidateExtensionContext() {
@@ -1842,11 +2185,15 @@ function invalidateExtensionContext() {
   extensionContextValid = false;
   const lifecycle = contentDocumentLifecycle;
   contentDocumentLifecycle = null;
-  void lifecycle?.dispose('extension-invalidated').catch(reportContentLifecycleError);
+  void lifecycle
+    ?.dispose("extension-invalidated")
+    .catch(reportContentLifecycleError);
 }
 
 /** Isolated world writes captured DeepSeek request headers to chrome.storage. */
-async function persistDeepSeekClientHeaders(capturedHeaders?: Record<string, string> | null): Promise<boolean> {
+async function persistDeepSeekClientHeaders(
+  capturedHeaders?: Record<string, string> | null,
+): Promise<boolean> {
   try {
     const headers = capturedHeaders ?? createClientHeaders();
     if (headers) {
@@ -1855,11 +2202,11 @@ async function persistDeepSeekClientHeaders(capturedHeaders?: Record<string, str
       if (!saved) return false;
       // Ask the sidepanel to re-check login status.
       return notifyContentAuthStatusChanged({
-        send: () => chrome.runtime.sendMessage({ type: 'AUTH_STATUS_CHANGED' }),
+        send: () => chrome.runtime.sendMessage({ type: "AUTH_STATUS_CHANGED" }),
         isExtensionInvalidatedError,
         invalidateExtensionContext,
         reportError(error) {
-          console.error('[DeepSeek++] auth status notification failed', error);
+          console.error("[DeepSeek++] auth status notification failed", error);
         },
       });
     }
@@ -1867,7 +2214,10 @@ async function persistDeepSeekClientHeaders(capturedHeaders?: Record<string, str
     if (isExtensionInvalidatedError(error)) {
       invalidateExtensionContext();
     } else {
-      console.error('[DeepSeek++] DeepSeek client header persistence failed', error);
+      console.error(
+        "[DeepSeek++] DeepSeek client header persistence failed",
+        error,
+      );
     }
   }
   return false;
@@ -1884,7 +2234,8 @@ function stopConversationExportActionInjector() {
   clearConversationExportActionTimers();
   exportActionRetryAttempts = 0;
   closeConversationExportMenu();
-  document.querySelectorAll(`.${EXPORT_ACTION_CLASS}, .${EXPORT_ACTION_TOAST_CLASS}`)
+  document
+    .querySelectorAll(`.${EXPORT_ACTION_CLASS}, .${EXPORT_ACTION_TOAST_CLASS}`)
     .forEach((el) => el.remove());
   document.getElementById(EXPORT_ACTION_STYLE_ID)?.remove();
 }
@@ -1912,11 +2263,20 @@ function scheduleConversationExportActionMount() {
   }, EXPORT_ACTION_MOUNT_DEBOUNCE_MS);
 }
 
-function mutationMayAffectConversationExportActions(mutation: MutationRecord): boolean {
-  if (mutation.type !== 'childList') return false;
+function mutationMayAffectConversationExportActions(
+  mutation: MutationRecord,
+): boolean {
+  if (mutation.type !== "childList") return false;
   for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
-    if (!nodeMatchesOrContains(node, '.ds-message, button, [role="button"].ds-button')) continue;
-    if (node instanceof Element && node.closest(`.${EXPORT_ACTION_MENU_CLASS}`)) continue;
+    if (
+      !nodeMatchesOrContains(
+        node,
+        '.ds-message, button, [role="button"].ds-button',
+      )
+    )
+      continue;
+    if (node instanceof Element && node.closest(`.${EXPORT_ACTION_MENU_CLASS}`))
+      continue;
     return true;
   }
   return false;
@@ -1966,20 +2326,23 @@ function mountConversationExportActions(): number {
 }
 
 function removeConversationExportActions() {
-  document.querySelectorAll(`.${EXPORT_ACTION_CLASS}`)
+  document
+    .querySelectorAll(`.${EXPORT_ACTION_CLASS}`)
     .forEach((el) => el.remove());
   removeTokenSpeedIndicator();
 }
 
 function getAssistantExportMessages(): Element[] {
-  return Array.from(document.querySelectorAll('.ds-message'))
-    .filter((message) => getAssistantContentHosts(message).length > 0);
+  return Array.from(document.querySelectorAll(".ds-message")).filter(
+    (message) => getAssistantContentHosts(message).length > 0,
+  );
 }
 
 function findAssistantMessageActionRow(message: Element): HTMLElement | null {
   const responseHost = getAssistantResponseHost(message);
-  const controls = getDeepSeekActionControls(message)
-    .filter((control) => isOfficialActionControlCandidate(control, responseHost));
+  const controls = getDeepSeekActionControls(message).filter((control) =>
+    isOfficialActionControlCandidate(control, responseHost),
+  );
 
   for (const control of controls) {
     const row = findCompactActionRow(control, message, responseHost);
@@ -1990,13 +2353,18 @@ function findAssistantMessageActionRow(message: Element): HTMLElement | null {
 }
 
 function getDeepSeekActionControls(root: ParentNode): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(DEEPSEEK_ACTION_CONTROL_SELECTOR));
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(DEEPSEEK_ACTION_CONTROL_SELECTOR),
+  );
 }
 
-function isOfficialActionControlCandidate(control: HTMLElement, responseHost: Element): boolean {
+function isOfficialActionControlCandidate(
+  control: HTMLElement,
+  responseHost: Element,
+): boolean {
   if (control.classList.contains(EXPORT_ACTION_CLASS)) return false;
   if (responseHost.contains(control)) return false;
-  if (control.closest('.dpp-tool-block, .dpp-agent-container')) return false;
+  if (control.closest(".dpp-tool-block, .dpp-agent-container")) return false;
   if (!isVisibleElement(control)) return false;
 
   const rect = control.getBoundingClientRect();
@@ -2012,9 +2380,11 @@ function findCompactActionRow(
   let el: HTMLElement | null = control.parentElement;
   let depth = 0;
   while (el && el !== message && depth < 6) {
-    const rowControls = getDeepSeekActionControls(el)
-      .filter((candidate) => isOfficialActionControlCandidate(candidate, responseHost));
-    if (rowControls.length >= 4 && isCompactActionRow(el, responseHost)) return el;
+    const rowControls = getDeepSeekActionControls(el).filter((candidate) =>
+      isOfficialActionControlCandidate(candidate, responseHost),
+    );
+    if (rowControls.length >= 4 && isCompactActionRow(el, responseHost))
+      return el;
     el = el.parentElement;
     depth += 1;
   }
@@ -2026,27 +2396,34 @@ function isCompactActionRow(row: HTMLElement, responseHost: Element): boolean {
   const responseRect = responseHost.getBoundingClientRect();
   if (rowRect.width === 0 || rowRect.height === 0) return false;
   if (rowRect.height > 72) return false;
-  if (responseRect.height > 0 && rowRect.top < responseRect.bottom - 12) return false;
+  if (responseRect.height > 0 && rowRect.top < responseRect.bottom - 12)
+    return false;
   return true;
 }
 
 function findGlobalAssistantActionRows(): HTMLElement[] {
   const rows = new Set<HTMLElement>();
-  const controls = getDeepSeekActionControls(document)
-    .filter(isGlobalActionControlCandidate);
+  const controls = getDeepSeekActionControls(document).filter(
+    isGlobalActionControlCandidate,
+  );
 
   for (const control of controls) {
     const row = findGlobalCompactActionRow(control);
     if (row) rows.add(row);
   }
 
-  return [...rows].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  return [...rows].sort(
+    (a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top,
+  );
 }
 
 function isGlobalActionControlCandidate(control: HTMLElement): boolean {
   if (control.classList.contains(EXPORT_ACTION_CLASS)) return false;
-  if (control.closest('.dpp-tool-block, .dpp-agent-container')) return false;
-  if (control.closest('aside, nav, header, [role="navigation"], [role="banner"]')) return false;
+  if (control.closest(".dpp-tool-block, .dpp-agent-container")) return false;
+  if (
+    control.closest('aside, nav, header, [role="navigation"], [role="banner"]')
+  )
+    return false;
   if (findDeepSeekInputBox()?.contains(control)) return false;
   if (!isVisibleElement(control)) return false;
 
@@ -2055,7 +2432,8 @@ function isGlobalActionControlCandidate(control: HTMLElement): boolean {
   if (rect.left < getConversationViewportLeft()) return false;
 
   const textarea = getPromptTextarea();
-  const textareaTop = textarea?.getBoundingClientRect().top ?? window.innerHeight;
+  const textareaTop =
+    textarea?.getBoundingClientRect().top ?? window.innerHeight;
   if (rect.bottom >= textareaTop - 12) return false;
   return true;
 }
@@ -2064,22 +2442,28 @@ function findGlobalCompactActionRow(control: HTMLElement): HTMLElement | null {
   let el: HTMLElement | null = control.parentElement;
   let depth = 0;
   while (el && el !== document.body && depth < 6) {
-    const rowControls = getDeepSeekActionControls(el)
-      .filter(isGlobalActionControlCandidate);
-    if (rowControls.length >= 4 && isLikelyReplyActionRow(el, rowControls)) return el;
+    const rowControls = getDeepSeekActionControls(el).filter(
+      isGlobalActionControlCandidate,
+    );
+    if (rowControls.length >= 4 && isLikelyReplyActionRow(el, rowControls))
+      return el;
     el = el.parentElement;
     depth += 1;
   }
   return null;
 }
 
-function isLikelyReplyActionRow(row: HTMLElement, rowControls: HTMLElement[]): boolean {
+function isLikelyReplyActionRow(
+  row: HTMLElement,
+  rowControls: HTMLElement[],
+): boolean {
   const rowRect = row.getBoundingClientRect();
   if (rowRect.width === 0 || rowRect.height === 0) return false;
   if (rowRect.height > 72) return false;
 
   const textarea = getPromptTextarea();
-  const textareaTop = textarea?.getBoundingClientRect().top ?? window.innerHeight;
+  const textareaTop =
+    textarea?.getBoundingClientRect().top ?? window.innerHeight;
   if (rowRect.bottom >= textareaTop - 12) return false;
 
   const sortedControls = rowControls
@@ -2099,14 +2483,19 @@ function getConversationViewportLeft(): number {
   return 180;
 }
 
-function ensureConversationExportButton(row: HTMLElement, sessionId: string): HTMLButtonElement {
-  let button = row.querySelector<HTMLButtonElement>(`:scope > .${EXPORT_ACTION_CLASS}`);
+function ensureConversationExportButton(
+  row: HTMLElement,
+  sessionId: string,
+): HTMLButtonElement {
+  let button = row.querySelector<HTMLButtonElement>(
+    `:scope > .${EXPORT_ACTION_CLASS}`,
+  );
   if (!button) {
-    button = document.createElement('button');
-    button.type = 'button';
+    button = document.createElement("button");
+    button.type = "button";
     button.className = EXPORT_ACTION_CLASS;
     button.innerHTML = createConversationExportActionIcon();
-    button.addEventListener('click', (event) => {
+    button.addEventListener("click", (event) => {
       event.stopPropagation();
       if (activeConversationExportId) return;
       toggleConversationExportMenu(button!);
@@ -2115,14 +2504,26 @@ function ensureConversationExportButton(row: HTMLElement, sessionId: string): HT
 
   placeConversationExportButton(row, button);
   button.dataset.dppExportSessionId = sessionId;
-  applyConversationExportButtonStatus(button, activeConversationExportId ? 'running' : 'idle');
+  applyConversationExportButtonStatus(
+    button,
+    activeConversationExportId ? "running" : "idle",
+  );
   return button;
 }
 
-function placeConversationExportButton(row: HTMLElement, button: HTMLButtonElement): void {
+function placeConversationExportButton(
+  row: HTMLElement,
+  button: HTMLButtonElement,
+): void {
   const officialControls = getDeepSeekActionControls(row)
-    .filter((control) => !control.classList.contains(EXPORT_ACTION_CLASS) && isVisibleElement(control))
-    .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+    .filter(
+      (control) =>
+        !control.classList.contains(EXPORT_ACTION_CLASS) &&
+        isVisibleElement(control),
+    )
+    .sort(
+      (a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left,
+    );
   const lastOfficialControl = officialControls[officialControls.length - 1];
 
   if (!lastOfficialControl || lastOfficialControl.parentElement !== row) {
@@ -2131,20 +2532,26 @@ function placeConversationExportButton(row: HTMLElement, button: HTMLButtonEleme
   }
 
   if (lastOfficialControl.nextElementSibling !== button) {
-    lastOfficialControl.insertAdjacentElement('afterend', button);
+    lastOfficialControl.insertAdjacentElement("afterend", button);
   }
 }
 
-function applyConversationExportButtonStatus(button: HTMLButtonElement, status: 'idle' | 'running') {
-  const running = status === 'running';
+function applyConversationExportButtonStatus(
+  button: HTMLButtonElement,
+  status: "idle" | "running",
+) {
+  const running = status === "running";
   button.disabled = running;
   button.dataset.status = status;
-  button.title = running ? contentT('content.export.buttonRunning') : contentT('content.export.buttonIdle');
-  button.setAttribute('aria-label', button.title);
+  button.title = running
+    ? contentT("content.export.buttonRunning")
+    : contentT("content.export.buttonIdle");
+  button.setAttribute("aria-label", button.title);
 }
 
-function setConversationExportButtonsStatus(status: 'idle' | 'running') {
-  document.querySelectorAll<HTMLButtonElement>(`.${EXPORT_ACTION_CLASS}`)
+function setConversationExportButtonsStatus(status: "idle" | "running") {
+  document
+    .querySelectorAll<HTMLButtonElement>(`.${EXPORT_ACTION_CLASS}`)
     .forEach((button) => applyConversationExportButtonStatus(button, status));
 }
 
@@ -2161,72 +2568,75 @@ function showConversationExportMenu(button: HTMLButtonElement) {
 
   const sessionId = getCurrentChatSessionId();
   if (!sessionId) {
-    showConversationExportToast(contentT('content.export.emptyConversation'), 'error');
+    showConversationExportToast(
+      contentT("content.export.emptyConversation"),
+      "error",
+    );
     return;
   }
 
-  const menu = document.createElement('div');
+  const menu = document.createElement("div");
   menu.className = EXPORT_ACTION_MENU_CLASS;
-  menu.setAttribute('role', 'dialog');
-  menu.setAttribute('aria-label', contentT('content.export.formatDialogLabel'));
-  menu.addEventListener('click', (event) => event.stopPropagation());
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", contentT("content.export.formatDialogLabel"));
+  menu.addEventListener("click", (event) => event.stopPropagation());
 
-  const form = document.createElement('form');
-  const title = document.createElement('div');
-  title.className = 'dpp-export-menu-title';
-  title.textContent = contentT('content.export.formatTitle');
+  const form = document.createElement("form");
+  const title = document.createElement("div");
+  title.className = "dpp-export-menu-title";
+  title.textContent = contentT("content.export.formatTitle");
   form.appendChild(title);
 
   for (const option of CONVERSATION_EXPORT_FORMAT_OPTIONS) {
-    const label = document.createElement('label');
-    label.className = 'dpp-export-menu-option';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.name = 'format';
+    const label = document.createElement("label");
+    label.className = "dpp-export-menu-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.name = "format";
     input.value = option.format;
     input.checked = option.defaultChecked;
-    const text = document.createElement('span');
+    const text = document.createElement("span");
     text.textContent = contentT(option.labelKey);
     label.append(input, text);
     form.appendChild(label);
   }
 
-  const scopeTitle = document.createElement('div');
-  scopeTitle.className = 'dpp-export-menu-title';
-  scopeTitle.textContent = contentT('content.export.scopeLabel');
+  const scopeTitle = document.createElement("div");
+  scopeTitle.className = "dpp-export-menu-title";
+  scopeTitle.textContent = contentT("content.export.scopeLabel");
   form.appendChild(scopeTitle);
 
   const initialScope = getStoredConversationExportScope();
   for (const option of CONVERSATION_EXPORT_SCOPE_OPTIONS) {
-    const label = document.createElement('label');
-    label.className = 'dpp-export-menu-option';
-    const input = document.createElement('input');
-    input.type = 'radio';
-    input.name = 'contentScope';
+    const label = document.createElement("label");
+    label.className = "dpp-export-menu-option";
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "contentScope";
     input.value = option.scope;
     input.checked = initialScope === option.scope;
-    const text = document.createElement('span');
+    const text = document.createElement("span");
     text.textContent = contentT(option.labelKey);
     label.append(input, text);
     form.appendChild(label);
   }
 
-  const actions = document.createElement('div');
-  actions.className = 'dpp-export-menu-actions';
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.textContent = contentT('common.cancel');
-  cancel.addEventListener('click', () => closeConversationExportMenu());
-  const submit = document.createElement('button');
-  submit.type = 'submit';
-  submit.textContent = contentT('content.export.submit');
+  const actions = document.createElement("div");
+  actions.className = "dpp-export-menu-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = contentT("common.cancel");
+  cancel.addEventListener("click", () => closeConversationExportMenu());
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = contentT("content.export.submit");
   actions.append(cancel, submit);
   form.appendChild(actions);
 
-  form.addEventListener('change', () => {
+  form.addEventListener("change", () => {
     submit.disabled = getSelectedConversationExportFormats(menu).length === 0;
   });
-  form.addEventListener('submit', (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
     const formats = getSelectedConversationExportFormats(menu);
     if (formats.length === 0) return;
@@ -2242,48 +2652,81 @@ function showConversationExportMenu(button: HTMLButtonElement) {
   exportActionMenuButton = button;
   exportActionMenuSessionId = sessionId;
   positionConversationExportMenu(menu, button);
-  document.addEventListener('click', handleConversationExportMenuDocumentClick, true);
-  document.addEventListener('keydown', handleConversationExportMenuKeydown, true);
+  document.addEventListener(
+    "click",
+    handleConversationExportMenuDocumentClick,
+    true,
+  );
+  document.addEventListener(
+    "keydown",
+    handleConversationExportMenuKeydown,
+    true,
+  );
 }
 
-function positionConversationExportMenu(menu: HTMLElement, button: HTMLButtonElement) {
+function positionConversationExportMenu(
+  menu: HTMLElement,
+  button: HTMLButtonElement,
+) {
   const buttonRect = button.getBoundingClientRect();
   const menuRect = menu.getBoundingClientRect();
   const gap = 8;
   const margin = 12;
   const belowTop = buttonRect.bottom + gap;
   const aboveTop = buttonRect.top - menuRect.height - gap;
-  const top = belowTop + menuRect.height <= window.innerHeight - margin
-    ? belowTop
-    : Math.max(margin, aboveTop);
+  const top =
+    belowTop + menuRect.height <= window.innerHeight - margin
+      ? belowTop
+      : Math.max(margin, aboveTop);
   const left = Math.min(
     window.innerWidth - menuRect.width - margin,
-    Math.max(margin, buttonRect.left + buttonRect.width / 2 - menuRect.width / 2),
+    Math.max(
+      margin,
+      buttonRect.left + buttonRect.width / 2 - menuRect.width / 2,
+    ),
   );
   menu.style.top = `${Math.round(top)}px`;
   menu.style.left = `${Math.round(left)}px`;
 }
 
-function getSelectedConversationExportFormats(menu: HTMLElement): ConversationExportArtifact['format'][] {
-  return Array.from(menu.querySelectorAll<HTMLInputElement>('input[name="format"]:checked'))
+function getSelectedConversationExportFormats(
+  menu: HTMLElement,
+): ConversationExportArtifact["format"][] {
+  return Array.from(
+    menu.querySelectorAll<HTMLInputElement>('input[name="format"]:checked'),
+  )
     .map((input) => input.value)
     .filter(isConversationExportUiFormat);
 }
 
-function isConversationExportUiFormat(value: string): value is ConversationExportArtifact['format'] {
-  return CONVERSATION_EXPORT_FORMAT_OPTIONS.some((option) => option.format === value);
+function isConversationExportUiFormat(
+  value: string,
+): value is ConversationExportArtifact["format"] {
+  return CONVERSATION_EXPORT_FORMAT_OPTIONS.some(
+    (option) => option.format === value,
+  );
 }
 
 function closeConversationExportMenu() {
-  document.removeEventListener('click', handleConversationExportMenuDocumentClick, true);
-  document.removeEventListener('keydown', handleConversationExportMenuKeydown, true);
+  document.removeEventListener(
+    "click",
+    handleConversationExportMenuDocumentClick,
+    true,
+  );
+  document.removeEventListener(
+    "keydown",
+    handleConversationExportMenuKeydown,
+    true,
+  );
   exportActionMenuEl?.remove();
   exportActionMenuEl = null;
   exportActionMenuButton = null;
   exportActionMenuSessionId = null;
 }
 
-function closeConversationExportMenuIfSessionChanged(sessionId = getCurrentChatSessionId()) {
+function closeConversationExportMenuIfSessionChanged(
+  sessionId = getCurrentChatSessionId(),
+) {
   if (!exportActionMenuEl) return;
   if (sessionId === exportActionMenuSessionId) return;
   closeConversationExportMenu();
@@ -2298,83 +2741,102 @@ function handleConversationExportMenuDocumentClick(event: MouseEvent) {
 }
 
 function handleConversationExportMenuKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape') return;
+  if (event.key !== "Escape") return;
   closeConversationExportMenu();
 }
 
 async function startCurrentConversationExport(
-  selectedFormats: ConversationExportArtifact['format'][] = ['html'],
-  contentScope: ConversationExportContentScope = 'full',
+  selectedFormats: ConversationExportArtifact["format"][] = ["html"],
+  contentScope: ConversationExportContentScope = "full",
 ) {
   if (activeConversationExportId) return;
   const sessionId = getCurrentChatSessionId();
   if (!sessionId) {
-    showConversationExportToast(contentT('content.export.emptyConversation'), 'error');
+    showConversationExportToast(
+      contentT("content.export.emptyConversation"),
+      "error",
+    );
     return;
   }
 
   const formats = dedupeConversationExportUiFormats(selectedFormats);
   const exportId = crypto.randomUUID();
   activeConversationExportId = exportId;
-  setConversationExportButtonsStatus('running');
-  showConversationExportToast(contentT('content.export.progress'), 'info');
+  setConversationExportButtonsStatus("running");
+  showConversationExportToast(contentT("content.export.progress"), "info");
 
   try {
-    const response = await sendConversationExportRequest(exportId, sessionId, formats, contentScope);
+    const response = await sendConversationExportRequest(
+      exportId,
+      sessionId,
+      formats,
+      contentScope,
+    );
     if (!response?.ok) {
-      throw new Error(response?.error ?? contentT('content.export.failed'));
+      throw new Error(response?.error ?? contentT("content.export.failed"));
     }
 
-    const artifacts = response.artifacts.filter((artifact) => formats.includes(artifact.format));
+    const artifacts = response.artifacts.filter((artifact) =>
+      formats.includes(artifact.format),
+    );
     if (artifacts.length !== formats.length) {
-      throw new Error(contentT('content.export.failed'));
+      throw new Error(contentT("content.export.failed"));
     }
     downloadConversationExportArtifacts(artifacts);
 
     const warning = response.summary.failedSessionCount > 0;
     showConversationExportToast(
       warning
-        ? contentT('content.export.partialSuccess')
+        ? contentT("content.export.partialSuccess")
         : getConversationExportSuccessMessage(formats),
-      warning ? 'warning' : 'success',
+      warning ? "warning" : "success",
     );
   } catch (error) {
-    showConversationExportToast(error instanceof Error ? error.message : String(error), 'error');
+    showConversationExportToast(
+      error instanceof Error ? error.message : String(error),
+      "error",
+    );
   } finally {
     if (activeConversationExportId === exportId) {
       activeConversationExportId = null;
-      setConversationExportButtonsStatus('idle');
+      setConversationExportButtonsStatus("idle");
     }
   }
 }
 
-function dedupeConversationExportUiFormats(formats: ConversationExportArtifact['format'][]): ConversationExportArtifact['format'][] {
+function dedupeConversationExportUiFormats(
+  formats: ConversationExportArtifact["format"][],
+): ConversationExportArtifact["format"][] {
   const values = formats.filter(isConversationExportUiFormat);
-  const deduped = values.filter((format, index) => values.indexOf(format) === index);
-  return deduped.length > 0 ? deduped : ['html'];
+  const deduped = values.filter(
+    (format, index) => values.indexOf(format) === index,
+  );
+  return deduped.length > 0 ? deduped : ["html"];
 }
 
-function getConversationExportSuccessMessage(formats: ConversationExportArtifact['format'][]): string {
-  if (formats.includes('pdf')) {
-    return contentT('content.export.success');
+function getConversationExportSuccessMessage(
+  formats: ConversationExportArtifact["format"][],
+): string {
+  if (formats.includes("pdf")) {
+    return contentT("content.export.success");
   }
-  return contentT('content.export.success');
+  return contentT("content.export.success");
 }
 
 async function sendConversationExportRequest(
   exportId: string,
   sessionId: string,
-  formats: ConversationExportArtifact['format'][],
-  contentScope: ConversationExportContentScope = 'full',
+  formats: ConversationExportArtifact["format"][],
+  contentScope: ConversationExportContentScope = "full",
 ): Promise<ExportResponse | undefined> {
   if (!hasLiveExtensionContext()) return undefined;
   try {
-    return await chrome.runtime.sendMessage({
-      type: 'EXPORT_DEEPSEEK_CONVERSATIONS',
+    return (await chrome.runtime.sendMessage({
+      type: "EXPORT_DEEPSEEK_CONVERSATIONS",
       payload: {
         exportId,
         request: {
-          mode: 'sanitized',
+          mode: "sanitized",
           contentScope,
           formats,
           includeAttachmentMetadata: true,
@@ -2382,7 +2844,7 @@ async function sendConversationExportRequest(
           sessionIds: [sessionId],
         },
       },
-    }) as ExportResponse;
+    })) as ExportResponse;
   } catch (error) {
     if (isExtensionInvalidatedError(error)) {
       invalidateExtensionContext();
@@ -2392,10 +2854,12 @@ async function sendConversationExportRequest(
   }
 }
 
-function updateConversationExportProgress(progress: ConversationExportProgress | undefined) {
+function updateConversationExportProgress(
+  progress: ConversationExportProgress | undefined,
+) {
   if (!progress || progress.exportId !== activeConversationExportId) return;
-  if (progress.status === 'running') {
-    setConversationExportButtonsStatus('running');
+  if (progress.status === "running") {
+    setConversationExportButtonsStatus("running");
   }
 }
 
@@ -2404,32 +2868,40 @@ function getCurrentChatSessionId(): string | null {
 }
 
 function getCurrentConversationTitle(): string {
-  const title = document.title
-    .replace(/\s*[-|]\s*DeepSeek.*$/i, '')
-    .trim();
-  return title || contentT('content.conversation.untitled');
+  const title = document.title.replace(/\s*[-|]\s*DeepSeek.*$/i, "").trim();
+  return title || contentT("content.conversation.untitled");
 }
 
 async function refreshMultimodalMediaInputAvailability(
   isCurrent: () => boolean = () => true,
 ) {
   try {
-    const servers = await sendRuntimeMessageStrict<McpServerConfig[]>({ type: 'GET_MCP_SERVERS' });
+    const servers = await sendRuntimeMessageStrict<McpServerConfig[]>({
+      type: "GET_MCP_SERVERS",
+    });
     if (!isCurrent()) return;
     setMultimodalMediaInputEnabled(shouldEnableMultimodalMediaInput(servers));
   } catch (error) {
     if (!isCurrent()) return;
     setMultimodalMediaInputEnabled(false);
     if (hasLiveExtensionContext()) {
-      console.warn('[DeepSeek++] Failed to load MCP servers for multimodal media input.', error);
+      console.warn(
+        "[DeepSeek++] Failed to load MCP servers for multimodal media input.",
+        error,
+      );
     }
   }
 }
 
 function shouldEnableMultimodalMediaInput(servers: unknown): boolean {
-  return Array.isArray(servers) &&
-    servers.some((server) => Boolean(server && typeof server === 'object') &&
-      canUseMultimodalMediaInput(server as McpServerConfig));
+  return (
+    Array.isArray(servers) &&
+    servers.some(
+      (server) =>
+        Boolean(server && typeof server === "object") &&
+        canUseMultimodalMediaInput(server as McpServerConfig),
+    )
+  );
 }
 
 function setMultimodalMediaInputEnabled(enabled: boolean) {
@@ -2450,8 +2922,8 @@ function startMultimodalMediaInput() {
   if (!multimodalMediaInputEnabled) return;
   injectMultimodalMediaStyles();
   mountMultimodalMediaControls();
-  document.removeEventListener('paste', handleMultimodalMediaPaste, true);
-  document.addEventListener('paste', handleMultimodalMediaPaste, true);
+  document.removeEventListener("paste", handleMultimodalMediaPaste, true);
+  document.addEventListener("paste", handleMultimodalMediaPaste, true);
 }
 
 function stopMultimodalMediaInput() {
@@ -2459,7 +2931,7 @@ function stopMultimodalMediaInput() {
     clearTimeout(multimodalMediaMountTimer);
     multimodalMediaMountTimer = null;
   }
-  document.removeEventListener('paste', handleMultimodalMediaPaste, true);
+  document.removeEventListener("paste", handleMultimodalMediaPaste, true);
   removeMultimodalMediaControls();
   clearPendingMultimodalMedia();
   document.getElementById(MULTIMODAL_MEDIA_STYLE_ID)?.remove();
@@ -2475,30 +2947,33 @@ function scheduleMultimodalMediaMount() {
 }
 
 function mutationMayAffectPromptControls(mutation: MutationRecord): boolean {
-  if (mutation.type !== 'childList') return false;
+  if (mutation.type !== "childList") return false;
   const textarea = getPromptTextarea();
   if (
-    textarea
-    && mutation.target instanceof Node
-    && (
-      textarea.contains(mutation.target)
-      || (mutation.target instanceof Element && mutation.target.contains(textarea))
-    )
-  ) return true;
+    textarea &&
+    mutation.target instanceof Node &&
+    (textarea.contains(mutation.target) ||
+      (mutation.target instanceof Element &&
+        mutation.target.contains(textarea)))
+  )
+    return true;
 
   const selector = [
-    'textarea',
+    "textarea",
     `#${MULTIMODAL_MEDIA_BUTTON_ID}`,
     `#${MULTIMODAL_MEDIA_FILE_INPUT_ID}`,
     `#${MULTIMODAL_MEDIA_TRAY_ID}`,
-  ].join(', ');
-  return [...mutation.addedNodes, ...mutation.removedNodes]
-    .some((node) => nodeMatchesOrContains(node, selector));
+  ].join(", ");
+  return [...mutation.addedNodes, ...mutation.removedNodes].some((node) =>
+    nodeMatchesOrContains(node, selector),
+  );
 }
 
 function nodeMatchesOrContains(node: Node, selector: string): boolean {
-  if (node instanceof Element) return node.matches(selector) || Boolean(node.querySelector(selector));
-  if (node instanceof DocumentFragment) return Boolean(node.querySelector(selector));
+  if (node instanceof Element)
+    return node.matches(selector) || Boolean(node.querySelector(selector));
+  if (node instanceof DocumentFragment)
+    return Boolean(node.querySelector(selector));
   return false;
 }
 
@@ -2511,53 +2986,64 @@ function mountMultimodalMediaControls() {
   const inputBox = findDeepSeekInputBox();
   if (!inputBox) return;
 
-  if (multimodalMediaButtonEl?.isConnected && multimodalMediaButtonEl.parentElement === inputBox) {
+  if (
+    multimodalMediaButtonEl?.isConnected &&
+    multimodalMediaButtonEl.parentElement === inputBox
+  ) {
     updateMultimodalMediaButtonPlacement(inputBox);
-    if (multimodalMediaTrayEl) placeMultimodalMediaTray(inputBox, multimodalMediaTrayEl);
+    if (multimodalMediaTrayEl)
+      placeMultimodalMediaTray(inputBox, multimodalMediaTrayEl);
     renderMultimodalMediaTray();
     return;
   }
 
   removeMultimodalMediaControls({ keepMedia: true });
-  inputBox.setAttribute('data-dpp-multimodal-media-anchor', '');
+  inputBox.setAttribute("data-dpp-multimodal-media-anchor", "");
 
-  const fileInput = document.createElement('input');
+  const fileInput = document.createElement("input");
   fileInput.id = MULTIMODAL_MEDIA_FILE_INPUT_ID;
-  fileInput.type = 'file';
-  fileInput.accept = 'image/*,video/*';
+  fileInput.type = "file";
+  fileInput.accept = "image/*,video/*";
   fileInput.multiple = true;
-  fileInput.className = 'dpp-mm-file-input';
-  fileInput.addEventListener('click', stopMultimodalMediaFileInputEvent, true);
-  fileInput.addEventListener('input', stopMultimodalMediaFileInputEvent, true);
-  fileInput.addEventListener('change', (event) => {
-    stopMultimodalMediaFileInputEvent(event);
-    const files = Array.from(fileInput.files ?? []);
-    fileInput.value = '';
-    void addPendingMultimodalFiles(files, 'picker');
-  }, true);
+  fileInput.className = "dpp-mm-file-input";
+  fileInput.addEventListener("click", stopMultimodalMediaFileInputEvent, true);
+  fileInput.addEventListener("input", stopMultimodalMediaFileInputEvent, true);
+  fileInput.addEventListener(
+    "change",
+    (event) => {
+      stopMultimodalMediaFileInputEvent(event);
+      const files = Array.from(fileInput.files ?? []);
+      fileInput.value = "";
+      void addPendingMultimodalFiles(files, "picker");
+    },
+    true,
+  );
 
-  const button = document.createElement('button');
+  const button = document.createElement("button");
   button.id = MULTIMODAL_MEDIA_BUTTON_ID;
-  button.type = 'button';
-  button.className = 'dpp-mm-button';
-  button.title = contentT('content.multimodalMedia.buttonTitle');
-  button.setAttribute('aria-label', contentT('content.multimodalMedia.buttonTitle'));
+  button.type = "button";
+  button.className = "dpp-mm-button";
+  button.title = contentT("content.multimodalMedia.buttonTitle");
+  button.setAttribute(
+    "aria-label",
+    contentT("content.multimodalMedia.buttonTitle"),
+  );
   button.innerHTML = createMultimodalMediaButtonIcon();
-  button.addEventListener('click', (event) => {
+  button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     void openMultimodalMediaPicker(fileInput);
   });
 
-  const tray = document.createElement('div');
+  const tray = document.createElement("div");
   tray.id = MULTIMODAL_MEDIA_TRAY_ID;
-  tray.className = 'dpp-mm-tray';
+  tray.className = "dpp-mm-tray";
 
-  const status = document.createElement('div');
+  const status = document.createElement("div");
   status.id = MULTIMODAL_MEDIA_STATUS_ID;
-  status.className = 'dpp-mm-status';
-  status.setAttribute('role', 'status');
-  status.setAttribute('aria-live', 'polite');
+  status.className = "dpp-mm-status";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
 
   tray.append(status);
   document.body.append(fileInput);
@@ -2574,7 +3060,8 @@ function mountMultimodalMediaControls() {
 function placeMultimodalMediaTray(inputBox: HTMLElement, tray: HTMLElement) {
   const parent = inputBox.parentElement;
   if (!parent) return;
-  if (tray.parentElement === parent && tray.nextElementSibling === inputBox) return;
+  if (tray.parentElement === parent && tray.nextElementSibling === inputBox)
+    return;
   parent.insertBefore(tray, inputBox);
 }
 
@@ -2591,62 +3078,68 @@ async function openMultimodalMediaPicker(fileInput: HTMLInputElement) {
       excludeAcceptAllOption: false,
       types: [
         {
-          description: 'Images and videos',
+          description: "Images and videos",
           accept: {
-            'image/*': ['.png', '.jpg', '.jpeg', '.webp', '.gif'],
-            'video/*': ['.mp4', '.mov', '.webm', '.m4v'],
+            "image/*": [".png", ".jpg", ".jpeg", ".webp", ".gif"],
+            "video/*": [".mp4", ".mov", ".webm", ".m4v"],
           },
         },
       ],
     });
     const files = await Promise.all(handles.map((handle) => handle.getFile()));
-    await addPendingMultimodalFiles(files, 'picker');
+    await addPendingMultimodalFiles(files, "picker");
   } catch (error) {
     if (isFilePickerAbort(error)) return;
     throw error;
   }
 }
 
-function getBrowserFilePicker(): ((options: {
-  multiple?: boolean;
-  excludeAcceptAllOption?: boolean;
-  types?: Array<{
-    description?: string;
-    accept: Record<string, string[]>;
-  }>;
-}) => Promise<Array<{ getFile(): Promise<File> }>>) | null {
-  const candidate = (window as Window & {
-    showOpenFilePicker?: (options: {
+function getBrowserFilePicker():
+  | ((options: {
       multiple?: boolean;
       excludeAcceptAllOption?: boolean;
       types?: Array<{
         description?: string;
         accept: Record<string, string[]>;
       }>;
-    }) => Promise<Array<{ getFile(): Promise<File> }>>;
-  }).showOpenFilePicker;
-  return typeof candidate === 'function' ? candidate.bind(window) : null;
+    }) => Promise<Array<{ getFile(): Promise<File> }>>)
+  | null {
+  const candidate = (
+    window as Window & {
+      showOpenFilePicker?: (options: {
+        multiple?: boolean;
+        excludeAcceptAllOption?: boolean;
+        types?: Array<{
+          description?: string;
+          accept: Record<string, string[]>;
+        }>;
+      }) => Promise<Array<{ getFile(): Promise<File> }>>;
+    }
+  ).showOpenFilePicker;
+  return typeof candidate === "function" ? candidate.bind(window) : null;
 }
 
 function isFilePickerAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function stopMultimodalMediaFileInputEvent(event: Event) {
-  if (event.type !== 'click') event.preventDefault();
+  if (event.type !== "click") event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
 }
 
 function removeMultimodalMediaControls(options: { keepMedia?: boolean } = {}) {
-  const parent = multimodalMediaButtonEl?.parentElement ?? multimodalMediaTrayEl?.parentElement;
+  const parent =
+    multimodalMediaButtonEl?.parentElement ??
+    multimodalMediaTrayEl?.parentElement;
   multimodalMediaButtonEl?.remove();
   multimodalMediaFileInputEl?.remove();
   multimodalMediaTrayEl?.remove();
   multimodalMediaStatusEl?.remove();
-  parent?.removeAttribute('data-dpp-multimodal-media-anchor');
-  parent?.removeAttribute('data-dpp-multimodal-media-has-native');
-  parent?.removeAttribute('data-dpp-multimodal-media-has-items');
+  parent?.removeAttribute("data-dpp-multimodal-media-anchor");
+  parent?.removeAttribute("data-dpp-multimodal-media-has-native");
+  parent?.removeAttribute("data-dpp-multimodal-media-has-items");
   multimodalMediaButtonEl = null;
   multimodalMediaFileInputEl = null;
   multimodalMediaTrayEl = null;
@@ -2656,14 +3149,16 @@ function removeMultimodalMediaControls(options: { keepMedia?: boolean } = {}) {
 
 function updateMultimodalMediaButtonPlacement(inputBox: HTMLElement) {
   inputBox.setAttribute(
-    'data-dpp-multimodal-media-has-native',
-    hasNativePromptAttachmentButton(inputBox) ? 'true' : 'false',
+    "data-dpp-multimodal-media-has-native",
+    hasNativePromptAttachmentButton(inputBox) ? "true" : "false",
   );
 }
 
 function hasNativePromptAttachmentButton(inputBox: HTMLElement): boolean {
   const inputRect = inputBox.getBoundingClientRect();
-  const buttons = Array.from(inputBox.querySelectorAll<HTMLElement>('button, [role="button"]'))
+  const buttons = Array.from(
+    inputBox.querySelectorAll<HTMLElement>('button, [role="button"]'),
+  )
     .filter((button) => button.id !== MULTIMODAL_MEDIA_BUTTON_ID)
     .filter((button) => {
       const rect = button.getBoundingClientRect();
@@ -2680,49 +3175,54 @@ function renderMultimodalMediaTray() {
   const anchor = multimodalMediaButtonEl?.parentElement;
   const hasVisibleStatus = Boolean(
     multimodalMediaStatusEl?.textContent &&
-    (multimodalMediaBusy || multimodalMediaStatusEl.dataset.tone === 'error'),
+    (multimodalMediaBusy || multimodalMediaStatusEl.dataset.tone === "error"),
   );
   const isVisible = items.length > 0 || hasVisibleStatus;
   anchor?.setAttribute(
-    'data-dpp-multimodal-media-has-items',
-    isVisible ? 'true' : 'false',
+    "data-dpp-multimodal-media-has-items",
+    isVisible ? "true" : "false",
   );
-  multimodalMediaTrayEl.dataset.visible = isVisible ? 'true' : 'false';
-  multimodalMediaButtonEl?.toggleAttribute('disabled', multimodalMediaBusy);
-  multimodalMediaButtonEl?.classList.toggle('is-busy', multimodalMediaBusy);
+  multimodalMediaTrayEl.dataset.visible = isVisible ? "true" : "false";
+  multimodalMediaButtonEl?.toggleAttribute("disabled", multimodalMediaBusy);
+  multimodalMediaButtonEl?.classList.toggle("is-busy", multimodalMediaBusy);
 
-  multimodalMediaTrayEl.textContent = '';
-  const list = document.createElement('div');
-  list.className = 'dpp-mm-list';
+  multimodalMediaTrayEl.textContent = "";
+  const list = document.createElement("div");
+  list.className = "dpp-mm-list";
   for (const item of items) {
-    const chip = document.createElement('div');
-    chip.className = 'dpp-mm-chip';
+    const chip = document.createElement("div");
+    chip.className = "dpp-mm-chip";
 
-    if (item.kind === 'image' && item.objectUrl) {
-      const preview = document.createElement('img');
-      preview.className = 'dpp-mm-preview';
+    if (item.kind === "image" && item.objectUrl) {
+      const preview = document.createElement("img");
+      preview.className = "dpp-mm-preview";
       preview.src = item.objectUrl;
-      preview.alt = '';
+      preview.alt = "";
       chip.append(preview);
     } else {
-      const preview = document.createElement('span');
-      preview.className = 'dpp-mm-preview dpp-mm-preview-file';
-      preview.textContent = item.kind === 'video' ? 'V' : 'I';
+      const preview = document.createElement("span");
+      preview.className = "dpp-mm-preview dpp-mm-preview-file";
+      preview.textContent = item.kind === "video" ? "V" : "I";
       chip.append(preview);
     }
 
-    const label = document.createElement('span');
-    label.className = 'dpp-mm-name';
+    const label = document.createElement("span");
+    label.className = "dpp-mm-name";
     label.textContent = `${item.name} · ${formatMultimodalMediaBytes(item.sizeBytes)}`;
     chip.append(label);
 
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'dpp-mm-remove';
-    remove.title = contentT('content.multimodalMedia.removeTitle', { name: item.name });
-    remove.setAttribute('aria-label', contentT('content.multimodalMedia.removeTitle', { name: item.name }));
-    remove.textContent = '×';
-    remove.addEventListener('click', () => {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "dpp-mm-remove";
+    remove.title = contentT("content.multimodalMedia.removeTitle", {
+      name: item.name,
+    });
+    remove.setAttribute(
+      "aria-label",
+      contentT("content.multimodalMedia.removeTitle", { name: item.name }),
+    );
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
       removePendingMultimodalMedia(item.id);
       renderMultimodalMediaTray();
     });
@@ -2736,16 +3236,24 @@ function renderMultimodalMediaTray() {
   }
 }
 
-async function addPendingMultimodalFiles(files: readonly File[], source: 'picker' | 'paste') {
+async function addPendingMultimodalFiles(
+  files: readonly File[],
+  source: "picker" | "paste",
+) {
   if (!multimodalMediaInputEnabled) return;
-  const mediaFiles = files.filter((file) => classifyMultimodalFile(file) !== null);
+  const mediaFiles = files.filter(
+    (file) => classifyMultimodalFile(file) !== null,
+  );
   if (mediaFiles.length === 0) return;
 
   const existing = getCurrentRoutePendingMultimodalMedia().length;
   if (existing + mediaFiles.length > MULTIMODAL_MEDIA_MAX_ITEMS_PER_TURN) {
-    setMultimodalMediaStatus(contentT('content.multimodalMedia.tooMany', {
-      count: MULTIMODAL_MEDIA_MAX_ITEMS_PER_TURN,
-    }), 'error');
+    setMultimodalMediaStatus(
+      contentT("content.multimodalMedia.tooMany", {
+        count: MULTIMODAL_MEDIA_MAX_ITEMS_PER_TURN,
+      }),
+      "error",
+    );
     return;
   }
 
@@ -2757,17 +3265,20 @@ async function addPendingMultimodalFiles(files: readonly File[], source: 'picker
     const error = validateMultimodalFile(file, kind);
     if (error) {
       hasValidationError = true;
-      setMultimodalMediaStatus(error, 'error');
+      setMultimodalMediaStatus(error, "error");
       continue;
     }
     const id = crypto.randomUUID();
-    const objectUrl = kind === 'image' ? URL.createObjectURL(file) : null;
+    const objectUrl = kind === "image" ? URL.createObjectURL(file) : null;
     pendingMultimodalMedia.set(id, {
       id,
       kind,
       file,
-      name: file.name ||
-        (source === 'paste' ? contentT('content.multimodalMedia.pastedFileName') : 'media'),
+      name:
+        file.name ||
+        (source === "paste"
+          ? contentT("content.multimodalMedia.pastedFileName")
+          : "media"),
       mimeType: file.type,
       sizeBytes: file.size,
       objectUrl,
@@ -2791,25 +3302,31 @@ function handleMultimodalMediaPaste(event: ClipboardEvent) {
   if (files.length === 0) return;
 
   event.preventDefault();
-  const text = event.clipboardData?.getData('text/plain') ?? '';
+  const text = event.clipboardData?.getData("text/plain") ?? "";
   if (text) insertPromptText(text);
-  void addPendingMultimodalFiles(files, 'paste');
+  void addPendingMultimodalFiles(files, "paste");
 }
 
-function extractMultimodalFilesFromDataTransfer(dataTransfer: DataTransfer | null): File[] {
+function extractMultimodalFilesFromDataTransfer(
+  dataTransfer: DataTransfer | null,
+): File[] {
   if (!dataTransfer) return [];
 
-  const directFiles = dedupeClipboardMultimodalFiles(Array.from(dataTransfer.files ?? []));
+  const directFiles = dedupeClipboardMultimodalFiles(
+    Array.from(dataTransfer.files ?? []),
+  );
   if (directFiles.length > 0) return directFiles;
 
   return dedupeClipboardMultimodalFiles(
     Array.from(dataTransfer.items ?? [])
-      .filter((item) => item.kind === 'file')
+      .filter((item) => item.kind === "file")
       .map((item) => item.getAsFile()),
   );
 }
 
-function dedupeClipboardMultimodalFiles(candidates: Array<File | null>): File[] {
+function dedupeClipboardMultimodalFiles(
+  candidates: Array<File | null>,
+): File[] {
   const files: File[] = [];
   const seen = new Set<string>();
   const addFile = (file: File | null) => {
@@ -2854,38 +3371,56 @@ async function consumePendingMultimodalMediaForRequest(
 
   const originalPrompt = body.prompt;
   if (!originalPrompt.trim()) {
-    throw new Error(contentT('content.multimodalMedia.emptyPrompt'));
+    throw new Error(contentT("content.multimodalMedia.emptyPrompt"));
   }
-  options.onLongRunning?.(calculateMultimodalRequestAugmentationTimeoutMs(media));
+  options.onLongRunning?.(
+    calculateMultimodalRequestAugmentationTimeoutMs(media),
+  );
 
   try {
     multimodalMediaBusy = true;
     renderMultimodalMediaTray();
-    setMultimodalMediaStatus(contentT('content.multimodalMedia.analyzing', { count: media.length }), 'info');
+    setMultimodalMediaStatus(
+      contentT("content.multimodalMedia.analyzing", { count: media.length }),
+      "info",
+    );
 
-    const inputs = await Promise.all(media.map(readPendingMultimodalMediaInput));
-    const response = await sendRuntimeMessageStrict<MultimodalMediaAnalyzeResponse>({
-      type: 'ANALYZE_MULTIMODAL_MEDIA',
-      payload: {
-        prompt: originalPrompt,
-        media: inputs,
-        chatSessionId: typeof body.chat_session_id === 'string'
-          ? body.chat_session_id
-          : getCurrentChatSessionId(),
-        parentMessageId: normalizeContentMessageId(body.parent_message_id),
-      },
-    });
-    if (!response.ok) throw new Error(response.error || 'Multimodal analysis failed.');
+    const inputs = await Promise.all(
+      media.map(readPendingMultimodalMediaInput),
+    );
+    const response =
+      await sendRuntimeMessageStrict<MultimodalMediaAnalyzeResponse>({
+        type: "ANALYZE_MULTIMODAL_MEDIA",
+        payload: {
+          prompt: originalPrompt,
+          media: inputs,
+          chatSessionId:
+            typeof body.chat_session_id === "string"
+              ? body.chat_session_id
+              : getCurrentChatSessionId(),
+          parentMessageId: normalizeContentMessageId(body.parent_message_id),
+        },
+      });
+    if (!response.ok)
+      throw new Error(response.error || "Multimodal analysis failed.");
 
     clearPendingMultimodalMediaItems(media);
-    setMultimodalMediaStatus(contentT('content.multimodalMedia.analyzed', { count: response.analyses.length }), 'info');
+    setMultimodalMediaStatus(
+      contentT("content.multimodalMedia.analyzed", {
+        count: response.analyses.length,
+      }),
+      "info",
+    );
     return {
       ...body,
       prompt: buildMultimodalAnalysisPrompt(originalPrompt, response.analyses),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setMultimodalMediaStatus(contentT('content.multimodalMedia.failed', { message }), 'error');
+    setMultimodalMediaStatus(
+      contentT("content.multimodalMedia.failed", { message }),
+      "error",
+    );
     throw error;
   } finally {
     multimodalMediaBusy = false;
@@ -2893,8 +3428,10 @@ async function consumePendingMultimodalMediaForRequest(
   }
 }
 
-async function readPendingMultimodalMediaInput(item: PendingMultimodalMedia): Promise<MultimodalMediaInput> {
-  if (item.kind === 'image') {
+async function readPendingMultimodalMediaInput(
+  item: PendingMultimodalMedia,
+): Promise<MultimodalMediaInput> {
+  if (item.kind === "image") {
     return {
       id: item.id,
       kind: item.kind,
@@ -2918,10 +3455,11 @@ async function readPendingMultimodalMediaInput(item: PendingMultimodalMedia): Pr
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`Failed to read ${file.name || 'media file'}.`));
+    reader.onerror = () =>
+      reject(new Error(`Failed to read ${file.name || "media file"}.`));
     reader.onload = () => {
-      if (typeof reader.result === 'string') resolve(reader.result);
-      else reject(new Error(`Failed to read ${file.name || 'media file'}.`));
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error(`Failed to read ${file.name || "media file"}.`));
     };
     reader.readAsDataURL(file);
   });
@@ -2929,25 +3467,37 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 async function readFileAsBase64(file: File): Promise<string> {
   const dataUrl = await readFileAsDataUrl(file);
-  const comma = dataUrl.indexOf(',');
+  const comma = dataUrl.indexOf(",");
   return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
 
 function classifyMultimodalFile(file: File): MultimodalMediaKind | null {
-  if (file.type.startsWith('image/')) return 'image';
-  if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
   return null;
 }
 
-function validateMultimodalFile(file: File, kind: MultimodalMediaKind): string | null {
-  if (!file.type) return contentT('content.multimodalMedia.unsupported', { name: file.name || 'media' });
-  const maxBytes = kind === 'image' ? MULTIMODAL_MEDIA_IMAGE_MAX_BYTES : MULTIMODAL_MEDIA_VIDEO_INLINE_MAX_BYTES;
+function validateMultimodalFile(
+  file: File,
+  kind: MultimodalMediaKind,
+): string | null {
+  if (!file.type)
+    return contentT("content.multimodalMedia.unsupported", {
+      name: file.name || "media",
+    });
+  const maxBytes =
+    kind === "image"
+      ? MULTIMODAL_MEDIA_IMAGE_MAX_BYTES
+      : MULTIMODAL_MEDIA_VIDEO_INLINE_MAX_BYTES;
   if (file.size > maxBytes) {
     return contentT(
-      kind === 'image'
-        ? 'content.multimodalMedia.imageTooLarge'
-        : 'content.multimodalMedia.videoTooLarge',
-      { name: file.name || 'media', limit: formatMultimodalMediaBytes(maxBytes) },
+      kind === "image"
+        ? "content.multimodalMedia.imageTooLarge"
+        : "content.multimodalMedia.videoTooLarge",
+      {
+        name: file.name || "media",
+        limit: formatMultimodalMediaBytes(maxBytes),
+      },
     );
   }
   return null;
@@ -2957,13 +3507,17 @@ function getCurrentRoutePendingMultimodalMedia(): PendingMultimodalMedia[] {
   return getPendingMultimodalMediaForRoute(getTokenSpeedRouteKey());
 }
 
-function getPendingMultimodalMediaForRoute(routeKey: string): PendingMultimodalMedia[] {
+function getPendingMultimodalMediaForRoute(
+  routeKey: string,
+): PendingMultimodalMedia[] {
   return Array.from(pendingMultimodalMedia.values())
     .filter((item) => item.routeKey === routeKey)
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
-function selectPendingMultimodalMediaRouteKey(body: Record<string, unknown>): string | null {
+function selectPendingMultimodalMediaRouteKey(
+  body: Record<string, unknown>,
+): string | null {
   return selectMultimodalMediaRouteKeyForRequest(
     Array.from(pendingMultimodalMedia.values()),
     getTokenSpeedRouteKey(),
@@ -2971,12 +3525,20 @@ function selectPendingMultimodalMediaRouteKey(body: Record<string, unknown>): st
   );
 }
 
-function handleMultimodalMediaRouteChange(previousRouteKey: string, nextRouteKey: string) {
-  if (shouldPreserveInitialMultimodalMediaRoute(previousRouteKey, nextRouteKey)) {
+function handleMultimodalMediaRouteChange(
+  previousRouteKey: string,
+  nextRouteKey: string,
+) {
+  if (
+    shouldPreserveInitialMultimodalMediaRoute(previousRouteKey, nextRouteKey)
+  ) {
     renderMultimodalMediaTray();
     return;
   }
-  if (hasDeepSeekChatSessionRoute(previousRouteKey) && !hasDeepSeekChatSessionRoute(nextRouteKey)) {
+  if (
+    hasDeepSeekChatSessionRoute(previousRouteKey) &&
+    !hasDeepSeekChatSessionRoute(nextRouteKey)
+  ) {
     clearPendingMultimodalMedia();
     renderMultimodalMediaTray();
     return;
@@ -2991,7 +3553,9 @@ function clearInactiveMultimodalMedia(routeKey: string) {
   renderMultimodalMediaTray();
 }
 
-function clearPendingMultimodalMediaItems(items: readonly PendingMultimodalMedia[]) {
+function clearPendingMultimodalMediaItems(
+  items: readonly PendingMultimodalMedia[],
+) {
   for (const item of items) removePendingMultimodalMedia(item.id);
   renderMultimodalMediaTray();
 }
@@ -3009,7 +3573,7 @@ function removePendingMultimodalMedia(id: string) {
   pendingMultimodalMedia.delete(id);
 }
 
-function setMultimodalMediaStatus(message: string, tone: 'info' | 'error') {
+function setMultimodalMediaStatus(message: string, tone: "info" | "error") {
   if (!multimodalMediaStatusEl) return;
   multimodalMediaStatusEl.textContent = message;
   multimodalMediaStatusEl.dataset.tone = tone;
@@ -3018,14 +3582,14 @@ function setMultimodalMediaStatus(message: string, tone: 'info' | 'error') {
 
 function clearMultimodalMediaStatus() {
   if (!multimodalMediaStatusEl) return;
-  multimodalMediaStatusEl.textContent = '';
+  multimodalMediaStatusEl.textContent = "";
   delete multimodalMediaStatusEl.dataset.tone;
   renderMultimodalMediaTray();
 }
 
 function normalizeContentMessageId(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -3033,7 +3597,8 @@ function normalizeContentMessageId(value: unknown): number | null {
 }
 
 function formatMultimodalMediaBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+  if (bytes >= 1024 * 1024)
+    return `${(bytes / 1024 / 1024).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
   if (bytes >= 1024) return `${Math.ceil(bytes / 1024)} KB`;
   return `${bytes} B`;
 }
@@ -3052,7 +3617,7 @@ function createMultimodalMediaButtonIcon(): string {
 
 function injectMultimodalMediaStyles() {
   if (document.getElementById(MULTIMODAL_MEDIA_STYLE_ID)) return;
-  const style = document.createElement('style');
+  const style = document.createElement("style");
   style.id = MULTIMODAL_MEDIA_STYLE_ID;
   style.textContent = `
     [data-dpp-multimodal-media-anchor] {
@@ -3287,37 +3852,51 @@ function injectMultimodalMediaStyles() {
   document.head.appendChild(style);
 }
 
-function downloadConversationExportArtifacts(artifacts: readonly ConversationExportArtifact[]) {
+function downloadConversationExportArtifacts(
+  artifacts: readonly ConversationExportArtifact[],
+) {
   const manager = exportDownloadManager;
-  if (!manager || artifacts.length === 0) throw new Error(contentT('content.export.failed'));
+  if (!manager || artifacts.length === 0)
+    throw new Error(contentT("content.export.failed"));
   if (artifacts.length === 1) {
     const artifact = artifacts[0];
-    manager.download(artifact.filename, new Blob([artifact.content], { type: artifact.mimeType }));
+    manager.download(
+      artifact.filename,
+      new Blob([artifact.content], { type: artifact.mimeType }),
+    );
     return;
   }
 
   const archive = createConversationExportArchiveArtifact(artifacts);
   const archiveBytes = new Uint8Array(archive.content.byteLength);
   archiveBytes.set(archive.content);
-  manager.download(archive.filename, new Blob([archiveBytes], { type: archive.mimeType }));
+  manager.download(
+    archive.filename,
+    new Blob([archiveBytes], { type: archive.mimeType }),
+  );
 }
 
-function showConversationExportToast(message: string, tone: 'info' | 'success' | 'warning' | 'error') {
-  let toast = document.querySelector<HTMLElement>(`.${EXPORT_ACTION_TOAST_CLASS}`);
+function showConversationExportToast(
+  message: string,
+  tone: "info" | "success" | "warning" | "error",
+) {
+  let toast = document.querySelector<HTMLElement>(
+    `.${EXPORT_ACTION_TOAST_CLASS}`,
+  );
   if (!toast) {
-    toast = document.createElement('div');
+    toast = document.createElement("div");
     toast.className = EXPORT_ACTION_TOAST_CLASS;
-    toast.setAttribute('role', 'status');
+    toast.setAttribute("role", "status");
     document.body.appendChild(toast);
   }
 
   toast.textContent = message;
   toast.dataset.tone = tone;
-  toast.dataset.visible = 'true';
+  toast.dataset.visible = "true";
   if (exportActionToastTimer) clearTimeout(exportActionToastTimer);
   exportActionToastTimer = setTimeout(() => {
     exportActionToastTimer = null;
-    toast.dataset.visible = 'false';
+    toast.dataset.visible = "false";
   }, EXPORT_ACTION_TOAST_VISIBLE_MS);
 }
 
@@ -3329,28 +3908,31 @@ const CONTENT_TOAST_VISIBLE_MS = 6000;
  * agent concurrency guard in issue #298). Distinct from the export toast so
  * the two never overwrite each other.
  */
-function showContentToast(message: string, tone: 'info' | 'warning' = 'info'): void {
+function showContentToast(
+  message: string,
+  tone: "info" | "warning" = "info",
+): void {
   injectContentToastStyles();
   let toast = document.querySelector<HTMLElement>(`.${CONTENT_TOAST_CLASS}`);
   if (!toast) {
-    toast = document.createElement('div');
+    toast = document.createElement("div");
     toast.className = CONTENT_TOAST_CLASS;
-    toast.setAttribute('role', 'status');
+    toast.setAttribute("role", "status");
     document.body.appendChild(toast);
   }
   toast.textContent = message;
   toast.dataset.tone = tone;
-  toast.dataset.visible = 'true';
+  toast.dataset.visible = "true";
   if (contentToastTimer) clearTimeout(contentToastTimer);
   contentToastTimer = setTimeout(() => {
     contentToastTimer = null;
-    toast!.dataset.visible = 'false';
+    toast!.dataset.visible = "false";
   }, CONTENT_TOAST_VISIBLE_MS);
 }
 
 function injectContentToastStyles(): void {
   if (document.getElementById(CONTENT_TOAST_STYLE_ID)) return;
-  const style = document.createElement('style');
+  const style = document.createElement("style");
   style.id = CONTENT_TOAST_STYLE_ID;
   style.textContent = `
     .${CONTENT_TOAST_CLASS} {
@@ -3386,11 +3968,13 @@ function injectContentToastStyles(): void {
 function isVisibleElement(el: HTMLElement): boolean {
   const rect = el.getBoundingClientRect();
   const style = getComputedStyle(el);
-  return rect.width > 0 &&
+  return (
+    rect.width > 0 &&
     rect.height > 0 &&
-    style.display !== 'none' &&
-    style.visibility !== 'hidden' &&
-    Number(style.opacity) !== 0;
+    style.display !== "none" &&
+    style.visibility !== "hidden" &&
+    Number(style.opacity) !== 0
+  );
 }
 
 function createConversationExportActionIcon(): string {
@@ -3405,7 +3989,7 @@ function createConversationExportActionIcon(): string {
 
 function injectConversationExportActionStyles() {
   if (document.getElementById(EXPORT_ACTION_STYLE_ID)) return;
-  const style = document.createElement('style');
+  const style = document.createElement("style");
   style.id = EXPORT_ACTION_STYLE_ID;
   style.textContent = `
     .${EXPORT_ACTION_CLASS} {
@@ -3580,16 +4164,18 @@ function injectConversationExportActionStyles() {
   document.head.appendChild(style);
 }
 
-function normalizeCapturedClientHeaders(value: unknown): Record<string, string> | null {
-  if (!value || typeof value !== 'object') return null;
+function normalizeCapturedClientHeaders(
+  value: unknown,
+): Record<string, string> | null {
+  if (!value || typeof value !== "object") return null;
   const headers = value as Record<string, unknown>;
   const authorization = headers.Authorization;
-  if (typeof authorization !== 'string' || !authorization) return null;
+  if (typeof authorization !== "string" || !authorization) return null;
 
   const normalized: Record<string, string> = { Authorization: authorization };
   for (const [key, entry] of Object.entries(headers)) {
-    if (key === 'Authorization') continue;
-    if (typeof entry === 'string' && entry) normalized[key] = entry;
+    if (key === "Authorization") continue;
+    if (typeof entry === "string" && entry) normalized[key] = entry;
   }
   return normalized;
 }
@@ -3618,16 +4204,18 @@ async function sendRuntimeMessageStrict<T>(
   decode?: (value: unknown) => T,
 ): Promise<T> {
   if (!hasLiveExtensionContext()) {
-    throw new Error('Extension context is unavailable.');
+    throw new Error("Extension context is unavailable.");
   }
 
   try {
     const result = await chrome.runtime.sendMessage(message);
     if (decode) {
-      return decodeRuntimeResponse(result, decode, 'Runtime request failed.');
+      return decodeRuntimeResponse(result, decode, "Runtime request failed.");
     }
     if (isRuntimeFailure(result)) {
-      throw new Error(result.error ? String(result.error) : 'Runtime request failed.');
+      throw new Error(
+        result.error ? String(result.error) : "Runtime request failed.",
+      );
     }
     return result as T;
   } catch (error) {
@@ -3661,11 +4249,11 @@ function startDeepSeekThemeSync() {
   themeObserver = new MutationObserver(scheduleDeepSeekThemeSync);
   observeThemeHost(document.documentElement);
   observeThemeHost(document.body);
-  observeThemeHost(document.getElementById('root'));
+  observeThemeHost(document.getElementById("root"));
 
-  themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
   themeMediaListener = () => scheduleDeepSeekThemeSync();
-  themeMediaQuery.addEventListener('change', themeMediaListener);
+  themeMediaQuery.addEventListener("change", themeMediaListener);
 
   startThemeBootstrapSync();
 }
@@ -3679,7 +4267,7 @@ function stopDeepSeekThemeSync() {
     themeSyncTimer = null;
   }
   if (themeMediaQuery && themeMediaListener) {
-    themeMediaQuery.removeEventListener('change', themeMediaListener);
+    themeMediaQuery.removeEventListener("change", themeMediaListener);
   }
   themeMediaQuery = null;
   themeMediaListener = null;
@@ -3689,12 +4277,12 @@ function startThemeBootstrapSync() {
   stopThemeBootstrapSync();
   themeBootstrapAttempts = 0;
   themeTreeObserver = new MutationObserver(() => {
-    observeThemeTree(document.getElementById('root'));
+    observeThemeTree(document.getElementById("root"));
     scheduleDeepSeekThemeSync();
   });
 
   observeThemeTree(document.body);
-  observeThemeTree(document.getElementById('root'));
+  observeThemeTree(document.getElementById("root"));
   scheduleThemeBootstrapRetry();
 }
 
@@ -3711,7 +4299,15 @@ function observeThemeHost(element: Element | null) {
   if (!element || !themeObserver) return;
   themeObserver.observe(element, {
     attributes: true,
-    attributeFilter: ['class', 'style', 'data-theme', 'data-color-mode', 'data-mode', 'color-scheme', 'data-ds-dark-theme'],
+    attributeFilter: [
+      "class",
+      "style",
+      "data-theme",
+      "data-color-mode",
+      "data-mode",
+      "color-scheme",
+      "data-ds-dark-theme",
+    ],
   });
 }
 
@@ -3748,40 +4344,54 @@ function syncDeepSeekTheme() {
   applyDeepSeekThemeClass(theme);
   if (theme === currentDeepSeekTheme) return;
   currentDeepSeekTheme = theme;
-  void sendRuntimeMessage({ type: 'SET_DEEPSEEK_THEME', payload: { theme } });
+  void sendRuntimeMessage({ type: "SET_DEEPSEEK_THEME", payload: { theme } });
 }
 
 function applyDeepSeekThemeClass(theme: DeepSeekTheme) {
-  document.body.classList.toggle('dpp-theme-dark', theme === 'dark');
-  document.body.classList.toggle('dpp-theme-light', theme === 'light');
+  document.body.classList.toggle("dpp-theme-dark", theme === "dark");
+  document.body.classList.toggle("dpp-theme-light", theme === "light");
 }
 
 function detectDeepSeekTheme(): DeepSeekTheme {
-  return detectExplicitTheme() ??
+  return (
+    detectExplicitTheme() ??
     detectBackgroundTheme() ??
-    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    (window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light")
+  );
 }
 
 function detectExplicitTheme(): DeepSeekTheme | null {
-  const hosts = [document.documentElement, document.body, document.getElementById('root')]
-    .filter((element): element is HTMLElement => Boolean(element));
-  const attributeNames = ['data-theme', 'data-color-mode', 'data-mode', 'color-scheme'];
+  const hosts = [
+    document.documentElement,
+    document.body,
+    document.getElementById("root"),
+  ].filter((element): element is HTMLElement => Boolean(element));
+  const attributeNames = [
+    "data-theme",
+    "data-color-mode",
+    "data-mode",
+    "color-scheme",
+  ];
 
   for (const host of hosts) {
     // DeepSeek toggles its theme with a boolean `data-ds-dark-theme` marker;
     // honor it directly so injected UI follows the host instead of the OS
     // prefers-color-scheme (Issue #551).
-    if (host.hasAttribute('data-ds-dark-theme')) return 'dark';
+    if (host.hasAttribute("data-ds-dark-theme")) return "dark";
     for (const name of attributeNames) {
       const theme = parseThemeText(host.getAttribute(name));
       if (theme) return theme;
     }
 
-    const themeFromClass = parseThemeText(typeof host.className === 'string' ? host.className : '');
+    const themeFromClass = parseThemeText(
+      typeof host.className === "string" ? host.className : "",
+    );
     if (themeFromClass) return themeFromClass;
 
     const scheme = getComputedStyle(host).colorScheme.toLowerCase().trim();
-    if (scheme === 'dark' || scheme === 'light') return scheme;
+    if (scheme === "dark" || scheme === "light") return scheme;
   }
 
   return null;
@@ -3790,8 +4400,8 @@ function detectExplicitTheme(): DeepSeekTheme | null {
 function parseThemeText(value: string | null): DeepSeekTheme | null {
   if (!value) return null;
   const normalized = value.toLowerCase();
-  if (/(^|[\s_-])(dark|black|night)([\s_-]|$)/.test(normalized)) return 'dark';
-  if (/(^|[\s_-])(light|white|day)([\s_-]|$)/.test(normalized)) return 'light';
+  if (/(^|[\s_-])(dark|black|night)([\s_-]|$)/.test(normalized)) return "dark";
+  if (/(^|[\s_-])(light|white|day)([\s_-]|$)/.test(normalized)) return "light";
   return null;
 }
 
@@ -3802,8 +4412,8 @@ function detectBackgroundTheme(): DeepSeekTheme | null {
   );
   const candidates = [
     sampled,
-    document.querySelector('main'),
-    document.getElementById('root'),
+    document.querySelector("main"),
+    document.getElementById("root"),
     document.body,
     document.documentElement,
   ].filter((element): element is Element => Boolean(element));
@@ -3811,7 +4421,9 @@ function detectBackgroundTheme(): DeepSeekTheme | null {
   for (const candidate of candidates) {
     let element: Element | null = candidate;
     while (element && element !== document.documentElement.parentElement) {
-      const theme = themeFromBackgroundColor(getComputedStyle(element).backgroundColor);
+      const theme = themeFromBackgroundColor(
+        getComputedStyle(element).backgroundColor,
+      );
       if (theme) return theme;
       element = element.parentElement;
     }
@@ -3823,15 +4435,19 @@ function detectBackgroundTheme(): DeepSeekTheme | null {
 function themeFromBackgroundColor(color: string): DeepSeekTheme | null {
   const rgb = parseRgbColor(color);
   if (!rgb || rgb.alpha < 0.2) return null;
-  return relativeLuminance(rgb.red, rgb.green, rgb.blue) < 0.45 ? 'dark' : 'light';
+  return relativeLuminance(rgb.red, rgb.green, rgb.blue) < 0.45
+    ? "dark"
+    : "light";
 }
 
-function parseRgbColor(color: string): { red: number; green: number; blue: number; alpha: number } | null {
+function parseRgbColor(
+  color: string,
+): { red: number; green: number; blue: number; alpha: number } | null {
   const match = color.match(/^rgba?\((.+)\)$/);
   if (!match) return null;
 
   const parts = match[1]
-    .replace(/\//g, ' ')
+    .replace(/\//g, " ")
     .split(/[\s,]+/)
     .map((part) => part.trim())
     .filter(Boolean);
@@ -3849,10 +4465,10 @@ function relativeLuminance(red: number, green: number, blue: number): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-function startInlineAgentIfNeeded(
+async function startInlineAgentIfNeeded(
   complete: ResponseCompletePayload,
   executions: ToolExecutionRecord[],
-): void {
+): Promise<void> {
   if (isInlineAgentResponseComplete(complete)) return;
 
   // Concurrency guard (issue #298): if an inline agent loop is already running
@@ -3862,13 +4478,9 @@ function startInlineAgentIfNeeded(
   // Continuation turns are produced by the agent loop itself and are already
   // handled by isInlineAgentResponseComplete above.
   if (isInlineAgentRunning()) {
-    showContentToast(
-      contentT('content.agent.concurrencyGuard'),
-      'warning',
-    );
+    showContentToast(contentT("content.agent.concurrencyGuard"), "warning");
     return;
   }
-
 
   // Collect executions that should trigger a continuation:
   // MCP tools + local web and browser-control tools.
@@ -3883,7 +4495,7 @@ function startInlineAgentIfNeeded(
   if (!authorization) {
     // Don't fail silently: the user asked for agent work and the loop cannot
     // start without the tool authorization grant (Issue #544).
-    showContentToast(contentT('content.agent.startFailed'), 'warning');
+    showContentToast(contentT("content.agent.startFailed"), "warning");
     return;
   }
 
@@ -3903,38 +4515,72 @@ function startInlineAgentIfNeeded(
     },
     toolDescriptors: authorization.descriptors.filter(
       (d) =>
-        d.provider?.kind === 'mcp' ||
+        d.provider?.kind === "mcp" ||
         d.provider?.id === MCP_CAPABILITY_TOOL_PROVIDER_ID ||
-        d.provider?.id === 'web' ||
-        d.provider?.id === 'browser_control' ||
-        d.name === 'web_search' ||
-        d.name === 'web_fetch' ||
-        d.name.startsWith('browser_'),
+        d.provider?.id === "web" ||
+        d.provider?.id === "browser_control" ||
+        d.name === "web_search" ||
+        d.name === "web_fetch" ||
+        d.name.startsWith("browser_"),
     ),
     locale: currentContentLocale,
     powWasmUrl: chrome.runtime.getURL(DEEPSEEK_POW_WASM_PATH),
   };
 
   injectInlineAgentStyles();
-  const container = createAgentContainer(stopInlineAgent, getAgentRendererLabels());
-  container.setAttribute('data-dpp-agent-loop-id', loopId);
+  const container = createAgentContainer(
+    stopInlineAgent,
+    getAgentRendererLabels(),
+  );
+  container.setAttribute("data-dpp-agent-loop-id", loopId);
 
-  const messages = getAssistantMessages();
   const anchorContent = getInlineAgentAnchorContent(complete);
-  const target = findInlineAgentLiveTarget(complete, messages, anchorContent);
-  if (!target) {
-    // Don't fail silently: the anchor assistant message could not be located
-    // in the live DOM (Issue #544).
-    showContentToast(contentT('content.agent.startFailed'), 'warning');
+  const scope = inlineAgentCapabilityScope;
+  const observationRoot = document.getElementById("root") ?? document.body;
+  if (!scope?.active || !observationRoot) {
+    showContentToast(contentT("content.agent.startFailed"), "warning");
     return;
   }
+  const located = await waitForInlineAgentLiveTarget({
+    find() {
+      const messages = getAssistantMessages();
+      const target = findInlineAgentLiveTarget(
+        complete,
+        messages,
+        anchorContent,
+      );
+      return target ? { target, messages } : null;
+    },
+    observe(onMutation) {
+      const observer = new MutationObserver(onMutation);
+      const release = scope.observe(observer, observationRoot, {
+        childList: true,
+        subtree: true,
+      });
+      return () => {
+        void release();
+      };
+    },
+    scheduleTimeout: (callback, delayMs) => scope.setTimeout(callback, delayMs),
+    clearScheduledTimeout: (timer) => scope.clearTimeout(timer),
+    signal: scope.signal,
+    timeoutMs: INLINE_AGENT_LIVE_TARGET_WAIT_MS,
+  });
+  if (!located || inlineAgentCapabilityScope !== scope || !scope.active) {
+    // Don't fail silently after the bounded DOM commit wait: the anchor
+    // assistant message really could not be located (Issue #544).
+    if (scope.active)
+      showContentToast(contentT("content.agent.startFailed"), "warning");
+    return;
+  }
+  const { target, messages } = located;
   const anchorMessageIndex = messages.indexOf(target);
 
   inlineAgentLoopId = loopId;
   activeInlineAgentTrace = createInlineAgentTrace(
     complete,
     loopId,
-    continuableExecutions.length,
+    executions,
     anchorMessageIndex,
     anchorContent,
   );
@@ -3945,15 +4591,36 @@ function startInlineAgentIfNeeded(
   // (findRestoredInlineAgentTrace) recognizes it and never mounts a duplicate
   // restored console next to the still-present live one (Issue #551
   // follow-up).
-  container.setAttribute('data-dpp-agent-trace-key', activeInlineAgentTrace.id);
+  container.setAttribute("data-dpp-agent-trace-key", activeInlineAgentTrace.id);
   mountInlineAgentContainer(target, container);
+
+  // The agent flow now owns the tool presentation of the run record: the
+  // old-style collapsible tool block (and detached artifact cards) of the
+  // first native turn are removed from the anchor message, and that turn's
+  // executions render as the first NEW-style tool group inside the agent
+  // stream — the run reads as one flow and the tool count is neither lost
+  // nor duplicated. ALL completed first-turn executions are shown (not only
+  // the continuable subset), matching the legacy block's coverage.
+  removeToolBlockFromMessage(target);
+  const stream = getAgentConsoleBody(container);
+  const initialExecutions = executions.filter(
+    (execution) => !execution.pending,
+  );
+  if (stream && initialExecutions.length > 0) {
+    // Step index -1 keeps the group ahead of every loop step: step 0's
+    // narration mounts AFTER it, so the run record starts with the trigger
+    // turn's tools.
+    for (const exec of initialExecutions) {
+      resolveAgentToolEntry(stream, -1, exec, getAgentRendererLabels());
+    }
+  }
 
   // Visible "starting" feedback for the 2.5-6.5s wait before the first model
   // turn (Issue #544); removed when the first step renders. The console
   // header carries the phase + stop control (Issue #551).
   const startingEl = createAgentStartingElement(getAgentRendererLabels());
   getAgentConsoleBody(container)?.appendChild(startingEl);
-  container.setAttribute('data-agent-starting', 'true');
+  container.setAttribute("data-agent-starting", "true");
 
   startAgentConsoleTimer();
   startOwnedInlineAgentLoop(payload);
@@ -3961,7 +4628,7 @@ function startInlineAgentIfNeeded(
 
 function startOwnedInlineAgentLoop(payload: InlineAgentStartPayload): void {
   const task = startInlineAgentLoop(payload).catch((error) => {
-    console.error('[DeepSeek++] inline agent loop failed', error);
+    console.error("[DeepSeek++] inline agent loop failed", error);
   });
   pendingInlineAgentLoopTasks.add(task);
   void task.then(() => {
@@ -3969,8 +4636,13 @@ function startOwnedInlineAgentLoop(payload: InlineAgentStartPayload): void {
   });
 }
 
-function isInlineAgentResponseComplete(complete: ResponseCompletePayload): boolean {
-  return isInlineAgentContinuationRequest(complete.originalPrompt, complete.agentTaskPrompt);
+function isInlineAgentResponseComplete(
+  complete: ResponseCompletePayload,
+): boolean {
+  return isInlineAgentContinuationRequest(
+    complete.originalPrompt,
+    complete.agentTaskPrompt,
+  );
 }
 
 /**
@@ -3989,7 +4661,10 @@ function adoptMessageReasoningBlocks(message: Element): void {
   }
 }
 
-function mountInlineAgentContainer(message: Element, container: HTMLElement): void {
+function mountInlineAgentContainer(
+  message: Element,
+  container: HTMLElement,
+): void {
   const placeContainer = () => {
     adoptMessageReasoningBlocks(message);
     const responseHost = getAssistantResponseHost(message);
@@ -4006,7 +4681,29 @@ function mountInlineAgentContainer(message: Element, container: HTMLElement): vo
 
   inlineAgentContainerObserver?.disconnect();
   inlineAgentContainerObserver = new MutationObserver(placeContainer);
-  inlineAgentContainerObserver.observe(message, { childList: true, subtree: true });
+  inlineAgentContainerObserver.observe(message, {
+    childList: true,
+    subtree: true,
+  });
+}
+
+/**
+ * Removes the old-style tool presentation (collapsible `.dpp-tool-block` +
+ * detached `.dpp-artifact-results` cards) from a message's response host.
+ * Called when an inline agent takes over the run record: the first native
+ * turn's tools then render as the agent flow's first tool group, so the
+ * record never shows both the legacy block and the new-style group for the
+ * same executions.
+ */
+function removeToolBlockFromMessage(message: Element): void {
+  const responseHost = getAssistantResponseHost(message);
+  for (const node of Array.from(
+    responseHost.querySelectorAll<HTMLElement>(
+      ":scope > .dpp-tool-block, :scope > .dpp-artifact-results",
+    ),
+  )) {
+    node.remove();
+  }
 }
 
 function findInlineAgentLiveTarget(
@@ -4014,16 +4711,27 @@ function findInlineAgentLiveTarget(
   messages: Element[],
   anchorContent: string,
 ): Element | null {
-  const messageId = complete.assistantMessageId == null ? null : String(complete.assistantMessageId);
+  const messageId =
+    complete.assistantMessageId == null
+      ? null
+      : String(complete.assistantMessageId);
   if (messageId) {
-    const byId = messages.find((message) => elementHasMessageId(message, messageId));
+    const byId = messages.find((message) =>
+      elementHasMessageId(message, messageId),
+    );
     if (byId) return byId;
   }
 
   // A message already hosting an agent console belongs to an earlier run; a
   // fresh run never anchors into it (Issue #551 follow-up).
-  const claimed = new Set(messages.filter((message) => message.querySelector('.dpp-agent-container')));
-  const byContent = findAssistantMessageByContentSnippet(messages, anchorContent, claimed);
+  const claimed = new Set(
+    messages.filter((message) => message.querySelector(".dpp-agent-container")),
+  );
+  const byContent = findAssistantMessageByContentSnippet(
+    messages,
+    anchorContent,
+    claimed,
+  );
   if (byContent) return byContent;
 
   return messages[messages.length - 1] ?? null;
@@ -4059,6 +4767,7 @@ function teardownInlineAgentPanel(): void {
   inlineAgentContainer = null;
   inlineAgentCurrentStep = null;
   activeInlineAgentTrace = null;
+  activeAgentModelBackend = null;
   inlineAgentContainerObserver?.disconnect();
   inlineAgentContainerObserver = null;
 }
@@ -4067,11 +4776,14 @@ function stopInlineAgent(): void {
   stopAgentConsoleTimer();
   removeAgentStartingElement();
   const container = inlineAgentContainer;
-  updateActiveInlineAgentTrace((trace) => ({
-    ...trace,
-    status: 'stopping',
-    error: contentT('content.agent.stopped'),
-  }), { immediate: true });
+  updateActiveInlineAgentTrace(
+    (trace) => ({
+      ...trace,
+      status: "stopping",
+      error: contentT("content.agent.stopped"),
+    }),
+    { immediate: true },
+  );
   // Reset module state (DOM bookkeeping + observers). The container itself is
   // retained momentarily so its header can switch to the neutral paused state,
   // then detached once the aborted loop settles.
@@ -4081,6 +4793,7 @@ function stopInlineAgent(): void {
   inlineAgentContainer = null;
   inlineAgentCurrentStep = null;
   activeInlineAgentTrace = null;
+  activeAgentModelBackend = null;
   inlineAgentContainerObserver?.disconnect();
   inlineAgentContainerObserver = null;
   activeAgentAbort?.abort();
@@ -4090,19 +4803,25 @@ function stopInlineAgent(): void {
     // the interrupted step visible and pending tool entries stop pulsing.
     const stream = getAgentConsoleBody(container);
     if (stream) finalizePendingAgentToolEntries(stream);
-    renderTerminalAgentConsoleHeader(container, 'paused', 0, 0, contentT('content.agent.stopped'));
+    renderTerminalAgentConsoleHeader(
+      container,
+      "paused",
+      0,
+      0,
+      contentT("content.agent.stopped"),
+    );
   }
 }
 
-async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<void> {
+async function startInlineAgentLoop(
+  payload: InlineAgentStartPayload,
+): Promise<void> {
   // B2: the caller may pre-select a model backend; otherwise auto-select the
   // official API when an official API key is configured (same semantics as
   // the sidepanel chat). No key → the released web backend.
   if (!payload.modelBackend) {
-    payload.modelBackend = (await getDeepSeekApiKey()) ? 'official-api' : 'web';
+    payload.modelBackend = (await getDeepSeekApiKey()) ? "official-api" : "web";
   }
-  activeAgentModelBackend = payload.modelBackend;
-
   // Abort any previously running loop AND tear down its panel synchronously
   // before mounting the new one. Previously the old panel stayed in the DOM
   // until the aborted stream settled, so two agent panels briefly raced
@@ -4111,23 +4830,29 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
     activeAgentAbort.abort();
     teardownInlineAgentPanel();
   }
+  const modelBackend = payload.modelBackend;
+  activeAgentModelBackend = modelBackend;
   const abort = new AbortController();
   activeAgentAbort = abort;
 
   agentRunningToolCount = payload.toolExecutions.length;
   const authorizationRequestKey = `agent:${payload.loopId}`;
-  const capabilityScopeRequestId = payload.capabilityScopeRequestId ?? authorizationRequestKey;
+  const capabilityScopeRequestId =
+    payload.capabilityScopeRequestId ?? authorizationRequestKey;
   let authorization: ToolAuthorizationGrantSummary;
   try {
     authorization = await createContentToolAuthorization({
       requestId: capabilityScopeRequestId,
-      trigger: 'agent_run',
+      trigger: "agent_run",
       chatSessionId: payload.chatSessionId,
       runId: payload.loopId,
       descriptorIds: payload.toolDescriptors.map((descriptor) => descriptor.id),
     });
     activeToolAuthorizations.set(authorizationRequestKey, authorization);
-    inlineAgentAuthorizationRequestKeys.set(payload.loopId, authorizationRequestKey);
+    inlineAgentAuthorizationRequestKeys.set(
+      payload.loopId,
+      authorizationRequestKey,
+    );
   } catch (error) {
     handleAgentLoopError({
       loopId: payload.loopId,
@@ -4135,19 +4860,28 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
       totalTools: payload.toolExecutions.length,
       error: error instanceof Error ? error.message : String(error),
     });
-    if (activeAgentAbort === abort) activeAgentAbort = null;
+    if (activeAgentAbort === abort) {
+      activeAgentAbort = null;
+      activeAgentModelBackend = null;
+    }
     return;
   }
 
+  const terminalTasks: Promise<boolean>[] = [];
   const post = (type: string, data: unknown) => {
-    handleInlineAgentLoopEvent(type, data);
+    const terminalTask = handleInlineAgentLoopEvent(
+      type,
+      data,
+      activeAgentModelBackend ?? modelBackend,
+    );
+    if (terminalTask) terminalTasks.push(terminalTask);
   };
 
   const executeTool = async (call: ToolCall): Promise<ToolExecutionRecord> => {
     const enrichedCall: ToolCall = ensureToolCallId({
       ...call,
       source: {
-        trigger: 'agent_run',
+        trigger: "agent_run",
         requestId: capabilityScopeRequestId,
         chatSessionId: payload.chatSessionId,
         runId: payload.loopId,
@@ -4172,37 +4906,56 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
     };
   };
 
+  let shouldReloadNativeHistory = false;
   try {
-    await runInlineAgentLoop({
-      ...payload,
-      toolDescriptors: [
-        ...projectToolDescriptorsForNativeSearch(
-          authorization.descriptors,
-          payload.promptOptions.searchEnabled,
-        ),
-      ],
-    }, { post, executeTool, signal: abort.signal });
+    await runInlineAgentLoop(
+      {
+        ...payload,
+        toolDescriptors: [
+          ...projectToolDescriptorsForNativeSearch(
+            authorization.descriptors,
+            payload.promptOptions.searchEnabled,
+          ),
+        ],
+      },
+      { post, executeTool, signal: abort.signal },
+    );
+    if (terminalTasks.length > 0) {
+      const terminalResults = await Promise.all(terminalTasks);
+      shouldReloadNativeHistory = terminalResults.some(Boolean);
+    }
   } finally {
     await closeContentToolAuthorization(authorizationRequestKey);
-    if (activeAgentAbort === abort) activeAgentAbort = null;
-    activeAgentModelBackend = null;
+    if (activeAgentAbort === abort) {
+      activeAgentAbort = null;
+      activeAgentModelBackend = null;
+    }
   }
+
+  // Reload only after the terminal trace write and authorization teardown have
+  // both settled. The new document then reads the real DeepSeek history; no
+  // synthetic request, XHR lifecycle, or local response graph is involved.
+  if (shouldReloadNativeHistory) reloadInlineAgentNativeHistory();
 }
 
-function handleInlineAgentLoopEvent(type: string, data: unknown): void {
+function handleInlineAgentLoopEvent(
+  type: string,
+  data: unknown,
+  modelBackend: InlineAgentModelBackend,
+): Promise<boolean> | null {
   switch (type) {
-    case 'AGENT_STEP_STARTED':
-      setPetState('working');
+    case "AGENT_STEP_STARTED":
+      setPetState("working");
       handleAgentStepStarted(data as { loopId: string; stepIndex: number });
       break;
-    case 'AGENT_STREAM_CHUNK':
-      setPetState('speaking');
+    case "AGENT_STREAM_CHUNK":
+      setPetState("speaking");
       handleAgentStreamChunk(data as InlineAgentStreamChunkMsg);
       break;
-    case 'AGENT_REASONING_CHUNK':
+    case "AGENT_REASONING_CHUNK":
       handleAgentReasoningChunk(data as InlineAgentReasoningChunkMsg);
       break;
-    case 'AGENT_TOKEN_SPEED': {
+    case "AGENT_TOKEN_SPEED": {
       const progress = normalizeResponseTokenSpeedPayload(data);
       if (progress) {
         updateTokenSpeedIndicator(progress);
@@ -4210,32 +4963,40 @@ function handleInlineAgentLoopEvent(type: string, data: unknown): void {
       }
       break;
     }
-    case 'AGENT_TOOL_DETECTED':
+    case "AGENT_TOOL_DETECTED":
       handleAgentToolDetected(data as InlineAgentToolDetectedMsg);
       break;
-    case 'AGENT_STEP_COMPLETE':
+    case "AGENT_STEP_COMPLETE":
       handleAgentStepComplete(data as InlineAgentStepCompleteMsg);
       schedulePetIdle();
       break;
-    case 'AGENT_LOOP_COMPLETE':
-      handleAgentLoopComplete(data as InlineAgentLoopCompleteMsg);
-      setPetState('success');
+    case "AGENT_LOOP_COMPLETE": {
+      const terminalTask = handleAgentLoopComplete(
+        data as InlineAgentLoopCompleteMsg,
+        modelBackend,
+      );
+      setPetState("success");
       schedulePetIdle(PET_FEEDBACK_DELAY_MS);
-      break;
-    case 'AGENT_LOOP_ERROR':
-      setPetState('error');
+      return terminalTask;
+    }
+    case "AGENT_LOOP_ERROR":
+      setPetState("error");
       handleAgentLoopError(data as InlineAgentLoopErrorMsg);
       schedulePetIdle(PET_FEEDBACK_DELAY_MS);
       break;
   }
+  return null;
 }
 
 function removeAgentStartingElement(): void {
-  inlineAgentContainer?.querySelector('.dpp-agent-starting')?.remove();
-  inlineAgentContainer?.removeAttribute('data-agent-starting');
+  inlineAgentContainer?.querySelector(".dpp-agent-starting")?.remove();
+  inlineAgentContainer?.removeAttribute("data-agent-starting");
 }
 
-function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): void {
+function handleAgentStepStarted(data: {
+  loopId: string;
+  stepIndex: number;
+}): void {
   if (data.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
   removeAgentStartingElement();
   pendingAgentReasoningByStep.delete(data.stepIndex);
@@ -4244,22 +5005,28 @@ function handleAgentStepStarted(data: { loopId: string; stepIndex: number }): vo
   // (textless tool-only steps leave no empty paragraph in the flow).
   const stepEl = createAgentStepElement(data.stepIndex);
   inlineAgentCurrentStep = stepEl;
-  updateAgentConsoleHeader(inlineAgentContainer, {
-    phase: 'running',
-    stepNumber: data.stepIndex,
-    toolCount: agentRunningToolCount,
-    totalSteps: 0,
-    totalTools: 0,
-    elapsedSeconds: getAgentConsoleElapsedSeconds(),
-  }, getAgentRendererLabels());
-  updateActiveInlineAgentTrace((trace) => upsertInlineAgentTraceStep(trace, {
-    index: data.stepIndex,
-    status: 'streaming',
-    text: '',
-    toolExecutions: [],
-    responseMessageId: null,
-    collapsed: false,
-  }));
+  updateAgentConsoleHeader(
+    inlineAgentContainer,
+    {
+      phase: "running",
+      stepNumber: data.stepIndex,
+      toolCount: agentRunningToolCount,
+      totalSteps: 0,
+      totalTools: 0,
+      elapsedSeconds: getAgentConsoleElapsedSeconds(),
+    },
+    getAgentRendererLabels(),
+  );
+  updateActiveInlineAgentTrace((trace) =>
+    upsertInlineAgentTraceStep(trace, {
+      index: data.stepIndex,
+      status: "streaming",
+      text: "",
+      toolExecutions: [],
+      responseMessageId: null,
+      collapsed: false,
+    }),
+  );
 }
 
 /**
@@ -4272,12 +5039,19 @@ function handleAgentToolDetected(msg: InlineAgentToolDetectedMsg): void {
   if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
   const stream = getAgentConsoleBody(inlineAgentContainer);
   if (stream && inlineAgentCurrentStep) {
-    addAgentToolEntry(stream, msg.stepIndex, msg.call, getAgentRendererLabels());
+    addAgentToolEntry(
+      stream,
+      msg.stepIndex,
+      msg.call,
+      getAgentRendererLabels(),
+    );
   }
   agentRunningToolCount += 1;
-  updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
-    status: 'executing_tools',
-  }));
+  updateActiveInlineAgentTrace((trace) =>
+    updateInlineAgentTraceStep(trace, msg.stepIndex, {
+      status: "executing_tools",
+    }),
+  );
 }
 
 function handleAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
@@ -4315,20 +5089,37 @@ function handleAgentReasoningChunk(msg: InlineAgentReasoningChunkMsg): void {
     // Reasoning without any narration text: mount the (textless) step so the
     // note has a home in the stream instead of being silently dropped.
     if (step && stream && step.parentElement !== stream) {
-      mountAgentNarration(step, stream, getAgentRendererLabels(), reasoningText);
+      mountAgentNarration(
+        step,
+        stream,
+        getAgentRendererLabels(),
+        reasoningText,
+      );
     }
   }
 
-  updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
-    reasoning: reasoningText,
-  }));
+  updateActiveInlineAgentTrace((trace) =>
+    updateInlineAgentTraceStep(trace, msg.stepIndex, {
+      reasoning: reasoningText,
+    }),
+  );
 }
 
 function renderInlineAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
-  if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep || !inlineAgentContainer) return;
+  if (
+    msg.loopId !== inlineAgentLoopId ||
+    !inlineAgentCurrentStep ||
+    !inlineAgentContainer
+  )
+    return;
   const step = inlineAgentCurrentStep;
   const previousText = getInlineAgentStepText(step);
-  const nextText = clampText(getInlineAgentDisplayStepText(msg.fullText) || previousText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '';
+  const nextText =
+    clampText(
+      getInlineAgentDisplayStepText(msg.fullText, currentToolDescriptors) ||
+        previousText,
+      INLINE_AGENT_STEP_RENDER_MAX_CHARS,
+    ) ?? "";
   if (nextText) {
     const stream = getAgentConsoleBody(inlineAgentContainer);
     if (stream) mountAgentNarration(step, stream, getAgentRendererLabels());
@@ -4341,10 +5132,58 @@ function renderInlineAgentStreamChunk(msg: InlineAgentStreamChunkMsg): void {
     if (note) updateAgentReasoningNoteElement(note, pendingReasoning);
   }
   updateStepStreamText(step, nextText);
-  updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
-    text: nextText,
-    ...(nextText ? { status: 'streaming' as const } : {}),
-  }));
+  refreshAgentStepCodeRunners(step);
+  updateActiveInlineAgentTrace((trace) =>
+    updateInlineAgentTraceStep(trace, msg.stepIndex, {
+      text: nextText,
+      ...(nextText ? { status: "streaming" as const } : {}),
+    }),
+  );
+}
+
+/**
+ * Incremental code-run support on the agent console (native renderer does
+ * not run these languages): hydrates the run action onto code blocks whose
+ * language is javascript/typescript/python, executing through the background
+ * sandbox runner. Languages the DeepSeek native renderer presents itself
+ * (html/svg/xml/mermaid plus xychart shorthand normalized in stored history)
+ * are never touched; after the web run commits, the new document renders those
+ * blocks from the real DeepSeek response.
+ */
+function refreshAgentStepCodeRunners(step: HTMLElement): void {
+  hydrateAgentStepCodeRunners(
+    step,
+    async (code, language) => {
+      try {
+        const result = await sendRuntimeMessage<ToolCardResult>({
+          type: "RUN_ARTIFACT_CODE",
+          payload: {
+            language,
+            code,
+            timeoutMs: language === "python" ? 15_000 : 5_000,
+          },
+        });
+        if (!result) {
+          const unavailable = contentT("content.agent.codeRunnerUnavailable");
+          return { ok: false, error: { message: unavailable } };
+        }
+        return {
+          ok: result.ok,
+          output: result.output,
+          detail: result.detail,
+          error: result.error ? { message: result.error.message } : undefined,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
+    },
+    getAgentRendererLabels(),
+  );
 }
 
 function flushPendingInlineAgentStreamRender(): void {
@@ -4367,123 +5206,144 @@ function cancelPendingInlineAgentStreamRender(): void {
 }
 
 function handleAgentStepComplete(msg: InlineAgentStepCompleteMsg): void {
-  if (msg.loopId !== inlineAgentLoopId || !inlineAgentCurrentStep || !inlineAgentContainer) return;
+  if (
+    msg.loopId !== inlineAgentLoopId ||
+    !inlineAgentCurrentStep ||
+    !inlineAgentContainer
+  )
+    return;
   flushPendingInlineAgentStreamRender();
 
   const stream = getAgentConsoleBody(inlineAgentContainer);
   for (const exec of msg.toolExecutions) {
     if (stream) {
-      resolveAgentToolEntry(stream, msg.stepIndex, exec, getAgentRendererLabels());
+      resolveAgentToolEntry(
+        stream,
+        msg.stepIndex,
+        exec,
+        getAgentRendererLabels(),
+      );
     }
   }
-  updateAgentConsoleHeader(inlineAgentContainer, {
-    phase: 'running',
-    stepNumber: msg.stepIndex,
-    toolCount: agentRunningToolCount,
-    totalSteps: 0,
-    totalTools: 0,
-    elapsedSeconds: getAgentConsoleElapsedSeconds(),
-  }, getAgentRendererLabels());
+  updateAgentConsoleHeader(
+    inlineAgentContainer,
+    {
+      phase: "running",
+      stepNumber: msg.stepIndex,
+      toolCount: agentRunningToolCount,
+      totalSteps: 0,
+      totalTools: 0,
+      elapsedSeconds: getAgentConsoleElapsedSeconds(),
+    },
+    getAgentRendererLabels(),
+  );
 
-  updateStepStatus(inlineAgentCurrentStep, 'complete');
+  updateStepStatus(inlineAgentCurrentStep, "complete");
   const fullText = getInlineAgentStepText(inlineAgentCurrentStep);
-  updateActiveInlineAgentTrace((trace) => updateInlineAgentTraceStep(trace, msg.stepIndex, {
-    status: 'complete',
-    text: fullText,
-    toolExecutions: msg.toolExecutions,
-    responseMessageId: msg.responseMessageId,
-    collapsed: true,
-  }), { immediate: true });
+  updateActiveInlineAgentTrace(
+    (trace) =>
+      updateInlineAgentTraceStep(trace, msg.stepIndex, {
+        status: "complete",
+        text: fullText,
+        toolExecutions: msg.toolExecutions,
+        responseMessageId: msg.responseMessageId,
+        collapsed: true,
+      }),
+    { immediate: true },
+  );
 
   inlineAgentCurrentStep = null;
 }
 
-function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
-  if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return;
+async function handleAgentLoopComplete(
+  msg: InlineAgentLoopCompleteMsg,
+  modelBackend: InlineAgentModelBackend,
+): Promise<boolean> {
+  if (msg.loopId !== inlineAgentLoopId || !inlineAgentContainer) return false;
   stopAgentConsoleTimer();
   removeAgentStartingElement();
   flushPendingInlineAgentStreamRender();
 
+  let completedTrace: InlineAgentTraceRecord | null = null;
+  let shouldReloadNativeHistory = false;
   try {
     inlineAgentContainerObserver?.disconnect();
     inlineAgentContainerObserver = null;
 
     // The stream redesign (Issue #551): the final turn is the LAST narration
     // segment of the body stream — there is no separate answer area. The
-    // display text is the full final-turn reply, with artifact blocks already
-    // converted to code blocks and the `<task_complete>` control block
-    // stripped, so the answer no longer depends on the 8000-char step clamp.
-    const displayFinalText = getInlineAgentDisplayFinalText(msg.finalText);
+    // extension keeps this visible until the persisted web trace is committed;
+    // the subsequent new document delegates the same response to DeepSeek's
+    // real history renderer.
+    const displayFinalText = getInlineAgentDisplayFinalText(
+      msg.finalText,
+      currentToolDescriptors,
+    );
 
     // Budget-exhausted loops end with the budget notice as their final text;
-    // they are paused, not complete, so the status line must not claim
-    // success (Issue #541).
-    const budgetPaused = isInlineAgentBudgetFinalText(
-      msg.finalText,
-      (count) => contentT('content.agent.budgetReached', { count }),
+    // they are paused, not complete, and must never trigger a history reload.
+    const budgetPaused = isInlineAgentBudgetFinalText(msg.finalText, (count) =>
+      contentT("content.agent.budgetReached", { count }),
     );
-    // Resolve the answer from the two same-origin candidates — the loop's
-    // resolved final text and the last step's streamed text. Both are
-    // code-blockified display texts, so the resolver normalizes truncation
-    // markers: when the last step is a (clamped) prefix of the final turn the
-    // full answer REPLACES the partial narration instead of being rendered
-    // twice. Budget-paused runs and legacy summary-split traces keep their
-    // distinct step notes and append the notice as a final stream segment.
-    const completedSteps = inlineAgentContainer.querySelectorAll('.dpp-agent-step');
-    const lastCompletedStep = completedSteps[completedSteps.length - 1] as HTMLElement | undefined;
-    const lastCompletedStepText = lastCompletedStep ? getInlineAgentStepText(lastCompletedStep) : '';
+    const completedSteps =
+      inlineAgentContainer.querySelectorAll(".dpp-agent-step");
+    const lastCompletedStep = completedSteps[completedSteps.length - 1] as
+      HTMLElement | undefined;
+    const lastCompletedStepText = lastCompletedStep
+      ? getInlineAgentStepText(lastCompletedStep)
+      : "";
     const resolvedAnswer = budgetPaused
       ? { answer: displayFinalText, fromStep: false }
       : resolveInlineAgentAnswerText(displayFinalText, lastCompletedStepText);
     const finalText = resolvedAnswer.answer;
-    if (lastCompletedStep
-      && (resolvedAnswer.fromStep
-        || isInlineAgentStepTextTheFinalAnswer(lastCompletedStepText, finalText))) {
-      // The last narration IS the answer (possibly a clamped prefix of it):
-      // render the resolved full answer in its place.
+    if (
+      lastCompletedStep &&
+      (resolvedAnswer.fromStep ||
+        isInlineAgentStepTextTheFinalAnswer(lastCompletedStepText, finalText))
+    ) {
       updateStepStreamText(lastCompletedStep, finalText);
+      refreshAgentStepCodeRunners(lastCompletedStep);
     } else if (finalText) {
       appendInlineAgentNarration(inlineAgentContainer, finalText, msg.loopId);
     }
     renderTerminalAgentConsoleHeader(
       inlineAgentContainer,
-      budgetPaused ? 'paused' : 'complete',
+      budgetPaused ? "paused" : "complete",
       msg.totalSteps,
       msg.totalTools,
     );
-    // Finished runs collapse every tool group to its one-line header; manual
-    // toggles are never overridden (Issue #551 redesign).
     const stream = getAgentConsoleBody(inlineAgentContainer);
     if (stream) {
       collapseAllAgentToolGroups(stream);
-      // Defense-in-depth: a missed STEP_COMPLETE (aborted mid-step) must not
-      // leave pulsing pending tool entries behind a "complete" header.
       finalizePendingAgentToolEntries(stream);
     }
 
-    // Web backend: deliver the final answer through the page's native chat
-    // flow (registered agent replay + composer drive) so the deliverables
-    // render with DeepSeek's native pipeline (chart cards, copy/download/run
-    // code blocks, native preview panel). Never for budget-paused runs (the
-    // "final text" is a pause notice, not a deliverable).
-    if (activeAgentModelBackend === 'web' && !budgetPaused && finalText) {
-      void deliverInlineAgentFinalAnswerNatively(finalText);
+    completedTrace = updateActiveInlineAgentTrace(
+      (trace) => ({
+        ...trace,
+        status: "complete",
+        totalSteps: msg.totalSteps,
+        totalTools: msg.totalTools,
+        finalText:
+          clampText(finalText, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? "",
+      }),
+      { persist: false },
+    );
+    if (completedTrace) {
+      shouldReloadNativeHistory = shouldReloadInlineAgentNativeHistory({
+        modelBackend,
+        budgetPaused,
+        finalText,
+        trace: completedTrace,
+        visibleChatSessionId: readDeepSeekChatSessionId(location.pathname),
+      });
     }
-
-    updateActiveInlineAgentTrace((trace) => ({
-      ...trace,
-      status: 'complete',
-      totalSteps: msg.totalSteps,
-      totalTools: msg.totalTools,
-      // Persist the "body + code blocks" display form so a page refresh
-      // restores the same complete deliverable (clamped to the 100k cap).
-      finalText: clampText(finalText, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? '',
-    }), { immediate: true });
   } catch (err) {
-    console.error('[DeepSeek++] handleAgentLoopComplete error:', err);
+    console.error("[DeepSeek++] handleAgentLoopComplete error:", err);
   } finally {
-    // ALWAYS clean up state — even if rendering throws, the next agent loop
-    // must start fresh. Otherwise subsequent searches silently fail.
+    // Clear the live bookkeeping synchronously. The DOM stays visible while
+    // the terminal write settles, so a persistence failure leaves the user
+    // with the completed extension-owned answer instead of a blank screen.
     stopAgentConsoleTimer();
     pendingAgentReasoningByStep.clear();
     inlineAgentLoopId = null;
@@ -4492,187 +5352,31 @@ function handleAgentLoopComplete(msg: InlineAgentLoopCompleteMsg): void {
     activeInlineAgentTrace = null;
     inlineAgentContainerObserver?.disconnect();
     inlineAgentContainerObserver = null;
-
-    // Note: no silent refresh — it breaks the extension's tool execution state.
-    // After manual page refresh, DeepSeek's native renderer will show the
-    // continuation message with proper Markdown.
   }
+
+  if (!completedTrace) return false;
+  try {
+    // This awaited write is the commit barrier. The caller closes the tool
+    // authorization after this promise resolves and only then reloads.
+    await persistInlineAgentTraceImmediately(completedTrace);
+  } catch {
+    return false;
+  }
+  return shouldReloadNativeHistory;
+}
+
+function reloadInlineAgentNativeHistory(): void {
+  window.location.reload();
 }
 
 /**
- * Delivers the completed agent run's final answer through the page's native
- * chat flow (web backend only): the fetch hook is primed with the final
- * answer (plus the last turn's reasoning) and the page composer is driven with
- * the continuation prompt. The page then sends its own completion request,
- * which the hook short-circuits with the synthetic response — so the page's
- * native renderer presents the deliverable (chart cards, copy/download/run
- * code blocks, native preview panel) exactly like an official conversation,
- * and the final turn's thinking renders as a native "thought" block.
- *
- * Fail-closed and best-effort: mismatched session, busy composer, or a
- * missing chain id skip the delivery silently (the panel rendering remains);
- * the hook registration expires on its own when the page request never
- * arrives.
- */
-function deliverInlineAgentFinalAnswerNatively(finalText: string): void {
-  const trace = activeInlineAgentTrace;
-  if (!trace || !finalText.trim()) return;
-  // The replay registration travels over the main/content bridge; without it
-  // the composer drive would reach the real server (a divergent extra turn).
-  if (!mainWorldBridgeController?.ready) return;
-  const chatSessionId = trace.chatSessionId;
-  if (!chatSessionId) return;
-
-  // The replay only makes sense while this session is the visible one.
-  if (!document.location.pathname.includes(`/a/chat/s/${chatSessionId}`)) return;
-
-  const sortedSteps = [...trace.steps].sort((a, b) => a.index - b.index);
-  const lastStep = sortedSteps[sortedSteps.length - 1];
-  const responseMessageId = lastStep?.responseMessageId ?? null;
-  if (responseMessageId == null) return;
-
-  const executions = sortedSteps.flatMap((step) => step.toolExecutions);
-  const prompt = buildContinuationPrompt(
-    trace.agentTaskPrompt || trace.originalPrompt,
-    executions,
-    currentContentLocale,
-  );
-  if (!prompt) return;
-
-  postToMainWorld({
-    type: 'REGISTER_AGENT_REPLAY',
-    payload: {
-      chatSessionId,
-      prompt,
-      content: finalText,
-      reasoning: lastStep?.reasoning ?? '',
-      responseMessageId,
-      createdAt: Date.now(),
-    },
-  });
-  void drivePageChatSend(prompt, chatSessionId);
-}
-
-/**
- * Drives the page's chat composer with `text` and sends it. The page's own
- * send flow then creates the user message and fires the completion request the
- * hook replays. Refuses to clobber text the user is typing. Returns true when
- * the send was at least attempted; the send itself is verified by watching
- * the composer clear (the page clears it on send).
- */
-async function drivePageChatSend(text: string, chatSessionId: string): Promise<void> {
-  const composer = findChatComposer();
-  if (!composer) {
-    console.warn('[DeepSeek++] agent replay: chat composer not found; skipping native delivery.');
-    return;
-  }
-  if (composer.value.trim()) {
-    console.warn('[DeepSeek++] agent replay: composer busy; skipping native delivery.');
-    return;
-  }
-  if (!document.location.pathname.includes(`/a/chat/s/${chatSessionId}`)) return;
-
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-  if (setter) setter.call(composer, text);
-  composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
-  composer.focus();
-
-  // Send via the page's own Enter-to-send binding; if the composer did not
-  // clear within the grace window, fall back to the primary send button.
-  const sentViaEnter = await new Promise<boolean>((resolve) => {
-    window.setTimeout(() => resolve(!composer.value.trim()), 900);
-    composer.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Enter',
-      code: 'Enter',
-      keyCode: 13,
-      which: 13,
-      bubbles: true,
-      cancelable: true,
-    }));
-    composer.dispatchEvent(new KeyboardEvent('keyup', {
-      key: 'Enter',
-      code: 'Enter',
-      keyCode: 13,
-      which: 13,
-      bubbles: true,
-    }));
-  });
-  if (sentViaEnter) return;
-
-  const sendButton = findChatSendButton();
-  if (!sendButton) {
-    console.warn('[DeepSeek++] agent replay: composer did not send and no send button was found.');
-    return;
-  }
-  sendButton.click();
-  window.setTimeout(() => {
-    if (composer.value.trim()) {
-      console.warn('[DeepSeek++] agent replay: composer did not clear after send; native delivery likely failed.');
-    }
-  }, 1500);
-}
-
-function findChatComposer(): HTMLTextAreaElement | null {
-  // Placeholder text is matched with unicode escapes so the selector source
-  // stays free of hardcoded CJK (the i18n coverage audit greps literal text).
-  const composerPlaceholderRe = /[\u53d1\u9001\u6d88\u606f]|send\s+a\s+message/i;
-  const candidates = [
-    document.querySelector<HTMLTextAreaElement>('textarea[name="search"]'),
-    document.querySelector<HTMLTextAreaElement>('textarea[placeholder]'),
-  ];
-  for (const element of candidates) {
-    if (!element) continue;
-    if (element.name === 'search') return element;
-    if (composerPlaceholderRe.test(element.getAttribute('placeholder') ?? '')) return element;
-  }
-  return null;
-}
-
-function findChatSendButton(): HTMLElement | null {
-  const candidates = [
-    document.querySelector<HTMLElement>('[role="button"].ds-button--primary.ds-button--filled'),
-    document.querySelector<HTMLElement>('button.ds-button--primary'),
-    document.querySelector<HTMLElement>('[role="button"].ds-button--primary'),
-  ];
-  return candidates.find((element): element is HTMLElement => Boolean(element)) ?? null;
-}
-
-/**
- * Issue #551 stream redesign: the user-facing final text is the full final
- * turn with artifact blocks converted to code blocks FIRST (so the raw
- * `<artifact_create>` JSON is never shown and tool-call stripping cannot
- * mangle the payload), tool-call XML removed, and the `<task_complete>`
- * control block stripped.
- */
-function getInlineAgentDisplayFinalText(text: string): string {
-  const withCodeBlocks = convertInlineAgentArtifactBlocks(text);
-  const withoutToolCalls = stripToolCalls(withCodeBlocks, { descriptors: currentToolDescriptors });
-  return getInlineAgentAnswerText(withoutToolCalls);
-}
-
-/**
- * Issue #551 process separation: step bodies show the model's working notes
- * with artifact blocks converted to code blocks and the internal
- * `<task_complete>` control block removed. Live streaming uses `'stream'`
- * mode — an incomplete artifact block renders as an OPEN code block (no
- * marker, no closing fence — the markdown renderer auto-closes it) so the
- * deliverable visibly grows with the token stream.
- */
-function getInlineAgentDisplayStepText(text: string): string {
-  const withCodeBlocks = convertInlineAgentArtifactBlocks(text, { partial: 'stream' });
-  const withoutToolCalls = stripToolCalls(withCodeBlocks, { descriptors: currentToolDescriptors });
-  return getInlineAgentProcessText(withoutToolCalls);
-}
-
-/**
- * Restored step text extraction: historical traces clamped mid-artifact, so
- * salvage mode decodes the fragment into a closed code block with the explicit
- * truncation marker (the streaming open-block form is only for live output).
+ * Restored step text extraction: historical traces (clamped mid-output) go
+ * through the same retired-protocol + tool-call stripping as live step text;
+ * their `...[truncated]` clamp marker is preserved for the answer resolver's
+ * same-origin comparison.
  */
 function getInlineAgentRestoredStepText(text: string): string {
-  const withCodeBlocks = convertInlineAgentArtifactBlocks(text);
-  const withoutToolCalls = stripToolCalls(withCodeBlocks, { descriptors: currentToolDescriptors });
-  return getInlineAgentProcessText(withoutToolCalls);
+  return getInlineAgentDisplayStepText(text, currentToolDescriptors);
 }
 
 /**
@@ -4680,19 +5384,23 @@ function getInlineAgentRestoredStepText(text: string): string {
  * final answers that are not the last step's own text (budget notices, legacy
  * summary-split runs) and for restored answers.
  */
-function appendInlineAgentNarration(container: HTMLElement, text: string, loopId: string): void {
-  const renderText = clampText(text, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? '';
+function appendInlineAgentNarration(
+  container: HTMLElement,
+  text: string,
+  loopId: string,
+): void {
+  const renderText = clampText(text, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? "";
   if (!renderText) return;
   const stream = getAgentConsoleBody(container);
   if (!stream) return;
 
-  const narration = document.createElement('div');
-  narration.className = 'dpp-agent-step dpp-agent-narration';
-  narration.setAttribute('data-dpp-agent-loop-id', loopId);
+  const narration = document.createElement("div");
+  narration.className = "dpp-agent-step dpp-agent-narration";
+  narration.setAttribute("data-dpp-agent-loop-id", loopId);
 
-  const body = document.createElement('div');
-  body.className = 'dpp-agent-step-body';
-  body.setAttribute('data-dpp-raw-text', renderText);
+  const body = document.createElement("div");
+  body.className = "dpp-agent-step-body";
+  body.setAttribute("data-dpp-raw-text", renderText);
   body.innerHTML = renderAgentStreamText(renderText);
 
   narration.appendChild(body);
@@ -4710,26 +5418,29 @@ function handleAgentLoopError(msg: InlineAgentLoopErrorMsg): void {
 
   try {
     if (inlineAgentCurrentStep) {
-      updateStepStatus(inlineAgentCurrentStep, 'error');
+      updateStepStatus(inlineAgentCurrentStep, "error");
     }
     const stream = getAgentConsoleBody(inlineAgentContainer);
     if (stream) finalizePendingAgentToolEntries(stream);
 
     renderTerminalAgentConsoleHeader(
       inlineAgentContainer,
-      'error',
+      "error",
       msg.stepIndex,
       msg.totalTools,
       msg.error,
     );
-    updateActiveInlineAgentTrace((trace) => ({
-      ...trace,
-      status: 'error',
-      totalSteps: msg.stepIndex,
-      error: msg.error,
-    }), { immediate: true });
+    updateActiveInlineAgentTrace(
+      (trace) => ({
+        ...trace,
+        status: "error",
+        totalSteps: msg.stepIndex,
+        error: msg.error,
+      }),
+      { immediate: true },
+    );
   } catch (err) {
-    console.error('[DeepSeek++] handleAgentLoopError:', err);
+    console.error("[DeepSeek++] handleAgentLoopError:", err);
   } finally {
     stopAgentConsoleTimer();
     inlineAgentLoopId = null;
@@ -4752,7 +5463,7 @@ function runToolExecution(call: ToolCall): Promise<ToolCardResult> {
   })()
     .catch((err): ToolCardResult => ({
       ok: false,
-      summary: contentT('content.toolBlock.summaries.failed'),
+      summary: contentT("content.toolBlock.summaries.failed"),
       detail: err instanceof Error ? err.message : String(err),
     }))
     .then((result) => {
@@ -4776,7 +5487,8 @@ function runToolExecution(call: ToolCall): Promise<ToolCardResult> {
   pendingToolExecutionTasks.add(task);
   const requestId = call.source?.requestId;
   if (requestId) {
-    const requestTasks = pendingToolExecutionTasksByRequest.get(requestId) ?? new Set();
+    const requestTasks =
+      pendingToolExecutionTasksByRequest.get(requestId) ?? new Set();
     requestTasks.add(task);
     pendingToolExecutionTasksByRequest.set(requestId, requestTasks);
   }
@@ -4785,7 +5497,8 @@ function runToolExecution(call: ToolCall): Promise<ToolCardResult> {
     if (!requestId) return;
     const requestTasks = pendingToolExecutionTasksByRequest.get(requestId);
     requestTasks?.delete(task);
-    if (requestTasks?.size === 0) pendingToolExecutionTasksByRequest.delete(requestId);
+    if (requestTasks?.size === 0)
+      pendingToolExecutionTasksByRequest.delete(requestId);
   });
   return task;
 }
@@ -4809,18 +5522,27 @@ function getToolAuthorizationForCall(
   const source = call.source;
   const requestId = source?.requestId;
   if (!requestId) return undefined;
-  const agentRequestId = source?.trigger === 'agent_run' && source.runId
-    ? inlineAgentAuthorizationRequestKeys.get(source.runId)
+  const agentRequestId =
+    source?.trigger === "agent_run" && source.runId
+      ? inlineAgentAuthorizationRequestKeys.get(source.runId)
+      : undefined;
+  const authoritativeRequestId =
+    agentRequestId ??
+    toolAuthorizationRequestAliases.get(requestId) ??
+    (activeToolAuthorizations.has(requestId) ? requestId : undefined);
+  return authoritativeRequestId
+    ? activeToolAuthorizations.get(authoritativeRequestId)
     : undefined;
-  const authoritativeRequestId = agentRequestId
-    ?? toolAuthorizationRequestAliases.get(requestId)
-    ?? (activeToolAuthorizations.has(requestId) ? requestId : undefined);
-  return authoritativeRequestId ? activeToolAuthorizations.get(authoritativeRequestId) : undefined;
 }
 
 function showPendingToolExecution(call: ToolCall): void {
   const session = getOrCreateActiveToolBlockSession(call);
-  if (session.executions.some((execution) => isMatchingPendingToolExecution(execution, call))) return;
+  if (
+    session.executions.some((execution) =>
+      isMatchingPendingToolExecution(execution, call),
+    )
+  )
+    return;
 
   session.executions.push({
     callId: call.id,
@@ -4830,27 +5552,35 @@ function showPendingToolExecution(call: ToolCall): void {
     descriptorId: call.descriptorId,
     result: {
       ok: true,
-      summary: contentT('content.toolBlock.summaries.running'),
+      summary: contentT("content.toolBlock.summaries.running"),
     },
   });
   session.updatedAt = Date.now();
   registerPendingToolStart(call, session);
   activeToolBlockSessionId = session.id;
   toolExecutions = session.executions;
-  setPetState('working');
+  setPetState("working");
   activeStreamingToolCount++;
   renderToolBlock(session, { skipCleanup: true });
 }
 
-function removePendingToolExecution(session: ActiveToolBlockSession, call: ToolCall): void {
-  const index = session.executions.findIndex((execution) => isMatchingPendingToolExecution(execution, call));
+function removePendingToolExecution(
+  session: ActiveToolBlockSession,
+  call: ToolCall,
+): void {
+  const index = session.executions.findIndex((execution) =>
+    isMatchingPendingToolExecution(execution, call),
+  );
   if (index >= 0) {
     session.executions.splice(index, 1);
   }
   unregisterPendingToolStart(call);
 }
 
-function registerPendingToolStart(call: ToolCall, session: ActiveToolBlockSession): void {
+function registerPendingToolStart(
+  call: ToolCall,
+  session: ActiveToolBlockSession,
+): void {
   const requestId = call.source?.requestId;
   if (!requestId) return;
   pendingStartedToolCallsByRequest.set(
@@ -4863,31 +5593,38 @@ function registerPendingToolStart(call: ToolCall, session: ActiveToolBlockSessio
 function unregisterPendingToolStart(call: ToolCall): void {
   const requestId = call.source?.requestId;
   if (!requestId) return;
-  pendingStartedToolCallsByRequest.delete(requestId, createPendingToolStartKey(call));
+  pendingStartedToolCallsByRequest.delete(
+    requestId,
+    createPendingToolStartKey(call),
+  );
 }
 
 function createPendingToolStartKey(call: ToolCall): string {
-  return call.id ?? `${call.descriptorId ?? ''}:${call.name}:${call.raw}`;
+  return call.id ?? `${call.descriptorId ?? ""}:${call.name}:${call.raw}`;
 }
 
 async function finalizeInterruptedToolStarts(requestId: string): Promise<void> {
   const authoritativeRequestId = activeToolAuthorizations.has(requestId)
     ? requestId
-    : toolAuthorizationRequestAliases.get(requestId) ?? requestId;
-  const pending = pendingStartedToolCallsByRequest.drain(authoritativeRequestId);
+    : (toolAuthorizationRequestAliases.get(requestId) ?? requestId);
+  const pending = pendingStartedToolCallsByRequest.drain(
+    authoritativeRequestId,
+  );
   await finalizePendingToolStarts(pending);
 }
 
-async function finalizePendingToolStarts(pending: PendingStartedToolCall[]): Promise<void> {
+async function finalizePendingToolStarts(
+  pending: PendingStartedToolCall[],
+): Promise<void> {
   for (const { call, session } of pending) {
     removePendingToolExecution(session, call);
     const result: ToolCardResult = {
       ok: false,
-      summary: contentT('content.toolBlock.summaries.failed'),
-      detail: contentT('tool.runtime.incomplete'),
+      summary: contentT("content.toolBlock.summaries.failed"),
+      detail: contentT("tool.runtime.incomplete"),
       error: {
         code: INCOMPLETE_TOOL_CALL_ERROR_CODE,
-        message: contentT('tool.runtime.incomplete'),
+        message: contentT("tool.runtime.incomplete"),
         retryable: false,
       },
     };
@@ -4908,14 +5645,19 @@ async function finalizePendingToolStarts(pending: PendingStartedToolCall[]): Pro
   }
 }
 
-function isMatchingPendingToolExecution(execution: ToolExecutionRecord, call: ToolCall): boolean {
+function isMatchingPendingToolExecution(
+  execution: ToolExecutionRecord,
+  call: ToolCall,
+): boolean {
   if (!execution.pending) return false;
   if (call.id && execution.callId === call.id) return true;
-  return execution.name === call.name && execution.descriptorId === call.descriptorId;
+  return (
+    execution.name === call.name && execution.descriptorId === call.descriptorId
+  );
 }
 
 function showPetResult(result: ToolCardResult): void {
-  setPetState(result.ok ? 'success' : 'error');
+  setPetState(result.ok ? "success" : "error");
   schedulePetIdle(PET_FEEDBACK_DELAY_MS);
 }
 
@@ -4929,32 +5671,60 @@ async function waitForPendingToolExecutions(requestId?: string) {
   }
 }
 
-function normalizeResponseCompletePayload(payload: unknown, fallbackText: unknown): ResponseCompletePayload {
-  const value = payload && typeof payload === 'object' ? payload as Partial<ResponseCompletePayload> : {};
+function normalizeResponseCompletePayload(
+  payload: unknown,
+  fallbackText: unknown,
+): ResponseCompletePayload {
+  const value =
+    payload && typeof payload === "object"
+      ? (payload as Partial<ResponseCompletePayload>)
+      : {};
   return {
-    requestId: typeof value.requestId === 'string' ? value.requestId : '',
-    text: typeof value.text === 'string' ? value.text : typeof fallbackText === 'string' ? fallbackText : '',
-    originalPrompt: typeof value.originalPrompt === 'string' ? value.originalPrompt : '',
-    agentTaskPrompt: typeof value.agentTaskPrompt === 'string' ? value.agentTaskPrompt : '',
-    chatSessionId: typeof value.chatSessionId === 'string' ? value.chatSessionId : null,
-    parentMessageId: typeof value.parentMessageId === 'number' ? value.parentMessageId : null,
-    assistantMessageId: typeof value.assistantMessageId === 'number' ? value.assistantMessageId : null,
+    requestId: typeof value.requestId === "string" ? value.requestId : "",
+    text:
+      typeof value.text === "string"
+        ? value.text
+        : typeof fallbackText === "string"
+          ? fallbackText
+          : "",
+    originalPrompt:
+      typeof value.originalPrompt === "string" ? value.originalPrompt : "",
+    agentTaskPrompt:
+      typeof value.agentTaskPrompt === "string" ? value.agentTaskPrompt : "",
+    chatSessionId:
+      typeof value.chatSessionId === "string" ? value.chatSessionId : null,
+    parentMessageId:
+      typeof value.parentMessageId === "number" ? value.parentMessageId : null,
+    assistantMessageId:
+      typeof value.assistantMessageId === "number"
+        ? value.assistantMessageId
+        : null,
     promptOptions: {
-      modelType: typeof value.promptOptions?.modelType === 'string' ? value.promptOptions.modelType : null,
+      modelType:
+        typeof value.promptOptions?.modelType === "string"
+          ? value.promptOptions.modelType
+          : null,
       searchEnabled: value.promptOptions?.searchEnabled === true,
       thinkingEnabled: value.promptOptions?.thinkingEnabled === true,
       refFileIds: Array.isArray(value.promptOptions?.refFileIds)
-        ? value.promptOptions.refFileIds.filter((item): item is string => typeof item === 'string')
+        ? value.promptOptions.refFileIds.filter(
+            (item): item is string => typeof item === "string",
+          )
         : [],
     },
   };
 }
 
-function normalizeResponseTokenSpeedPayload(payload: unknown): ResponseTokenSpeedPayload | null {
-  if (!payload || typeof payload !== 'object') return null;
+function normalizeResponseTokenSpeedPayload(
+  payload: unknown,
+): ResponseTokenSpeedPayload | null {
+  if (!payload || typeof payload !== "object") return null;
   const value = payload as Partial<ResponseTokenSpeedPayload>;
   const estimatedTokens = toFiniteNumber(value.estimatedTokens);
-  const accumulatedTokens = value.accumulatedTokens === null ? null : toFiniteNumber(value.accumulatedTokens);
+  const accumulatedTokens =
+    value.accumulatedTokens === null
+      ? null
+      : toFiniteNumber(value.accumulatedTokens);
   const tokensPerSecond = toFiniteNumber(value.tokensPerSecond);
   const elapsedMs = toFiniteNumber(value.elapsedMs);
   const textLength = toFiniteNumber(value.textLength);
@@ -4969,27 +5739,33 @@ function normalizeResponseTokenSpeedPayload(payload: unknown): ResponseTokenSpee
   }
 
   return {
-    requestId: typeof value.requestId === 'string' ? value.requestId : undefined,
-    chatSessionId: typeof value.chatSessionId === 'string' ? value.chatSessionId : null,
-    assistantMessageId: typeof value.assistantMessageId === 'number' ? value.assistantMessageId : null,
+    requestId:
+      typeof value.requestId === "string" ? value.requestId : undefined,
+    chatSessionId:
+      typeof value.chatSessionId === "string" ? value.chatSessionId : null,
+    assistantMessageId:
+      typeof value.assistantMessageId === "number"
+        ? value.assistantMessageId
+        : null,
     active: value.active === true,
     estimatedTokens,
     accumulatedTokens,
     tokensPerSecond,
     elapsedMs,
     textLength,
-    tokenSource: value.tokenSource === 'server' ? 'server' : 'estimated',
-    speedSource: value.speedSource === 'server' ? 'server' : 'estimated',
-    modelType: typeof value.modelType === 'string' ? value.modelType : null,
+    tokenSource: value.tokenSource === "server" ? "server" : "estimated",
+    speedSource: value.speedSource === "server" ? "server" : "estimated",
+    modelType: typeof value.modelType === "string" ? value.modelType : null,
   };
 }
 
 function toFiniteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function updateTokenSpeedIndicator(progress: ResponseTokenSpeedPayload) {
-  if (shouldIgnoreEmptyTokenSpeedProgress(progress, lastTokenSpeedProgress)) return;
+  if (shouldIgnoreEmptyTokenSpeedProgress(progress, lastTokenSpeedProgress))
+    return;
   tokenSpeedRouteKey = getTokenSpeedRouteKey();
   lastTokenSpeedProgress = progress;
   renderTokenSpeedIndicator(progress);
@@ -5007,8 +5783,8 @@ function createIdleTokenSpeedProgress(): ResponseTokenSpeedPayload {
     tokensPerSecond: 0,
     elapsedMs: 0,
     textLength: 0,
-    tokenSource: 'estimated',
-    speedSource: 'estimated',
+    tokenSource: "estimated",
+    speedSource: "estimated",
     modelType: null,
   };
 }
@@ -5024,34 +5800,38 @@ function recordUsageProgress(progress: ResponseTokenSpeedPayload) {
     progress.tokenSource,
     Math.round(progress.tokensPerSecond * 100) / 100,
     progress.speedSource,
-    progress.modelType ?? '',
-    progress.assistantMessageId ?? '',
-  ].join('|');
+    progress.modelType ?? "",
+    progress.assistantMessageId ?? "",
+  ].join("|");
 
-  void usageProgressWrites.persist(requestId, signature, async () => {
-    await sendRuntimeMessageStrict({
-      type: 'RECORD_USAGE_TURN',
-      payload: {
-        id: requestId,
-        recordedAt: Date.now(),
-        source: 'deepseek-web',
-        chatSessionId: progress.chatSessionId ?? getCurrentChatSessionId(),
-        assistantMessageId: progress.assistantMessageId ?? null,
-        modelType: progress.modelType,
-        totalTokens: Math.round(totalTokens),
-        tokenSource: progress.tokenSource,
-        tps: progress.tokensPerSecond,
-        speedSource: progress.speedSource,
-        elapsedMs: progress.elapsedMs,
-        messageCount: 2,
-      },
+  void usageProgressWrites
+    .persist(requestId, signature, async () => {
+      await sendRuntimeMessageStrict({
+        type: "RECORD_USAGE_TURN",
+        payload: {
+          id: requestId,
+          recordedAt: Date.now(),
+          source: "deepseek-web",
+          chatSessionId: progress.chatSessionId ?? getCurrentChatSessionId(),
+          assistantMessageId: progress.assistantMessageId ?? null,
+          modelType: progress.modelType,
+          totalTokens: Math.round(totalTokens),
+          tokenSource: progress.tokenSource,
+          tps: progress.tokensPerSecond,
+          speedSource: progress.speedSource,
+          elapsedMs: progress.elapsedMs,
+          messageCount: 2,
+        },
+      });
+    })
+    .catch((error) => {
+      console.error("[DeepSeek++] Failed to persist usage turn.", error);
     });
-  }).catch((error) => {
-    console.error('[DeepSeek++] Failed to persist usage turn.', error);
-  });
 }
 
-function renderTokenSpeedIndicator(progress: ResponseTokenSpeedPayload): boolean {
+function renderTokenSpeedIndicator(
+  progress: ResponseTokenSpeedPayload,
+): boolean {
   const badge = ensureTokenSpeedIndicator();
   if (!badge) return false;
 
@@ -5059,32 +5839,45 @@ function renderTokenSpeedIndicator(progress: ResponseTokenSpeedPayload): boolean
   const tokenText = formatTokenCount(tokens);
   const speed = formatTokenSpeed(progress.tokensPerSecond);
   badge.textContent = `${tokenText} tok · ${speed}`;
-  badge.dataset.active = progress.active ? 'true' : 'false';
+  badge.dataset.active = progress.active ? "true" : "false";
   badge.dataset.tokenSource = progress.tokenSource;
   badge.dataset.speedSource = progress.speedSource;
-  badge.setAttribute('aria-label', `Accumulated tokens ${tokenText}, token output speed ${speed}`);
-  badge.setAttribute('title', contentT('content.tokenSpeed.title', {
-    tokens: `${tokenText} tok`,
-    speed,
-    idle: progress.active ? '' : contentT('content.tokenSpeed.idleSuffix'),
-    tokenSource: progress.tokenSource === 'server'
-      ? contentT('content.tokenSpeed.sourceServer')
-      : contentT('content.tokenSpeed.sourceEstimated'),
-    speedSource: progress.speedSource === 'server'
-      ? contentT('content.tokenSpeed.sourceServer')
-      : contentT('content.tokenSpeed.sourceEstimated'),
-  }));
+  badge.setAttribute(
+    "aria-label",
+    `Accumulated tokens ${tokenText}, token output speed ${speed}`,
+  );
+  badge.setAttribute(
+    "title",
+    contentT("content.tokenSpeed.title", {
+      tokens: `${tokenText} tok`,
+      speed,
+      idle: progress.active ? "" : contentT("content.tokenSpeed.idleSuffix"),
+      tokenSource:
+        progress.tokenSource === "server"
+          ? contentT("content.tokenSpeed.sourceServer")
+          : contentT("content.tokenSpeed.sourceEstimated"),
+      speedSource:
+        progress.speedSource === "server"
+          ? contentT("content.tokenSpeed.sourceServer")
+          : contentT("content.tokenSpeed.sourceEstimated"),
+    }),
+  );
   return true;
 }
 
 function formatTokenCount(tokens: number): string {
-  const safeTokens = Number.isFinite(tokens) && tokens > 0 ? Math.round(tokens) : 0;
+  const safeTokens =
+    Number.isFinite(tokens) && tokens > 0 ? Math.round(tokens) : 0;
   return new Intl.NumberFormat(currentContentLocale).format(safeTokens);
 }
 
 function formatTokenSpeed(tokensPerSecond: number): string {
-  const safeRate = Number.isFinite(tokensPerSecond) && tokensPerSecond > 0 ? tokensPerSecond : 0;
-  const value = safeRate >= 100 ? String(Math.round(safeRate)) : safeRate.toFixed(1);
+  const safeRate =
+    Number.isFinite(tokensPerSecond) && tokensPerSecond > 0
+      ? tokensPerSecond
+      : 0;
+  const value =
+    safeRate >= 100 ? String(Math.round(safeRate)) : safeRate.toFixed(1);
   return `${value} tok/s`;
 }
 
@@ -5103,16 +5896,19 @@ function stopTokenSpeedIndicatorBootstrap() {
 function scheduleTokenSpeedIndicatorBootstrap() {
   if (tokenSpeedBootstrapTimer) return;
 
-  tokenSpeedBootstrapTimer = setTimeout(() => {
-    tokenSpeedBootstrapTimer = null;
-    const rendered = renderTokenSpeedIndicator(lastTokenSpeedProgress);
-    if (rendered) return;
+  tokenSpeedBootstrapTimer = setTimeout(
+    () => {
+      tokenSpeedBootstrapTimer = null;
+      const rendered = renderTokenSpeedIndicator(lastTokenSpeedProgress);
+      if (rendered) return;
 
-    tokenSpeedBootstrapAttempts += 1;
-    if (tokenSpeedBootstrapAttempts < TOKEN_SPEED_BOOTSTRAP_RETRY_LIMIT) {
-      scheduleTokenSpeedIndicatorBootstrap();
-    }
-  }, tokenSpeedBootstrapAttempts === 0 ? 0 : TOKEN_SPEED_BOOTSTRAP_RETRY_MS);
+      tokenSpeedBootstrapAttempts += 1;
+      if (tokenSpeedBootstrapAttempts < TOKEN_SPEED_BOOTSTRAP_RETRY_LIMIT) {
+        scheduleTokenSpeedIndicatorBootstrap();
+      }
+    },
+    tokenSpeedBootstrapAttempts === 0 ? 0 : TOKEN_SPEED_BOOTSTRAP_RETRY_MS,
+  );
 }
 
 function startTokenSpeedIndicatorMountSubscription(
@@ -5120,17 +5916,22 @@ function startTokenSpeedIndicatorMountSubscription(
   mutationHub: ContentMutationHub,
 ) {
   stopTokenSpeedIndicatorMountSubscription();
-  const root = document.getElementById('root') ?? document.body;
+  const root = document.getElementById("root") ?? document.body;
   if (!root) return;
 
-  scope.addCleanup('cleanup', mutationHub.subscribe({
-    matches: (mutations) => (
-      tokenSpeedCapabilityScope === scope
-      && scope.active
-      && mutations.some((mutation) => mutation.type === 'childList' && mutation.target === root)
-    ),
-    handle: scheduleTokenSpeedIndicatorMountRefresh,
-  }));
+  scope.addCleanup(
+    "cleanup",
+    mutationHub.subscribe({
+      matches: (mutations) =>
+        tokenSpeedCapabilityScope === scope &&
+        scope.active &&
+        mutations.some(
+          (mutation) =>
+            mutation.type === "childList" && mutation.target === root,
+        ),
+      handle: scheduleTokenSpeedIndicatorMountRefresh,
+    }),
+  );
   scheduleTokenSpeedIndicatorMountRefresh();
 }
 
@@ -5197,7 +5998,9 @@ function handleToolBlockRouteChange() {
   const inlineScope = inlineAgentCapabilityScope;
   if (inlineScope) {
     const epoch = ++inlineAgentCapabilityEpoch;
-    observeReportedPersistence(restorePersistedInlineAgentTraces(inlineScope, epoch));
+    observeReportedPersistence(
+      restorePersistedInlineAgentTraces(inlineScope, epoch),
+    );
   }
   scheduleRenderRestoredToolBlocks();
 }
@@ -5205,11 +6008,11 @@ function handleToolBlockRouteChange() {
 function handleContentNavigation(): void {
   if (tokenSpeedCapabilityScope?.active) handleTokenSpeedRouteChange();
   if (toolCapabilityScope?.active) handleToolBlockRouteChange();
-  window.dispatchEvent(new Event('dpp:navigation'));
+  window.dispatchEvent(new Event("dpp:navigation"));
 }
 
 function getTokenSpeedRouteKey(): string {
-  if (typeof location === 'undefined') return '';
+  if (typeof location === "undefined") return "";
   return `${location.pathname}${location.search}`;
 }
 
@@ -5235,25 +6038,31 @@ function ensureTokenSpeedIndicator(): HTMLElement | null {
   const anchorButton = findTokenStatsAnchorButton();
   if (!anchorButton) return null;
 
-  if (tokenSpeedEl && tokenSpeedEl.isConnected && tokenSpeedEl.previousElementSibling === anchorButton) {
+  if (
+    tokenSpeedEl &&
+    tokenSpeedEl.isConnected &&
+    tokenSpeedEl.previousElementSibling === anchorButton
+  ) {
     return tokenSpeedEl;
   }
 
   tokenSpeedEl?.remove();
 
-  const badge = document.createElement('div');
+  const badge = document.createElement("div");
   badge.id = TOKEN_SPEED_BADGE_ID;
-  badge.className = 'dpp-token-speed-badge';
-  badge.setAttribute('role', 'status');
-  badge.setAttribute('aria-live', 'polite');
-  anchorButton.insertAdjacentElement('afterend', badge);
+  badge.className = "dpp-token-speed-badge";
+  badge.setAttribute("role", "status");
+  badge.setAttribute("aria-live", "polite");
+  anchorButton.insertAdjacentElement("afterend", badge);
   tokenSpeedEl = badge;
   return badge;
 }
 
 function findTokenStatsAnchorButton(): HTMLButtonElement | null {
   const sessionId = getCurrentChatSessionId();
-  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(`.${EXPORT_ACTION_CLASS}`))
+  const buttons = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(`.${EXPORT_ACTION_CLASS}`),
+  )
     .filter((button) => {
       if (!isVisibleElement(button)) return false;
       return !sessionId || button.dataset.dppExportSessionId === sessionId;
@@ -5269,7 +6078,7 @@ function findTokenStatsAnchorButton(): HTMLButtonElement | null {
 function injectTokenSpeedStyles() {
   if (document.getElementById(TOKEN_SPEED_STYLE_ID)) return;
 
-  const style = document.createElement('style');
+  const style = document.createElement("style");
   style.id = TOKEN_SPEED_STYLE_ID;
   style.textContent = `
     .dpp-token-speed-badge {
@@ -5309,12 +6118,14 @@ function injectTokenSpeedStyles() {
   document.head.appendChild(style);
 }
 
-
-
-
-function clampText(value: string | undefined, maxLength: number): string | undefined {
+function clampText(
+  value: string | undefined,
+  maxLength: number,
+): string | undefined {
   if (!value) return value;
-  return value.length > maxLength ? value.slice(0, maxLength) + '\n...[truncated]' : value;
+  return value.length > maxLength
+    ? value.slice(0, maxLength) + "\n...[truncated]"
+    : value;
 }
 
 function syncToMainWorld(
@@ -5332,7 +6143,8 @@ function syncToMainWorld(
   currentModelType = modelType;
   currentToolDescriptors = toolDescriptors;
   currentPromptSettings = normalizePromptInjectionSettings(promptSettings);
-  currentSkillAutoActivation = normalizeSkillAutoActivationSettings(skillAutoActivation);
+  currentSkillAutoActivation =
+    normalizeSkillAutoActivationSettings(skillAutoActivation);
   toolOpenTagRe = buildToolOpenTagRegex(toolDescriptors);
   toolMarkerRe = buildToolMarkerRegex(toolDescriptors);
   const fallbackPromptDescriptors = toolDescriptors.filter(
@@ -5340,7 +6152,7 @@ function syncToMainWorld(
   );
 
   postToMainWorld({
-    type: 'SYNC_HOOK_STATE',
+    type: "SYNC_HOOK_STATE",
     // Catalog controls remain available to the content parser, but never
     // become fallback Prompt tools. A request receives them only through its
     // background-produced capability projection.
@@ -5349,16 +6161,16 @@ function syncToMainWorld(
       .filter((skill) => skill.enabled !== false)
       .map((skill) => ({ name: skill.name, description: skill.description })),
     skillPopupCopy: {
-      hint: contentT('content.skillPopup.hint'),
+      hint: contentT("content.skillPopup.hint"),
     },
   });
 }
 
 function decodeRuntimeMemories(value: unknown, path: string): Memory[] {
   if (!Array.isArray(value)) throw new Error(`${path} must be an array`);
-  return value.map((memory, index) => (
-    decodePersistedMemoryRecord(memory, `${path}[${index}]`)
-  ));
+  return value.map((memory, index) =>
+    decodePersistedMemoryRecord(memory, `${path}[${index}]`),
+  );
 }
 
 function syncCurrentRuntimeStateToMainWorld(): void {
@@ -5373,18 +6185,23 @@ function syncCurrentRuntimeStateToMainWorld(): void {
 }
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function decodeToolDescriptors(value: unknown): ToolDescriptor[] {
   if (!Array.isArray(value) || !value.every(isToolDescriptorRecord)) {
-    throw new Error('Runtime tool descriptor catalog does not match the released contract.');
+    throw new Error(
+      "Runtime tool descriptor catalog does not match the released contract.",
+    );
   }
   return value as unknown as ToolDescriptor[];
 }
 
 function reportToolDescriptorSyncFailure(error: unknown): void {
-  console.error('[DeepSeek++] tool descriptor sync failed; tool execution disabled', error);
+  console.error(
+    "[DeepSeek++] tool descriptor sync failed; tool execution disabled",
+    error,
+  );
   syncToMainWorld(
     currentMemories,
     currentSkills,
@@ -5397,18 +6214,18 @@ function reportToolDescriptorSyncFailure(error: unknown): void {
 
 function buildToolOpenTagRegex(descriptors: ToolDescriptor[]): RegExp {
   const pattern = buildToolTagPattern(descriptors);
-  return new RegExp(`<\\s*(${pattern})\\s*>`, 'i');
+  return new RegExp(`<\\s*(${pattern})\\s*>`, "i");
 }
 
 function buildToolMarkerRegex(descriptors: ToolDescriptor[]): RegExp {
   const pattern = buildToolTagPattern(descriptors);
-  return new RegExp(`<\\s*/?\\s*(?:${pattern})\\s*>`, 'i');
+  return new RegExp(`<\\s*/?\\s*(?:${pattern})\\s*>`, "i");
 }
 
 function buildToolTagPattern(descriptors: ToolDescriptor[]): string {
   const catalogNames = createToolInvocationCatalog(descriptors).invocationNames;
   const escaped = [...new Set(catalogNames)].map(escapeRegExp);
-  return escaped.length > 0 ? escaped.join('|') : '(?!)';
+  return escaped.length > 0 ? escaped.join("|") : "(?!)";
 }
 
 function hashString(value: string): string {
@@ -5423,7 +6240,9 @@ function getToolBlockUrl(): string {
   return `${location.origin}${location.pathname}${location.search}`;
 }
 
-function getToolBlockUrlForChatSession(chatSessionId: string | null | undefined): string {
+function getToolBlockUrlForChatSession(
+  chatSessionId: string | null | undefined,
+): string {
   return createToolRestoreBlockUrl({
     origin: location.origin,
     pathname: location.pathname,
@@ -5433,23 +6252,29 @@ function getToolBlockUrlForChatSession(chatSessionId: string | null | undefined)
 }
 
 function normalizeText(value: string | undefined): string {
-  return (value ?? '').replace(/\s+/g, '').trim();
+  return (value ?? "").replace(/\s+/g, "").trim();
 }
 
-function getInlineAgentAnchorContent(complete: ResponseCompletePayload): string {
-  return stripToolCalls(complete.text, { descriptors: currentToolDescriptors }).trim();
+function getInlineAgentAnchorContent(
+  complete: ResponseCompletePayload,
+): string {
+  return stripToolCalls(complete.text, {
+    descriptors: currentToolDescriptors,
+  }).trim();
 }
 
 function createInlineAgentTrace(
   complete: ResponseCompletePayload,
   loopId: string,
-  seedToolCount: number,
+  initialExecutions: ToolExecutionRecord[],
   anchorMessageIndex: number | null,
   anchorContent: string,
 ): InlineAgentTraceRecord {
   const now = Date.now();
   return {
-    id: hashString(`${complete.chatSessionId}\n${complete.assistantMessageId}\n${complete.agentTaskPrompt || complete.originalPrompt}`),
+    id: hashString(
+      `${complete.chatSessionId}\n${complete.assistantMessageId}\n${complete.agentTaskPrompt || complete.originalPrompt}`,
+    ),
     loopId,
     chatSessionId: complete.chatSessionId!,
     anchorMessageId: complete.assistantMessageId!,
@@ -5458,19 +6283,26 @@ function createInlineAgentTrace(
     url: getToolBlockUrlForChatSession(complete.chatSessionId),
     originalPrompt: complete.originalPrompt,
     agentTaskPrompt: complete.agentTaskPrompt,
-    status: 'running',
+    status: "running",
     steps: [],
+    initialExecutions: initialExecutions.map((execution) =>
+      sanitizeToolExecutionForRestoreStorage(execution),
+    ),
     totalSteps: 0,
-    totalTools: seedToolCount,
-    finalText: '',
+    totalTools: initialExecutions.length,
+    finalText: "",
     createdAt: now,
     updatedAt: now,
   };
 }
 
 function getInlineAgentStepText(step: HTMLElement): string {
-  const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
-  return (body?.getAttribute('data-dpp-raw-text') ?? body?.textContent ?? '').trim();
+  const body = step.querySelector<HTMLElement>(".dpp-agent-step-body");
+  return (
+    body?.getAttribute("data-dpp-raw-text") ??
+    body?.textContent ??
+    ""
+  ).trim();
 }
 
 /**
@@ -5482,35 +6314,44 @@ function getInlineAgentStepText(step: HTMLElement): string {
  * would duplicate the deliverable. Distinct step notes (budget-paused runs,
  * legacy summary-split traces) never match (Issue #551 redesign).
  */
-function isInlineAgentStepTextTheFinalAnswer(stepText: string, answerText: string): boolean {
+function isInlineAgentStepTextTheFinalAnswer(
+  stepText: string,
+  answerText: string,
+): boolean {
   if (!stepText || !answerText) return false;
   const normalizedStep = stripInlineAgentTruncationSuffix(stepText);
   const normalizedAnswer = stripInlineAgentTruncationSuffix(answerText);
   if (!normalizedStep || !normalizedAnswer) return false;
-  return normalizedStep === normalizedAnswer || normalizedAnswer.startsWith(normalizedStep);
+  return (
+    normalizedStep === normalizedAnswer ||
+    normalizedAnswer.startsWith(normalizedStep)
+  );
 }
 
 function updateActiveInlineAgentTrace(
   updater: (trace: InlineAgentTraceRecord) => InlineAgentTraceRecord,
-  options: { immediate?: boolean } = {},
-): void {
-  if (!activeInlineAgentTrace) return;
+  options: { immediate?: boolean; persist?: boolean } = {},
+): InlineAgentTraceRecord | null {
+  if (!activeInlineAgentTrace) return null;
 
   activeInlineAgentTrace = {
     ...updater(activeInlineAgentTrace),
     updatedAt: Date.now(),
   };
+  const updated = activeInlineAgentTrace;
 
+  if (options.persist === false) return updated;
   if (options.immediate) {
     if (inlineAgentTraceWriteTimer) {
       clearTimeout(inlineAgentTraceWriteTimer);
       inlineAgentTraceWriteTimer = null;
     }
-    observeReportedPersistence(writeInlineAgentTrace(activeInlineAgentTrace));
-    return;
+    observeReportedPersistence(writeInlineAgentTrace(updated));
+    return updated;
   }
 
-  scheduleInlineAgentTraceWrite(activeInlineAgentTrace);
+  scheduleInlineAgentTraceWrite(updated);
+  return updated;
 }
 
 function upsertInlineAgentTraceStep(
@@ -5533,59 +6374,95 @@ function updateInlineAgentTraceStep(
 ): InlineAgentTraceRecord {
   const current = trace.steps.find((step) => step.index === stepIndex) ?? {
     index: stepIndex,
-    status: 'streaming' as const,
-    text: '',
+    status: "streaming" as const,
+    text: "",
     toolExecutions: [],
     responseMessageId: null,
     collapsed: false,
   };
-  return upsertInlineAgentTraceStep(trace, { ...current, ...patch, index: stepIndex });
+  return upsertInlineAgentTraceStep(trace, {
+    ...current,
+    ...patch,
+    index: stepIndex,
+  });
 }
 
 function scheduleInlineAgentTraceWrite(trace: InlineAgentTraceRecord): void {
   if (inlineAgentTraceWriteTimer) clearTimeout(inlineAgentTraceWriteTimer);
   inlineAgentTraceWriteTimer = setTimeout(() => {
     inlineAgentTraceWriteTimer = null;
-    const latest = activeInlineAgentTrace?.id === trace.id ? activeInlineAgentTrace : trace;
+    const latest =
+      activeInlineAgentTrace?.id === trace.id ? activeInlineAgentTrace : trace;
     observeReportedPersistence(writeInlineAgentTrace(latest));
   }, INLINE_AGENT_TRACE_WRITE_DEBOUNCE_MS);
 }
 
-async function writeInlineAgentTrace(trace: InlineAgentTraceRecord): Promise<void> {
+async function persistInlineAgentTraceImmediately(
+  trace: InlineAgentTraceRecord,
+): Promise<void> {
+  if (inlineAgentTraceWriteTimer) {
+    clearTimeout(inlineAgentTraceWriteTimer);
+    inlineAgentTraceWriteTimer = null;
+  }
+  await writeInlineAgentTrace(trace);
+}
+
+async function writeInlineAgentTrace(
+  trace: InlineAgentTraceRecord,
+): Promise<void> {
   const stored = sanitizeInlineAgentTraceForStorage(trace);
   await contentPersistenceTracker.track(
     pendingInlineAgentPersistenceOperations,
-    'inline-agent trace write',
+    "inline-agent trace write",
     upsertPersistedInlineAgentTrace(stored),
   );
-  if (inlineAgentCapabilityScope?.active) restoredInlineAgentTraces.set(stored.id, stored);
+  if (inlineAgentCapabilityScope?.active)
+    restoredInlineAgentTraces.set(stored.id, stored);
 }
 
-async function getPersistedInlineAgentTraces(): Promise<InlineAgentTraceRecord[]> {
+async function getPersistedInlineAgentTraces(): Promise<
+  InlineAgentTraceRecord[]
+> {
   return contentPersistenceTracker.track(
     pendingInlineAgentPersistenceOperations,
-    'inline-agent trace read',
+    "inline-agent trace read",
     readPersistedInlineAgentTraces(),
   );
 }
 
-function sanitizeInlineAgentTraceForStorage(trace: InlineAgentTraceRecord): InlineAgentTraceRecord {
+function sanitizeInlineAgentTraceForStorage(
+  trace: InlineAgentTraceRecord,
+): InlineAgentTraceRecord {
   return {
     ...trace,
-    originalPrompt: clampText(trace.originalPrompt, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '',
-    agentTaskPrompt: clampText(trace.agentTaskPrompt, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '',
-    anchorContent: clampText(trace.anchorContent, INLINE_AGENT_STEP_RENDER_MAX_CHARS),
-    finalText: clampText(trace.finalText, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? '',
+    originalPrompt:
+      clampText(trace.originalPrompt, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? "",
+    agentTaskPrompt:
+      clampText(trace.agentTaskPrompt, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ??
+      "",
+    anchorContent: clampText(
+      trace.anchorContent,
+      INLINE_AGENT_STEP_RENDER_MAX_CHARS,
+    ),
+    finalText:
+      clampText(trace.finalText, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? "",
     error: clampText(trace.error, 2000),
+    initialExecutions: trace.initialExecutions?.map((execution) =>
+      sanitizeToolExecutionForRestoreStorage(execution),
+    ),
     steps: trace.steps.map(sanitizeInlineAgentTraceStep),
   };
 }
 
-function sanitizeInlineAgentTraceStep(step: InlineAgentTraceStepRecord): InlineAgentTraceStepRecord {
+function sanitizeInlineAgentTraceStep(
+  step: InlineAgentTraceStepRecord,
+): InlineAgentTraceStepRecord {
   return {
     ...step,
-    text: clampText(step.text, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '',
-    toolExecutions: step.toolExecutions.map((execution) => sanitizeToolExecutionForRestoreStorage(execution)),
+    text: clampText(step.text, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? "",
+    toolExecutions: step.toolExecutions.map((execution) =>
+      sanitizeToolExecutionForRestoreStorage(execution),
+    ),
   };
 }
 
@@ -5599,8 +6476,15 @@ async function restorePersistedInlineAgentTraces(
   let changed = false;
 
   for (const trace of traces) {
-    if (!shouldTryRestoreInlineAgentTrace(trace, url) || restoredInlineAgentTraces.has(trace.id)) continue;
-    restoredInlineAgentTraces.set(trace.id, normalizeRestoredInlineAgentTrace(trace));
+    if (
+      !shouldTryRestoreInlineAgentTrace(trace, url) ||
+      restoredInlineAgentTraces.has(trace.id)
+    )
+      continue;
+    restoredInlineAgentTraces.set(
+      trace.id,
+      normalizeRestoredInlineAgentTrace(trace),
+    );
     pendingRestoredInlineAgentTraceIds.add(trace.id);
     changed = true;
   }
@@ -5608,44 +6492,60 @@ async function restorePersistedInlineAgentTraces(
   if (changed) scheduleRenderRestoredInlineAgentTraces();
 }
 
-function normalizeRestoredInlineAgentTrace(trace: InlineAgentTraceRecord): InlineAgentTraceRecord {
-  const wasInterrupted = trace.status === 'running';
-  const finalText = typeof trace.finalText === 'string' ? trace.finalText : '';
+function normalizeRestoredInlineAgentTrace(
+  trace: InlineAgentTraceRecord,
+): InlineAgentTraceRecord {
+  const wasInterrupted = trace.status === "running";
+  const finalText = typeof trace.finalText === "string" ? trace.finalText : "";
   return {
     ...trace,
-    status: wasInterrupted ? 'stopping' : trace.status,
-    error: wasInterrupted ? contentT('content.agent.stopped') : trace.error,
-    finalText: clampText(finalText, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? '',
+    status: wasInterrupted ? "stopping" : trace.status,
+    error: wasInterrupted ? contentT("content.agent.stopped") : trace.error,
+    finalText: clampText(finalText, INLINE_AGENT_FINAL_RENDER_MAX_CHARS) ?? "",
     steps: trace.steps.map((step) => ({
       ...step,
-      status: wasInterrupted && step.status === 'streaming' ? 'error' : step.status,
+      status:
+        wasInterrupted && step.status === "streaming" ? "error" : step.status,
       collapsed: true,
-      text: clampText(step.text, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '',
-      toolExecutions: step.toolExecutions.map((execution) => normalizeRestoredToolExecution(execution)),
+      text: clampText(step.text, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? "",
+      toolExecutions: step.toolExecutions.map((execution) =>
+        normalizeRestoredToolExecution(execution),
+      ),
     })),
   };
 }
 
-function shouldTryRestoreInlineAgentTrace(trace: InlineAgentTraceRecord, currentUrl: string): boolean {
-  if (trace.chatSessionId) return getCurrentChatSessionId() === trace.chatSessionId;
+function shouldTryRestoreInlineAgentTrace(
+  trace: InlineAgentTraceRecord,
+  currentUrl: string,
+): boolean {
+  if (trace.chatSessionId)
+    return getCurrentChatSessionId() === trace.chatSessionId;
   return trace.url === currentUrl;
 }
 
 async function getPersistedToolBlocks(): Promise<PersistedToolBlock[]> {
   return contentPersistenceTracker.track(
     pendingToolPersistenceOperations,
-    'tool execution block read',
+    "tool execution block read",
     readPersistedToolExecutionBlocks(),
   );
 }
 
-function getOrCreateActiveToolBlockSession(call: ToolCall): ActiveToolBlockSession {
+function getOrCreateActiveToolBlockSession(
+  call: ToolCall,
+): ActiveToolBlockSession {
   const chatSessionId = call.source?.chatSessionId ?? null;
   const parentMessageId = call.source?.parentMessageId ?? null;
   const requestId = call.source?.requestId ?? null;
   if (!requestId && !chatSessionId) {
     const activeSession = getActiveToolBlockSession();
-    if (activeSession && !activeSession.requestId && !activeSession.chatSessionId && isToolBlockSessionOnCurrentRoute(activeSession)) {
+    if (
+      activeSession &&
+      !activeSession.requestId &&
+      !activeSession.chatSessionId &&
+      isToolBlockSessionOnCurrentRoute(activeSession)
+    ) {
       return activeSession;
     }
   }
@@ -5669,7 +6569,7 @@ function getOrCreateActiveToolBlockSession(call: ToolCall): ActiveToolBlockSessi
     chatSessionId,
     requestId,
     parentMessageId,
-    content: '',
+    content: "",
     executions: [],
     createdAt: now,
     updatedAt: now,
@@ -5678,7 +6578,9 @@ function getOrCreateActiveToolBlockSession(call: ToolCall): ActiveToolBlockSessi
   return session;
 }
 
-function getActiveToolBlockSessionForComplete(complete: ResponseCompletePayload): ActiveToolBlockSession | null {
+function getActiveToolBlockSessionForComplete(
+  complete: ResponseCompletePayload,
+): ActiveToolBlockSession | null {
   const chatSessionId = complete.chatSessionId;
   const url = getToolBlockUrlForChatSession(chatSessionId);
   const id = createToolRestoreBlockId({
@@ -5689,8 +6591,12 @@ function getActiveToolBlockSessionForComplete(complete: ResponseCompletePayload)
     fallbackSeed: complete.agentTaskPrompt || complete.originalPrompt,
   });
 
-  return activeToolBlockSessions.get(id) ??
-    (activeToolBlockSessionId ? activeToolBlockSessions.get(activeToolBlockSessionId) ?? null : null);
+  return (
+    activeToolBlockSessions.get(id) ??
+    (activeToolBlockSessionId
+      ? (activeToolBlockSessions.get(activeToolBlockSessionId) ?? null)
+      : null)
+  );
 }
 
 function getCurrentRouteActiveToolBlockSession(): ActiveToolBlockSession | null {
@@ -5701,34 +6607,51 @@ function getCurrentRouteActiveToolBlockSession(): ActiveToolBlockSession | null 
 }
 
 function getActiveToolBlockSession(): ActiveToolBlockSession | null {
-  return activeToolBlockSessionId ? activeToolBlockSessions.get(activeToolBlockSessionId) ?? null : null;
+  return activeToolBlockSessionId
+    ? (activeToolBlockSessions.get(activeToolBlockSessionId) ?? null)
+    : null;
 }
 
-async function persistToolBlockSession(session: ActiveToolBlockSession, fullText?: string, complete?: ResponseCompletePayload) {
+async function persistToolBlockSession(
+  session: ActiveToolBlockSession,
+  fullText?: string,
+  complete?: ResponseCompletePayload,
+) {
   if (session.executions.length === 0) return;
 
-  const content = fullText ? stripToolCalls(fullText, { descriptors: currentToolDescriptors }) : '';
+  const content = fullText
+    ? stripToolCalls(fullText, { descriptors: currentToolDescriptors })
+    : "";
   session.content = content || session.content;
   session.updatedAt = Date.now();
-  const replayChatSessionId = session.chatSessionId ?? getCurrentChatSessionId();
-  const regenerateScope = replayChatSessionId && complete?.assistantMessageId != null
-    ? regenerateAuthorizationScopes.resolve(replayChatSessionId, complete.assistantMessageId)
-    : null;
+  const replayChatSessionId =
+    session.chatSessionId ?? getCurrentChatSessionId();
+  const regenerateScope =
+    replayChatSessionId && complete?.assistantMessageId != null
+      ? regenerateAuthorizationScopes.resolve(
+          replayChatSessionId,
+          complete.assistantMessageId,
+        )
+      : null;
 
   const block: PersistedToolBlock = {
     id: session.id,
-    source: 'storage',
+    source: "storage",
     url: session.url,
     createdAt: session.createdAt,
     content: session.content,
-    executions: session.executions.map((execution) => sanitizeToolExecutionForRestoreStorage(execution)),
+    executions: session.executions.map((execution) =>
+      sanitizeToolExecutionForRestoreStorage(execution),
+    ),
     metadata: {
-      requestId: session.requestId ?? '',
-      chatSessionId: session.chatSessionId ?? '',
+      requestId: session.requestId ?? "",
+      chatSessionId: session.chatSessionId ?? "",
       parentMessageId: session.parentMessageId ?? null,
       assistantMessageId: complete?.assistantMessageId ?? null,
       toolCount: session.executions.length,
-      mcpToolCount: session.executions.filter((execution) => execution.provider?.kind === 'mcp').length,
+      mcpToolCount: session.executions.filter(
+        (execution) => execution.provider?.kind === "mcp",
+      ).length,
       updatedAt: session.updatedAt,
       ...(regenerateScope
         ? {
@@ -5741,7 +6664,7 @@ async function persistToolBlockSession(session: ActiveToolBlockSession, fullText
 
   await contentPersistenceTracker.track(
     pendingToolPersistenceOperations,
-    'tool execution block write',
+    "tool execution block write",
     upsertPersistedToolExecutionBlock(block),
   );
   if (toolCapabilityScope?.active) {
@@ -5761,11 +6684,14 @@ async function restorePersistedToolBlocks(
   rememberRestoredToolRecords(
     blocks
       .filter((block) => shouldTryRestoreToolBlock(block, url))
-      .map((block) => ({ ...block, source: 'storage' as const })),
+      .map((block) => ({ ...block, source: "storage" as const })),
   );
 }
 
-function shouldTryRestoreToolBlock(block: PersistedToolBlock, currentUrl: string): boolean {
+function shouldTryRestoreToolBlock(
+  block: PersistedToolBlock,
+  currentUrl: string,
+): boolean {
   const chatSessionId = getToolRecordChatSessionId(block);
   if (chatSessionId) return getCurrentChatSessionId() === chatSessionId;
   if (isToolRecordOnCurrentRoute(block, currentUrl)) return true;
@@ -5777,31 +6703,45 @@ function shouldTryRestoreToolBlock(block: PersistedToolBlock, currentUrl: string
   }
 }
 
-function isToolRecordOnCurrentRoute(record: ToolCallRestoreRecord, currentUrl = getToolBlockUrl()): boolean {
+function isToolRecordOnCurrentRoute(
+  record: ToolCallRestoreRecord,
+  currentUrl = getToolBlockUrl(),
+): boolean {
   const chatSessionId = getToolRecordChatSessionId(record);
   if (chatSessionId) return getCurrentChatSessionId() === chatSessionId;
   return record.url === currentUrl;
 }
 
-function getToolRecordChatSessionId(record: ToolCallRestoreRecord): string | null {
+function getToolRecordChatSessionId(
+  record: ToolCallRestoreRecord,
+): string | null {
   const metadataSessionId = record.metadata?.chatSessionId;
-  if (typeof metadataSessionId === 'string' && metadataSessionId) return metadataSessionId;
+  if (typeof metadataSessionId === "string" && metadataSessionId)
+    return metadataSessionId;
   if (!record.url) return null;
   return getChatSessionIdFromUrl(record.url);
 }
 
-function getToolRecordAssistantMessageId(record: ToolCallRestoreRecord): string | null {
-  return firstMetadataId(record.metadata?.assistantMessageId, record.metadata?.messageId);
+function getToolRecordAssistantMessageId(
+  record: ToolCallRestoreRecord,
+): string | null {
+  return firstMetadataId(
+    record.metadata?.assistantMessageId,
+    record.metadata?.messageId,
+  );
 }
 
-function getToolRecordParentMessageId(record: ToolCallRestoreRecord): string | null {
+function getToolRecordParentMessageId(
+  record: ToolCallRestoreRecord,
+): string | null {
   return firstMetadataId(record.metadata?.parentMessageId);
 }
 
 function firstMetadataId(...values: unknown[]): string | null {
   for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value))
+      return String(value);
+    if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
 }
@@ -5817,7 +6757,9 @@ function getChatSessionIdFromUrl(url: string): string | null {
   }
 }
 
-function rememberRestoredToolRecords(records: ToolCallRestoreRecord[] | undefined) {
+function rememberRestoredToolRecords(
+  records: ToolCallRestoreRecord[] | undefined,
+) {
   if (!records || records.length === 0) return;
 
   let changed = false;
@@ -5827,7 +6769,10 @@ function rememberRestoredToolRecords(records: ToolCallRestoreRecord[] | undefine
     const compatibleId = findCompatibleRestoredToolRecordId(record);
     if (compatibleId) {
       const existing = restoredToolRecords.get(compatibleId)!;
-      restoredToolRecords.set(compatibleId, mergeToolRestoreRecords(existing, record));
+      restoredToolRecords.set(
+        compatibleId,
+        mergeToolRestoreRecords(existing, record),
+      );
       pendingRestoredToolRecordIds.add(compatibleId);
       changed = true;
       continue;
@@ -5845,28 +6790,42 @@ function rememberRestoredToolRecords(records: ToolCallRestoreRecord[] | undefine
   }
 }
 
-function findCompatibleRestoredToolRecordId(record: ToolCallRestoreRecord): string | null {
+function findCompatibleRestoredToolRecordId(
+  record: ToolCallRestoreRecord,
+): string | null {
   for (const [id, existing] of restoredToolRecords) {
     if (isCompatibleToolRestoreRecord(existing, record)) return id;
   }
   return null;
 }
 
-function isCompatibleToolRestoreRecord(a: ToolCallRestoreRecord, b: ToolCallRestoreRecord): boolean {
+function isCompatibleToolRestoreRecord(
+  a: ToolCallRestoreRecord,
+  b: ToolCallRestoreRecord,
+): boolean {
   const aMessageId = getToolRecordAssistantMessageId(a);
   const bMessageId = getToolRecordAssistantMessageId(b);
   if (aMessageId && bMessageId && aMessageId === bMessageId) return true;
 
   const aParentId = getToolRecordParentMessageId(a);
   const bParentId = getToolRecordParentMessageId(b);
-  if (aParentId && bParentId && aParentId === bParentId && haveMatchingToolSignatures(a, b)) return true;
+  if (
+    aParentId &&
+    bParentId &&
+    aParentId === bParentId &&
+    haveMatchingToolSignatures(a, b)
+  )
+    return true;
 
   const aContent = normalizeText(a.content);
   const bContent = normalizeText(b.content);
-  return aContent.length >= 12 &&
+  return (
+    aContent.length >= 12 &&
     bContent.length >= 12 &&
-    (aContent.includes(bContent.slice(0, 80)) || bContent.includes(aContent.slice(0, 80))) &&
-    haveMatchingToolSignatures(a, b);
+    (aContent.includes(bContent.slice(0, 80)) ||
+      bContent.includes(aContent.slice(0, 80))) &&
+    haveMatchingToolSignatures(a, b)
+  );
 }
 
 function mergeToolRestoreRecords(
@@ -5877,10 +6836,15 @@ function mergeToolRestoreRecords(
     ...existing,
     ...incoming,
     id: existing.id,
-    source: existing.source === 'storage' || incoming.source === 'storage' ? 'storage' : existing.source ?? incoming.source,
+    source:
+      existing.source === "storage" || incoming.source === "storage"
+        ? "storage"
+        : (existing.source ?? incoming.source),
     content: preferNonEmptyText(incoming.content, existing.content),
     calls: incoming.calls?.length ? incoming.calls : existing.calls,
-    executions: incoming.executions?.length ? incoming.executions : existing.executions,
+    executions: incoming.executions?.length
+      ? incoming.executions
+      : existing.executions,
     metadata: {
       ...(existing.metadata ?? {}),
       ...(incoming.metadata ?? {}),
@@ -5888,11 +6852,17 @@ function mergeToolRestoreRecords(
   };
 }
 
-function preferNonEmptyText(primary: string | undefined, fallback: string | undefined): string | undefined {
+function preferNonEmptyText(
+  primary: string | undefined,
+  fallback: string | undefined,
+): string | undefined {
   return primary && normalizeText(primary).length > 0 ? primary : fallback;
 }
 
-function haveMatchingToolSignatures(a: ToolCallRestoreRecord, b: ToolCallRestoreRecord): boolean {
+function haveMatchingToolSignatures(
+  a: ToolCallRestoreRecord,
+  b: ToolCallRestoreRecord,
+): boolean {
   const aSignature = getToolRecordSignature(a);
   const bSignature = getToolRecordSignature(b);
   if (!aSignature || !bSignature) return false;
@@ -5902,40 +6872,52 @@ function haveMatchingToolSignatures(a: ToolCallRestoreRecord, b: ToolCallRestore
 function getToolRecordSignature(record: ToolCallRestoreRecord): string | null {
   const calls = record.calls;
   if (calls?.length) {
-    return calls.map((call) => `${call.provider?.id ?? ''}:${call.name}:${JSON.stringify(call.payload)}`).join('|');
+    return calls
+      .map(
+        (call) =>
+          `${call.provider?.id ?? ""}:${call.name}:${JSON.stringify(call.payload)}`,
+      )
+      .join("|");
   }
   const executions = record.executions;
   if (executions?.length) {
-    return executions.map((execution) => `${execution.provider?.id ?? ''}:${execution.name}`).join('|');
+    return executions
+      .map((execution) => `${execution.provider?.id ?? ""}:${execution.name}`)
+      .join("|");
   }
   return null;
 }
 
-async function appendExternalToolPayloadChunk(chunk: ToolCallPayloadChunk): Promise<void> {
+async function appendExternalToolPayloadChunk(
+  chunk: ToolCallPayloadChunk,
+): Promise<void> {
   const authorization = chunk.requestId
     ? getToolAuthorizationForCall({
-      name: 'external_payload',
-      payload: {},
-      raw: '',
-      source: { trigger: 'manual_chat', requestId: chunk.requestId },
-    })
+        name: "external_payload",
+        payload: {},
+        raw: "",
+        source: { trigger: "manual_chat", requestId: chunk.requestId },
+      })
     : undefined;
   if (!authorization) {
-    throw new Error('Externalized tool payload has no active authorization context.');
+    throw new Error(
+      "Externalized tool payload has no active authorization context.",
+    );
   }
   const pendingKey = `${authorization.id}:${chunk.id}`;
-  const previous = pendingExternalToolPayloadWrites.get(pendingKey) ?? Promise.resolve();
+  const previous =
+    pendingExternalToolPayloadWrites.get(pendingKey) ?? Promise.resolve();
   const next = chainExternalizedPayloadWrite(previous, async () => {
-      await sendRuntimeMessageStrict({
-        type: 'APPEND_EXTERNAL_TOOL_PAYLOAD_CHUNK',
-        payload: {
-          authorizationId: authorization.id,
-          callId: chunk.id,
-          invocationName: chunk.invocationName,
-          chunk: chunk.chunk,
-        },
-      });
+    await sendRuntimeMessageStrict({
+      type: "APPEND_EXTERNAL_TOOL_PAYLOAD_CHUNK",
+      payload: {
+        authorizationId: authorization.id,
+        callId: chunk.id,
+        invocationName: chunk.invocationName,
+        chunk: chunk.chunk,
+      },
     });
+  });
   pendingExternalToolPayloadWrites.set(pendingKey, next);
   await next;
 }
@@ -5960,7 +6942,7 @@ async function executeToolCall(
   if (call.parseError) {
     return {
       ok: false,
-      summary: contentT('tool.runtime.invalidFormat'),
+      summary: contentT("tool.runtime.invalidFormat"),
       detail: call.parseError.message,
       error: call.parseError,
     };
@@ -5968,10 +6950,14 @@ async function executeToolCall(
 
   const grant = getToolAuthorizationForCall(call);
   const authorization = authorizationId ?? grant?.id;
-  const executionCall = await bindNewChatToolCallToBrowserSession(call, grant?.chatSessionId, {
-    readChatSessionId: getCurrentChatSessionId,
-    signal: toolCapabilityScope?.signal,
-  });
+  const executionCall = await bindNewChatToolCallToBrowserSession(
+    call,
+    grant?.chatSessionId,
+    {
+      readChatSessionId: getCurrentChatSessionId,
+      signal: toolCapabilityScope?.signal,
+    },
+  );
   if (!executionCall) return createUnboundToolSessionResult(call);
 
   const result = await sendRuntimeToolCallMessage(executionCall, authorization);
@@ -5980,9 +6966,13 @@ async function executeToolCall(
   if (normalized) {
     if (shouldRequestWebFetchPermission(executionCall, normalized)) {
       const url = executionCall.payload?.url;
-      const granted = typeof url === 'string' ? await requestWebFetchPermission(url) : false;
+      const granted =
+        typeof url === "string" ? await requestWebFetchPermission(url) : false;
       if (granted) {
-        const retryResult = await sendRuntimeToolCallMessage(executionCall, authorization);
+        const retryResult = await sendRuntimeToolCallMessage(
+          executionCall,
+          authorization,
+        );
         const retryNormalized = normalizeRuntimeToolCallResult(retryResult);
         if (retryNormalized) return retryNormalized;
       }
@@ -5993,24 +6983,24 @@ async function executeToolCall(
   if (!extensionContextValid) {
     return {
       ok: false,
-      summary: contentT('content.toolBlock.summaries.failed'),
-      detail: contentT('content.extensionReloaded'),
+      summary: contentT("content.toolBlock.summaries.failed"),
+      detail: contentT("content.extensionReloaded"),
     };
   }
   return createInvalidRuntimeToolResult(executionCall, result);
 }
 
 function createUnboundToolSessionResult(call: ToolCall): ToolCardResult {
-  const detail = contentT('tool.runtime.sessionBindingUnavailable');
+  const detail = contentT("tool.runtime.sessionBindingUnavailable");
   return {
     ok: false,
     name: call.name,
     provider: call.provider,
     descriptorId: call.descriptorId,
-    summary: contentT('tool.runtime.authorizationRejected'),
+    summary: contentT("tool.runtime.authorizationRejected"),
     detail,
     error: {
-      code: 'tool_session_unavailable',
+      code: "tool_session_unavailable",
       message: detail,
       retryable: true,
     },
@@ -6025,7 +7015,7 @@ async function sendRuntimeToolCallMessage(
 
   try {
     return await chrome.runtime.sendMessage({
-      type: 'EXECUTE_TOOL_CALL',
+      type: "EXECUTE_TOOL_CALL",
       payload: { ...call, authorizationId },
     });
   } catch (error) {
@@ -6036,10 +7026,10 @@ async function sendRuntimeToolCallMessage(
     const detail = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
-      summary: contentT('content.toolBlock.summaries.messageFailed'),
+      summary: contentT("content.toolBlock.summaries.messageFailed"),
       detail,
       error: {
-        code: 'runtime_message_failed',
+        code: "runtime_message_failed",
         message: detail,
         retryable: true,
       },
@@ -6048,12 +7038,18 @@ async function sendRuntimeToolCallMessage(
 }
 
 function normalizeRuntimeToolCallResult(value: unknown): ToolCardResult | null {
-  if (!value || typeof value !== 'object') return null;
+  if (!value || typeof value !== "object") return null;
   const result = value as Partial<ToolCardResult>;
-  if (typeof result.ok !== 'boolean' || typeof result.summary !== 'string') return null;
-  if (result.name !== undefined && typeof result.name !== 'string') return null;
-  if (result.descriptorId !== undefined && typeof result.descriptorId !== 'string') return null;
-  if (result.provider !== undefined && !isToolProviderIdentity(result.provider)) return null;
+  if (typeof result.ok !== "boolean" || typeof result.summary !== "string")
+    return null;
+  if (result.name !== undefined && typeof result.name !== "string") return null;
+  if (
+    result.descriptorId !== undefined &&
+    typeof result.descriptorId !== "string"
+  )
+    return null;
+  if (result.provider !== undefined && !isToolProviderIdentity(result.provider))
+    return null;
   return {
     ok: result.ok,
     name: result.name,
@@ -6067,19 +7063,26 @@ function normalizeRuntimeToolCallResult(value: unknown): ToolCardResult | null {
   };
 }
 
-function createInvalidRuntimeToolResult(call: ToolCall, value: unknown): ToolCardResult {
+function createInvalidRuntimeToolResult(
+  call: ToolCall,
+  value: unknown,
+): ToolCardResult {
   const missing = value === undefined || value === null;
   const message = missing
-    ? 'Background did not return a tool result.'
+    ? "Background did not return a tool result."
     : `Background returned an invalid tool result: ${previewUnknown(value)}`;
   return {
     ok: false,
-    summary: contentT('content.toolBlock.summaries.backgroundFailed'),
+    summary: contentT("content.toolBlock.summaries.backgroundFailed"),
     detail: missing
       ? getMissingToolResultDetail(call)
-      : contentT('content.toolBlock.invalidResultDetail', { preview: previewUnknown(value) }),
+      : contentT("content.toolBlock.invalidResultDetail", {
+          preview: previewUnknown(value),
+        }),
     error: {
-      code: missing ? 'runtime_tool_result_missing' : 'runtime_tool_result_invalid',
+      code: missing
+        ? "runtime_tool_result_missing"
+        : "runtime_tool_result_invalid",
       message,
       retryable: true,
     },
@@ -6088,23 +7091,27 @@ function createInvalidRuntimeToolResult(call: ToolCall, value: unknown): ToolCar
 
 function getMissingToolResultDetail(call: ToolCall): string {
   if (isSandboxRuntimeToolCall(call)) {
-    return contentT('content.toolBlock.missingSandboxResultDetail');
+    return contentT("content.toolBlock.missingSandboxResultDetail");
   }
   if (isMcpRuntimeToolCall(call)) {
-    return contentT('content.toolBlock.missingMcpResultDetail');
+    return contentT("content.toolBlock.missingMcpResultDetail");
   }
-  return contentT('content.toolBlock.missingResultDetail');
+  return contentT("content.toolBlock.missingResultDetail");
 }
 
 function isSandboxRuntimeToolCall(call: ToolCall): boolean {
-  return call.name === 'sandbox_run' ||
-    call.provider?.id === 'sandbox' ||
-    call.descriptorId?.startsWith('local:sandbox:') === true;
+  return (
+    call.name === "sandbox_run" ||
+    call.provider?.id === "sandbox" ||
+    call.descriptorId?.startsWith("local:sandbox:") === true
+  );
 }
 
 function isMcpRuntimeToolCall(call: ToolCall): boolean {
-  return call.provider?.kind === 'mcp' ||
-    call.descriptorId?.startsWith('mcp:') === true;
+  return (
+    call.provider?.kind === "mcp" ||
+    call.descriptorId?.startsWith("mcp:") === true
+  );
 }
 
 function previewUnknown(value: unknown): string {
@@ -6120,8 +7127,8 @@ function previewUnknown(value: unknown): string {
 
 // --- Auto permission request for web_fetch ---
 
-const PERMISSION_BANNER_ID = 'dpp-permission-banner';
-const PERMISSION_BANNER_STYLE_ID = 'dpp-permission-banner-css';
+const PERMISSION_BANNER_ID = "dpp-permission-banner";
+const PERMISSION_BANNER_STYLE_ID = "dpp-permission-banner-css";
 const PERMISSION_BANNER_TIMEOUT_MS = 60_000;
 
 interface ActivePermissionRequest {
@@ -6146,11 +7153,19 @@ async function requestWebFetchPermission(url: string): Promise<boolean> {
 
   try {
     const granted = await new Promise<boolean>((resolve) => {
-      const session: ActivePermissionRequest = { banner, resolve, timeoutId: null };
+      const session: ActivePermissionRequest = {
+        banner,
+        resolve,
+        timeoutId: null,
+      };
       activePermissionRequest = session;
 
-      const grantBtn = banner.querySelector<HTMLButtonElement>('.dpp-permission-grant');
-      const denyBtn = banner.querySelector<HTMLButtonElement>('.dpp-permission-deny');
+      const grantBtn = banner.querySelector<HTMLButtonElement>(
+        ".dpp-permission-grant",
+      );
+      const denyBtn = banner.querySelector<HTMLButtonElement>(
+        ".dpp-permission-deny",
+      );
       if (!grantBtn || !denyBtn) {
         finishPermissionRequest(session, false);
         return;
@@ -6159,20 +7174,27 @@ async function requestWebFetchPermission(url: string): Promise<boolean> {
       const cleanup = (result: boolean) => {
         finishPermissionRequest(session, result);
       };
-      session.timeoutId = setTimeout(() => cleanup(false), PERMISSION_BANNER_TIMEOUT_MS);
+      session.timeoutId = setTimeout(
+        () => cleanup(false),
+        PERMISSION_BANNER_TIMEOUT_MS,
+      );
 
-      grantBtn.addEventListener('click', async () => {
-        grantBtn.textContent = contentT('content.permission.requesting');
-        grantBtn.disabled = true;
-        denyBtn.disabled = true;
-        const permResult = await sendRuntimeMessage<{ ok: boolean }>({
-          type: 'REQUEST_HOST_PERMISSION',
-          payload: { origins: [`${origin}/*`] },
-        });
-        cleanup(permResult?.ok === true);
-      }, { once: true });
+      grantBtn.addEventListener(
+        "click",
+        async () => {
+          grantBtn.textContent = contentT("content.permission.requesting");
+          grantBtn.disabled = true;
+          denyBtn.disabled = true;
+          const permResult = await sendRuntimeMessage<{ ok: boolean }>({
+            type: "REQUEST_HOST_PERMISSION",
+            payload: { origins: [`${origin}/*`] },
+          });
+          cleanup(permResult?.ok === true);
+        },
+        { once: true },
+      );
 
-      denyBtn.addEventListener('click', () => cleanup(false), { once: true });
+      denyBtn.addEventListener("click", () => cleanup(false), { once: true });
     });
 
     return granted;
@@ -6186,7 +7208,10 @@ function finishActivePermissionRequest(granted: boolean): void {
   finishPermissionRequest(activePermissionRequest, granted);
 }
 
-function finishPermissionRequest(session: ActivePermissionRequest, granted: boolean): void {
+function finishPermissionRequest(
+  session: ActivePermissionRequest,
+  granted: boolean,
+): void {
   if (activePermissionRequest !== session) return;
   activePermissionRequest = null;
   if (session.timeoutId) {
@@ -6206,16 +7231,19 @@ function createPermissionBanner(origin: string): HTMLElement | null {
     existing.remove();
   }
 
-  const banner = document.createElement('div');
+  const banner = document.createElement("div");
   banner.id = PERMISSION_BANNER_ID;
-  banner.className = 'dpp-permission-banner';
+  banner.className = "dpp-permission-banner";
   banner.innerHTML = `
-    <span class="dpp-permission-text">${contentT('content.permission.webFetch', {
-      origin: `<strong>${escapeHtml(origin)}</strong>`,
-    })}</span>
+    <span class="dpp-permission-text">${contentT(
+      "content.permission.webFetch",
+      {
+        origin: `<strong>${escapeHtml(origin)}</strong>`,
+      },
+    )}</span>
     <div class="dpp-permission-actions">
-      <button type="button" class="dpp-permission-deny">${contentT('content.permission.deny')}</button>
-      <button type="button" class="dpp-permission-grant">${contentT('content.permission.grant')}</button>
+      <button type="button" class="dpp-permission-deny">${contentT("content.permission.deny")}</button>
+      <button type="button" class="dpp-permission-grant">${contentT("content.permission.grant")}</button>
     </div>
   `;
 
@@ -6229,7 +7257,7 @@ function injectPermissionBannerStyles() {
   injectInjectedThemeStyles();
   if (document.getElementById(PERMISSION_BANNER_STYLE_ID)) return;
 
-  const style = document.createElement('style');
+  const style = document.createElement("style");
   style.id = PERMISSION_BANNER_STYLE_ID;
   style.textContent = `
     .dpp-permission-banner {
@@ -6312,7 +7340,7 @@ function injectPermissionBannerStyles() {
 }
 
 function escapeHtml(text: string): string {
-  const div = document.createElement('div');
+  const div = document.createElement("div");
   div.appendChild(document.createTextNode(text));
   return div.innerHTML;
 }
@@ -6322,16 +7350,11 @@ function escapeHtml(text: string): string {
 function injectToolBlockStyles() {
   injectInjectedThemeStyles();
   if (document.getElementById(TOOL_BLOCK_STYLE_ID)) return;
-  const style = document.createElement('style');
+  const style = document.createElement("style");
   style.id = TOOL_BLOCK_STYLE_ID;
   style.textContent = `
     .dpp-tool-block {
       margin-top: 8px;
-    }
-    .dpp-tool-block:has(~ .dpp-agent-container) {
-      margin-left: 16px;
-      padding-left: 16px;
-      border-left: 1px solid var(--dpp-ui-border);
     }
     .dpp-artifact-results {
       margin-top: 10px;
@@ -6470,12 +7493,17 @@ function injectToolBlockStyles() {
   document.head.appendChild(style);
 }
 
-function createToolBlockShell(options?: { id?: string; restoreId?: string; collapsed?: boolean }): HTMLElement {
-  const block = document.createElement('div');
+function createToolBlockShell(options?: {
+  id?: string;
+  restoreId?: string;
+  collapsed?: boolean;
+}): HTMLElement {
+  const block = document.createElement("div");
   if (options?.id) block.id = options.id;
-  if (options?.restoreId) block.setAttribute('data-dpp-tool-key', options.restoreId);
-  block.className = 'dpp-tool-block';
-  block.setAttribute('data-collapsed', options?.collapsed ? 'true' : 'false');
+  if (options?.restoreId)
+    block.setAttribute("data-dpp-tool-key", options.restoreId);
+  block.className = "dpp-tool-block";
+  block.setAttribute("data-collapsed", options?.collapsed ? "true" : "false");
   block.innerHTML = `
     <div class="dpp-tool-block-header">
       <svg class="dpp-tool-block-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
@@ -6485,51 +7513,56 @@ function createToolBlockShell(options?: { id?: string; restoreId?: string; colla
     <div class="dpp-tool-block-body"></div>
   `;
 
-  block.querySelector('.dpp-tool-block-header')!.addEventListener('click', () => {
-    const collapsed = block.getAttribute('data-collapsed') === 'true';
-    block.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
-  });
+  block
+    .querySelector(".dpp-tool-block-header")!
+    .addEventListener("click", () => {
+      const collapsed = block.getAttribute("data-collapsed") === "true";
+      block.setAttribute("data-collapsed", collapsed ? "false" : "true");
+    });
 
   return block;
 }
 
-function updateToolBlockContent(block: HTMLElement, executions: ToolExecutionRecord[]) {
+function updateToolBlockContent(
+  block: HTMLElement,
+  executions: ToolExecutionRecord[],
+) {
   const count = executions.length;
-  const title = block.querySelector('.dpp-tool-block-title')!;
-  title.textContent = contentT('content.toolBlock.title', { count });
+  const title = block.querySelector(".dpp-tool-block-title")!;
+  title.textContent = contentT("content.toolBlock.title", { count });
 
-  const body = block.querySelector('.dpp-tool-block-body')!;
-  body.innerHTML = '';
+  const body = block.querySelector(".dpp-tool-block-body")!;
+  body.innerHTML = "";
   for (const exec of executions) {
-    const item = document.createElement('div');
-    item.className = 'dpp-tool-block-item';
+    const item = document.createElement("div");
+    item.className = "dpp-tool-block-item";
     item.innerHTML = `
       <div class="dpp-tool-block-dot"></div>
       <div class="dpp-tool-block-item-text">
         <div>
           <span class="dpp-tool-block-item-name"></span>
-          <span class="dpp-tool-block-item-status ${exec.result.ok ? '' : 'error'}"></span>
+          <span class="dpp-tool-block-item-status ${exec.result.ok ? "" : "error"}"></span>
         </div>
       </div>
     `;
-    const nameEl = item.querySelector('.dpp-tool-block-item-name')!;
-    const statusEl = item.querySelector('.dpp-tool-block-item-status')!;
+    const nameEl = item.querySelector(".dpp-tool-block-item-name")!;
+    const statusEl = item.querySelector(".dpp-tool-block-item-status")!;
     nameEl.textContent = formatToolExecutionName(exec);
     statusEl.textContent = exec.result.summary;
     const detail = formatToolResultDetail(exec.result);
     if (detail) {
-      const detailEl = document.createElement('div');
-      detailEl.className = 'dpp-tool-block-item-detail';
+      const detailEl = document.createElement("div");
+      detailEl.className = "dpp-tool-block-item-detail";
       const rendered = isDetachedArtifactToolResult(exec.result)
         ? false
         : renderToolResultWithRegistry({
-          target: detailEl,
-          result: exec.result,
-          locale: currentContentLocale,
-          sendMessage: sendRuntimeMessage,
-        });
+            target: detailEl,
+            result: exec.result,
+            locale: currentContentLocale,
+            sendMessage: sendRuntimeMessage,
+          });
       if (!rendered) detailEl.textContent = detail;
-      item.querySelector('.dpp-tool-block-item-text')!.appendChild(detailEl);
+      item.querySelector(".dpp-tool-block-item-text")!.appendChild(detailEl);
     }
     body.appendChild(item);
   }
@@ -6543,41 +7576,53 @@ function formatToolResultDetail(result: ToolCardResult): string {
     }
     return result.detail;
   }
-  if (result.output === undefined) return '';
-  return typeof result.output === 'string'
+  if (result.output === undefined) return "";
+  return typeof result.output === "string"
     ? result.output
     : JSON.stringify(result.output, null, 2);
 }
 
 function looksLikeJson(value: string): boolean {
   const trimmed = value.trimStart();
-  return trimmed.startsWith('{') || trimmed.startsWith('[');
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
 function extractReadableError(jsonText: string): string | null {
   try {
     const parsed = JSON.parse(jsonText);
-    if (typeof parsed === 'string') return parsed;
+    if (typeof parsed === "string") return parsed;
     if (Array.isArray(parsed)) {
       const texts = parsed
-        .filter((item: unknown) => item && typeof item === 'object' && (item as Record<string, unknown>).type === 'text')
+        .filter(
+          (item: unknown) =>
+            item &&
+            typeof item === "object" &&
+            (item as Record<string, unknown>).type === "text",
+        )
         .map((item: unknown) => (item as Record<string, unknown>).text)
-        .filter((text: unknown): text is string => typeof text === 'string');
-      if (texts.length > 0) return texts.join('\n');
+        .filter((text: unknown): text is string => typeof text === "string");
+      if (texts.length > 0) return texts.join("\n");
     }
-    if (parsed && typeof parsed === 'object') {
-      if (typeof parsed.message === 'string') return parsed.message;
-      if (typeof parsed.error === 'string') return parsed.error;
-      if (parsed.error && typeof parsed.error === 'object' && typeof parsed.error.message === 'string') {
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.message === "string") return parsed.message;
+      if (typeof parsed.error === "string") return parsed.error;
+      if (
+        parsed.error &&
+        typeof parsed.error === "object" &&
+        typeof parsed.error.message === "string"
+      ) {
         return parsed.error.message;
       }
     }
-  } catch { /* not valid JSON, return null */ }
+  } catch {
+    /* not valid JSON, return null */
+  }
   return null;
 }
 
 function formatToolExecutionName(exec: ToolExecutionRecord): string {
-  if (exec.name === 'python_exec') return contentT('content.toolBlock.pythonInterpreter');
+  if (exec.name === "python_exec")
+    return contentT("content.toolBlock.pythonInterpreter");
   return exec.provider?.displayName
     ? `${exec.provider.displayName} / ${exec.name}`
     : exec.name;
@@ -6592,22 +7637,28 @@ function renderActiveToolBlockForCurrentRoute(): void {
   renderToolBlock(session);
 }
 
-function isToolBlockSessionOnCurrentRoute(session: ActiveToolBlockSession): boolean {
-  if (session.chatSessionId) return getCurrentChatSessionId() === session.chatSessionId;
+function isToolBlockSessionOnCurrentRoute(
+  session: ActiveToolBlockSession,
+): boolean {
+  if (session.chatSessionId)
+    return getCurrentChatSessionId() === session.chatSessionId;
   return session.url === getToolBlockUrl();
 }
 
-function renderToolBlock(session: ActiveToolBlockSession = getActiveToolBlockSession() ?? {
-  id: '',
-  url: getToolBlockUrl(),
-  chatSessionId: getCurrentChatSessionId(),
-  requestId: null,
-  parentMessageId: null,
-  content: '',
-  executions: toolExecutions,
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
-}, options?: { skipCleanup?: boolean }) {
+function renderToolBlock(
+  session: ActiveToolBlockSession = getActiveToolBlockSession() ?? {
+    id: "",
+    url: getToolBlockUrl(),
+    chatSessionId: getCurrentChatSessionId(),
+    requestId: null,
+    parentMessageId: null,
+    content: "",
+    executions: toolExecutions,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  options?: { skipCleanup?: boolean },
+) {
   if (session.executions.length === 0) return;
   if (!isToolBlockSessionOnCurrentRoute(session)) return;
 
@@ -6616,8 +7667,14 @@ function renderToolBlock(session: ActiveToolBlockSession = getActiveToolBlockSes
   const existing = findRestoredToolBlock(session.id) as HTMLElement | null;
   if (existing) {
     toolBlockEl = existing;
-  } else if (!toolBlockEl || toolBlockEl.getAttribute('data-dpp-tool-key') !== session.id) {
-    toolBlockEl = createToolBlockShell({ id: TOOL_BLOCK_ID, restoreId: session.id });
+  } else if (
+    !toolBlockEl ||
+    toolBlockEl.getAttribute("data-dpp-tool-key") !== session.id
+  ) {
+    toolBlockEl = createToolBlockShell({
+      id: TOOL_BLOCK_ID,
+      restoreId: session.id,
+    });
   }
 
   if (!toolBlockEl.isConnected) {
@@ -6625,7 +7682,13 @@ function renderToolBlock(session: ActiveToolBlockSession = getActiveToolBlockSes
     placeToolBlock(
       block,
       () => isToolBlockSessionOnCurrentRoute(session),
-      (message) => renderDetachedArtifactResults(message, session.id, session.executions, block),
+      (message) =>
+        renderDetachedArtifactResults(
+          message,
+          session.id,
+          session.executions,
+          block,
+        ),
     );
   }
 
@@ -6636,8 +7699,11 @@ function renderToolBlock(session: ActiveToolBlockSession = getActiveToolBlockSes
   renderDetachedArtifactResultsForBlock(session, toolBlockEl);
 }
 
-function renderDetachedArtifactResultsForBlock(session: ActiveToolBlockSession, block: HTMLElement) {
-  const message = block.closest('.ds-message');
+function renderDetachedArtifactResultsForBlock(
+  session: ActiveToolBlockSession,
+  block: HTMLElement,
+) {
+  const message = block.closest(".ds-message");
   if (!message) return;
   renderDetachedArtifactResults(message, session.id, session.executions, block);
 }
@@ -6657,11 +7723,12 @@ function renderDetachedArtifactResults(
 
   injectToolBlockStyles();
   const responseHost = getAssistantResponseHost(message);
-  const container = existing ?? createDetachedArtifactResultsContainer(sessionId);
-  container.innerHTML = '';
+  const container =
+    existing ?? createDetachedArtifactResultsContainer(sessionId);
+  container.innerHTML = "";
   for (const exec of artifactExecutions) {
-    const item = document.createElement('div');
-    item.className = 'dpp-artifact-result-item';
+    const item = document.createElement("div");
+    item.className = "dpp-artifact-result-item";
     const rendered = renderToolResultWithRegistry({
       target: item,
       result: exec.result,
@@ -6676,7 +7743,10 @@ function renderDetachedArtifactResults(
     return;
   }
 
-  const anchor = beforeBlock && beforeBlock.parentElement === responseHost ? beforeBlock : null;
+  const anchor =
+    beforeBlock && beforeBlock.parentElement === responseHost
+      ? beforeBlock
+      : null;
   if (!container.isConnected) {
     responseHost.insertBefore(container, anchor);
   } else if (anchor && container.nextSibling !== anchor) {
@@ -6684,17 +7754,30 @@ function renderDetachedArtifactResults(
   }
 }
 
-function createDetachedArtifactResultsContainer(sessionId: string): HTMLElement {
-  const container = document.createElement('div');
-  container.className = 'dpp-artifact-results';
-  container.setAttribute('data-dpp-artifact-session-id', sessionId);
+function createDetachedArtifactResultsContainer(
+  sessionId: string,
+): HTMLElement {
+  const container = document.createElement("div");
+  container.className = "dpp-artifact-results";
+  container.setAttribute("data-dpp-artifact-session-id", sessionId);
   return container;
 }
 
-function findDetachedArtifactResults(message: Element, sessionId: string): HTMLElement | null {
+function findDetachedArtifactResults(
+  message: Element,
+  sessionId: string,
+): HTMLElement | null {
   const responseHost = getAssistantResponseHost(message);
-  return Array.from(responseHost.querySelectorAll<HTMLElement>(':scope > .dpp-artifact-results'))
-    .find((container) => container.getAttribute('data-dpp-artifact-session-id') === sessionId) ?? null;
+  return (
+    Array.from(
+      responseHost.querySelectorAll<HTMLElement>(
+        ":scope > .dpp-artifact-results",
+      ),
+    ).find(
+      (container) =>
+        container.getAttribute("data-dpp-artifact-session-id") === sessionId,
+    ) ?? null
+  );
 }
 
 function isDetachedArtifactExecution(execution: ToolExecutionRecord): boolean {
@@ -6705,15 +7788,15 @@ function isDetachedArtifactToolResult(result: ToolCardResult): boolean {
   const output = result.output;
   return Boolean(
     output &&
-    typeof output === 'object' &&
+    typeof output === "object" &&
     !Array.isArray(output) &&
-    (output as Record<string, unknown>).kind === 'artifact',
+    (output as Record<string, unknown>).kind === "artifact",
   );
 }
 
 function requeueRestoredToolRecordsForCurrentRoute(): void {
   for (const [id, record] of restoredToolRecords) {
-    if (record.source !== 'storage' || isToolRecordOnCurrentRoute(record)) {
+    if (record.source !== "storage" || isToolRecordOnCurrentRoute(record)) {
       pendingRestoredToolRecordIds.add(id);
     }
   }
@@ -6732,16 +7815,19 @@ function scheduleRenderRestoredToolBlocks() {
   if (pendingRestoredToolRecordIds.size === 0) return;
   if (restoredRenderTimer) return;
 
-  restoredRenderTimer = setTimeout(() => {
-    restoredRenderTimer = null;
-    const missing = renderRestoredToolBlocks();
-    if (missing > 0 && restoredRenderAttempts < 20) {
-      restoredRenderAttempts++;
-      scheduleRenderRestoredToolBlocks();
-      return;
-    }
-    restoredRenderAttempts = 0;
-  }, restoredRenderAttempts === 0 ? 0 : 250);
+  restoredRenderTimer = setTimeout(
+    () => {
+      restoredRenderTimer = null;
+      const missing = renderRestoredToolBlocks();
+      if (missing > 0 && restoredRenderAttempts < 20) {
+        restoredRenderAttempts++;
+        scheduleRenderRestoredToolBlocks();
+        return;
+      }
+      restoredRenderAttempts = 0;
+    },
+    restoredRenderAttempts === 0 ? 0 : 250,
+  );
 }
 
 function renderRestoredToolBlocks(): number {
@@ -6758,13 +7844,29 @@ function renderRestoredToolBlocks(): number {
       pendingRestoredToolRecordIds.delete(id);
       continue;
     }
-    const existingBlock = findRestoredToolBlock(record.id) as HTMLElement | null;
+    // Agent-owned messages: the inline agent trace (live or restored) renders
+    // the trigger turn's tools as the first agent tool group, so the legacy
+    // tool block must never mount there — showing both would duplicate the
+    // same executions in two visual styles (Issue: unified agent run record).
+    if (isToolBlockRecordOwnedByAgentRun(record)) {
+      pendingRestoredToolRecordIds.delete(id);
+      continue;
+    }
+    const existingBlock = findRestoredToolBlock(
+      record.id,
+    ) as HTMLElement | null;
     if (existingBlock) {
       const executions = getRestoredExecutions(record);
       if (executions.length > 0) {
         updateToolBlockContent(existingBlock, executions);
-        const target = existingBlock.closest('.ds-message');
-        if (target) renderDetachedArtifactResults(target, record.id, executions, existingBlock);
+        const target = existingBlock.closest(".ds-message");
+        if (target)
+          renderDetachedArtifactResults(
+            target,
+            record.id,
+            executions,
+            existingBlock,
+          );
       }
       pendingRestoredToolRecordIds.delete(id);
       continue;
@@ -6779,7 +7881,10 @@ function renderRestoredToolBlocks(): number {
       continue;
     }
 
-    const block = createToolBlockShell({ restoreId: record.id, collapsed: true });
+    const block = createToolBlockShell({
+      restoreId: record.id,
+      collapsed: true,
+    });
     updateToolBlockContent(block, executions);
     appendToolBlockToMessage(target, block);
     renderDetachedArtifactResults(target, record.id, executions, block);
@@ -6795,16 +7900,19 @@ function scheduleRenderRestoredInlineAgentTraces() {
   if (pendingRestoredInlineAgentTraceIds.size === 0) return;
   if (restoredInlineAgentRenderTimer) return;
 
-  restoredInlineAgentRenderTimer = setTimeout(() => {
-    restoredInlineAgentRenderTimer = null;
-    const missing = renderRestoredInlineAgentTraces();
-    if (missing > 0 && restoredInlineAgentRenderAttempts < 20) {
-      restoredInlineAgentRenderAttempts++;
-      scheduleRenderRestoredInlineAgentTraces();
-      return;
-    }
-    restoredInlineAgentRenderAttempts = 0;
-  }, restoredInlineAgentRenderAttempts === 0 ? 0 : 250);
+  restoredInlineAgentRenderTimer = setTimeout(
+    () => {
+      restoredInlineAgentRenderTimer = null;
+      const missing = renderRestoredInlineAgentTraces();
+      if (missing > 0 && restoredInlineAgentRenderAttempts < 20) {
+        restoredInlineAgentRenderAttempts++;
+        scheduleRenderRestoredInlineAgentTraces();
+        return;
+      }
+      restoredInlineAgentRenderAttempts = 0;
+    },
+    restoredInlineAgentRenderAttempts === 0 ? 0 : 250,
+  );
 }
 
 function renderRestoredInlineAgentTraces(): number {
@@ -6843,8 +7951,11 @@ function renderRestoredInlineAgentTraces(): number {
 }
 
 function findRestoredInlineAgentTrace(id: string): Element | null {
-  for (const container of document.querySelectorAll('.dpp-agent-container[data-dpp-agent-trace-key]')) {
-    if (container.getAttribute('data-dpp-agent-trace-key') === id) return container;
+  for (const container of document.querySelectorAll(
+    ".dpp-agent-container[data-dpp-agent-trace-key]",
+  )) {
+    if (container.getAttribute("data-dpp-agent-trace-key") === id)
+      return container;
   }
   return null;
 }
@@ -6866,33 +7977,36 @@ function findRestoredInlineAgentTarget(
   const toolContentHints: string[] = [];
   for (const record of restoredToolRecords.values()) {
     if (getToolRecordAssistantMessageId(record) !== anchorMessageId) continue;
-    toolContentHints.push(record.content ?? '');
+    toolContentHints.push(record.content ?? "");
   }
   return findInlineAgentRestoreTarget(
-    { anchorMessageId, anchorContent: trace.anchorContent ?? '' },
+    { anchorMessageId, anchorContent: trace.anchorContent ?? "" },
     toolContentHints,
     messages,
     usedMessages,
   );
 }
 
-function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTMLElement {
+function createRestoredInlineAgentContainer(
+  trace: InlineAgentTraceRecord,
+): HTMLElement {
   const container = createAgentContainer(undefined, getAgentRendererLabels());
-  container.setAttribute('data-restored', 'true');
-  container.setAttribute('data-dpp-agent-trace-key', trace.id);
-  container.setAttribute('data-dpp-agent-loop-id', trace.loopId);
+  container.setAttribute("data-restored", "true");
+  container.setAttribute("data-dpp-agent-trace-key", trace.id);
+  container.setAttribute("data-dpp-agent-loop-id", trace.loopId);
   const consoleBody = getAgentConsoleBody(container);
   if (!consoleBody) return container;
 
-  const restoredBudgetPaused = trace.status === 'complete' && isInlineAgentBudgetFinalText(
-    trace.finalText,
-    (count) => contentT('content.agent.budgetReached', { count }),
-  );
+  const restoredBudgetPaused =
+    trace.status === "complete" &&
+    isInlineAgentBudgetFinalText(trace.finalText, (count) =>
+      contentT("content.agent.budgetReached", { count }),
+    );
   const sortedSteps = [...trace.steps].sort((a, b) => a.index - b.index);
-  const lastStepIndex = sortedSteps.length > 0 ? sortedSteps[sortedSteps.length - 1].index : null;
-  const lastStepRecord = lastStepIndex === null
-    ? null
-    : sortedSteps[sortedSteps.length - 1];
+  const lastStepIndex =
+    sortedSteps.length > 0 ? sortedSteps[sortedSteps.length - 1].index : null;
+  const lastStepRecord =
+    lastStepIndex === null ? null : sortedSteps[sortedSteps.length - 1];
   // Stream redesign (Issue #551): the restored answer is the run's full final
   // turn as the LAST narration segment — no separate answer area. New traces
   // persist the code-blockified finalText; older traces persisted a raw
@@ -6901,66 +8015,133 @@ function createRestoredInlineAgentContainer(trace: InlineAgentTraceRecord): HTML
   // candidates with truncation markers normalized. A last step that IS the
   // answer is replaced in place; budget notices and legacy summary-split
   // traces keep their distinct step notes and append as a final segment.
-  const finalDisplayText = getInlineAgentDisplayFinalText(trace.finalText);
+  const finalDisplayText = getInlineAgentDisplayFinalText(
+    trace.finalText,
+    currentToolDescriptors,
+  );
   const lastStepRenderText = lastStepRecord
-    ? (getInlineAgentRestoredStepText(lastStepRecord.text) || lastStepRecord.text)
-    : '';
+    ? getInlineAgentRestoredStepText(lastStepRecord.text) || lastStepRecord.text
+    : "";
   const restoredAnswer = restoredBudgetPaused
     ? { answer: finalDisplayText, fromStep: false }
     : resolveInlineAgentAnswerText(finalDisplayText, lastStepRenderText);
   const restoredAnswerText = restoredAnswer.answer;
-  const lastStepIsAnswer = lastStepRecord !== null
-    && (restoredAnswer.fromStep
-      || isInlineAgentStepTextTheFinalAnswer(lastStepRenderText, restoredAnswerText));
+  const lastStepIsAnswer =
+    lastStepRecord !== null &&
+    (restoredAnswer.fromStep ||
+      isInlineAgentStepTextTheFinalAnswer(
+        lastStepRenderText,
+        restoredAnswerText,
+      ));
+  // A positive response id on the completed final step proves that the web
+  // backend already committed this turn to DeepSeek history. The native
+  // assistant message that follows the restored console owns both final
+  // reasoning and final markdown; rendering them again here would duplicate
+  // the answer after every refresh. Official-API and budget-paused traces keep
+  // the extension-owned final narration.
+  const nativeHistoryOwnsFinalTurn =
+    !restoredBudgetPaused &&
+    lastStepRecord?.toolExecutions.length === 0 &&
+    isInlineAgentNativeHistoryBackedTrace(trace);
 
   let lastStepReplaced = false;
+  // The trigger turn's tool executions (the legacy tool block is suppressed
+  // for agent-owned messages): render them as the FIRST new-style tool group
+  // so the restored run record keeps the full tool count in one visual flow.
+  for (const exec of trace.initialExecutions ?? []) {
+    resolveAgentToolEntry(consoleBody, -1, exec, getAgentRendererLabels());
+  }
   for (const step of sortedSteps) {
+    if (
+      nativeHistoryOwnsFinalTurn &&
+      step.index === lastStepIndex &&
+      step.toolExecutions.length === 0
+    ) {
+      continue;
+    }
     const stepEl = createAgentStepElement(step.index);
     const stepText = getInlineAgentRestoredStepText(step.text) || step.text;
-    const renderStepText = clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? '';
+    const renderStepText =
+      clampText(stepText, INLINE_AGENT_STEP_RENDER_MAX_CHARS) ?? "";
     const stepIsFinalAnswer = step.index === lastStepIndex && lastStepIsAnswer;
     if (renderStepText) {
-      updateStepStreamText(stepEl, stepIsFinalAnswer ? restoredAnswerText : renderStepText);
-      mountAgentNarration(stepEl, consoleBody, getAgentRendererLabels(), step.reasoning);
+      updateStepStreamText(
+        stepEl,
+        stepIsFinalAnswer ? restoredAnswerText : renderStepText,
+      );
+      refreshAgentStepCodeRunners(stepEl);
+      mountAgentNarration(
+        stepEl,
+        consoleBody,
+        getAgentRendererLabels(),
+        step.reasoning,
+      );
       if (stepIsFinalAnswer) lastStepReplaced = true;
     } else if (step.reasoning) {
       // Reasoning-only step (no narration text was persisted): mount the
       // textless step so the reasoning note has a home in the flow.
-      mountAgentNarration(stepEl, consoleBody, getAgentRendererLabels(), step.reasoning);
+      mountAgentNarration(
+        stepEl,
+        consoleBody,
+        getAgentRendererLabels(),
+        step.reasoning,
+      );
     }
     for (const exec of step.toolExecutions) {
-      resolveAgentToolEntry(consoleBody, step.index, exec, getAgentRendererLabels());
+      resolveAgentToolEntry(
+        consoleBody,
+        step.index,
+        exec,
+        getAgentRendererLabels(),
+      );
     }
     // A mid-flight step (streaming / executing tools) persisted by a page
     // refresh can never resume: render it as interrupted instead of a frozen
     // blinking state with no stop control (Issue #544).
-    if (step.status === 'streaming' || step.status === 'executing_tools') {
-      updateStepStatus(stepEl, 'interrupted');
+    if (step.status === "streaming" || step.status === "executing_tools") {
+      updateStepStatus(stepEl, "interrupted");
     } else {
       updateStepStatus(stepEl, step.status);
     }
   }
-  if (!lastStepReplaced && restoredAnswerText) {
+  if (!nativeHistoryOwnsFinalTurn && !lastStepReplaced && restoredAnswerText) {
     appendInlineAgentNarration(container, restoredAnswerText, trace.loopId);
   }
   // A restored trace is a finished run: every tool group collapses to its
   // one-line header (Issue #551 redesign).
   collapseAllAgentToolGroups(consoleBody);
 
-  const elapsedSeconds = Math.max(0, Math.floor((trace.updatedAt - trace.createdAt) / 1000));
-  if (trace.status === 'complete') {
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((trace.updatedAt - trace.createdAt) / 1000),
+  );
+  if (trace.status === "complete") {
     // A budget-paused trace persists status 'complete' with the budget notice
     // as its final text; restore it as paused, not as a success (Issue #541).
-    renderTerminalAgentConsoleHeader(container, restoredBudgetPaused ? 'paused' : 'complete', trace.totalSteps, trace.totalTools, undefined, elapsedSeconds);
-  } else if (trace.status === 'error') {
-    renderTerminalAgentConsoleHeader(container, 'error', trace.totalSteps, trace.totalTools, trace.error, elapsedSeconds);
-  } else if (trace.status === 'stopping') {
     renderTerminalAgentConsoleHeader(
       container,
-      'paused',
+      restoredBudgetPaused ? "paused" : "complete",
       trace.totalSteps,
       trace.totalTools,
-      trace.error ?? contentT('content.agent.stopped'),
+      undefined,
+      elapsedSeconds,
+    );
+  } else if (trace.status === "error") {
+    renderTerminalAgentConsoleHeader(
+      container,
+      "error",
+      trace.totalSteps,
+      trace.totalTools,
+      trace.error,
+      elapsedSeconds,
+    );
+  } else if (trace.status === "stopping") {
+    renderTerminalAgentConsoleHeader(
+      container,
+      "paused",
+      trace.totalSteps,
+      trace.totalTools,
+      trace.error ?? contentT("content.agent.stopped"),
       elapsedSeconds,
     );
   }
@@ -6974,20 +8155,53 @@ function mountRestoredInlineAgentContainer(
   trace: InlineAgentTraceRecord,
 ): void {
   adoptMessageReasoningBlocks(message);
+  // Defense against the restore race (tool-block read may finish before the
+  // trace map is populated): the agent console owns the tool presentation of
+  // its anchor message, so any legacy block mounted there is removed.
+  removeToolBlockFromMessage(message);
   const host = getAssistantResponseHost(message);
   host.appendChild(container);
 }
 
 function findRestoredToolBlock(id: string): Element | null {
-  for (const block of document.querySelectorAll('.dpp-tool-block[data-dpp-tool-key]')) {
-    if (block.getAttribute('data-dpp-tool-key') === id) return block;
+  for (const block of document.querySelectorAll(
+    ".dpp-tool-block[data-dpp-tool-key]",
+  )) {
+    if (block.getAttribute("data-dpp-tool-key") === id) return block;
   }
   return null;
 }
 
-function getRestoredExecutions(record: ToolCallRestoreRecord): ToolExecutionRecord[] {
+/**
+ * True when a persisted tool block belongs to an inline-agent run's anchor
+ * message: its `metadata.assistantMessageId` matches the live agent trace's
+ * anchor, or any restored trace's anchor. The agent console owns the tool
+ * presentation of those messages (the trigger turn's executions render as its
+ * first tool group), so the legacy block must not mount.
+ */
+function isToolBlockRecordOwnedByAgentRun(
+  record: ToolCallRestoreRecord,
+): boolean {
+  const rawAssistantMessageId = record.metadata?.assistantMessageId;
+  if (rawAssistantMessageId === undefined || rawAssistantMessageId === null)
+    return false;
+  const assistantMessageId = Number(rawAssistantMessageId);
+  if (!Number.isFinite(assistantMessageId)) return false;
+  if (activeInlineAgentTrace?.anchorMessageId === assistantMessageId)
+    return true;
+  for (const trace of restoredInlineAgentTraces.values()) {
+    if (trace.anchorMessageId === assistantMessageId) return true;
+  }
+  return false;
+}
+
+function getRestoredExecutions(
+  record: ToolCallRestoreRecord,
+): ToolExecutionRecord[] {
   if (record.executions?.length) {
-    return record.executions.map((execution) => normalizeRestoredToolExecution(execution));
+    return record.executions.map((execution) =>
+      normalizeRestoredToolExecution(execution),
+    );
   }
   return (record.calls ?? []).map((call) => ({
     name: call.name,
@@ -7016,43 +8230,76 @@ function summarizeRestoredToolCall(call: ToolCall): ToolCardResult {
   const detail = getRestoredPayloadDetail(payload);
 
   switch (call.name) {
-    case 'memory_save':
-      return { ok: true, summary: contentT('content.toolBlock.summaries.saved'), detail };
-    case 'memory_update':
-      return { ok: true, summary: contentT('content.toolBlock.summaries.updated'), detail };
-    case 'memory_delete':
-      return { ok: true, summary: contentT('content.toolBlock.summaries.deleted'), detail };
-    case 'web_search':
-      return { ok: true, summary: contentT('content.toolBlock.summaries.searched'), detail: String(typeof call.payload.query === 'string' ? call.payload.query : '') };
-    case 'web_fetch':
-      return { ok: true, summary: contentT('content.toolBlock.summaries.fetched'), detail: String(typeof call.payload.url === 'string' ? call.payload.url : '') };
-    case 'artifact_create':
-    case 'artifact_bundle_create':
-      return { ok: true, summary: contentT('content.toolBlock.summaries.executed'), detail };
+    case "memory_save":
+      return {
+        ok: true,
+        summary: contentT("content.toolBlock.summaries.saved"),
+        detail,
+      };
+    case "memory_update":
+      return {
+        ok: true,
+        summary: contentT("content.toolBlock.summaries.updated"),
+        detail,
+      };
+    case "memory_delete":
+      return {
+        ok: true,
+        summary: contentT("content.toolBlock.summaries.deleted"),
+        detail,
+      };
+    case "web_search":
+      return {
+        ok: true,
+        summary: contentT("content.toolBlock.summaries.searched"),
+        detail: String(
+          typeof call.payload.query === "string" ? call.payload.query : "",
+        ),
+      };
+    case "web_fetch":
+      return {
+        ok: true,
+        summary: contentT("content.toolBlock.summaries.fetched"),
+        detail: String(
+          typeof call.payload.url === "string" ? call.payload.url : "",
+        ),
+      };
+    case "artifact_create":
+    case "artifact_bundle_create":
+      return {
+        ok: true,
+        summary: contentT("content.toolBlock.summaries.executed"),
+        detail,
+      };
     default:
-      return { ok: true, summary: contentT('content.toolBlock.summaries.executed'), detail };
+      return {
+        ok: true,
+        summary: contentT("content.toolBlock.summaries.executed"),
+        detail,
+      };
   }
 }
 
 function getRestoredPayloadDetail(payload: Record<string, unknown>): string {
-  const primary = payload.filename ?? payload.name ?? payload.content ?? payload.id ?? '';
-  if (typeof primary === 'string') return primary;
+  const primary =
+    payload.filename ?? payload.name ?? payload.content ?? payload.id ?? "";
+  if (typeof primary === "string") return primary;
 
   const preview = getRestoreTruncatedPreview(primary);
   if (preview) return preview;
 
-  return '';
+  return "";
 }
 
 function hasRestoreOmittedPayload(value: unknown): boolean {
-  if (!value || typeof value !== 'object') return false;
+  if (!value || typeof value !== "object") return false;
   if (Array.isArray(value)) return value.some(hasRestoreOmittedPayload);
 
   const record = value as Record<string, unknown>;
   if (
     record.__dppRestoreTruncatedText === true ||
-    typeof record.__dppRestoreOmittedItems === 'number' ||
-    typeof record.__dppRestoreOmittedKeys === 'number' ||
+    typeof record.__dppRestoreOmittedItems === "number" ||
+    typeof record.__dppRestoreOmittedKeys === "number" ||
     record.__dppRestoreMaxDepth === true
   ) {
     return true;
@@ -7062,14 +8309,16 @@ function hasRestoreOmittedPayload(value: unknown): boolean {
 }
 
 function getRestoreTruncatedPreview(value: unknown): string {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   const preview = (value as Record<string, unknown>).preview;
-  return typeof preview === 'string' ? preview : '';
+  return typeof preview === "string" ? preview : "";
 }
 
 function getAssistantMessages(): Element[] {
-  const messages = Array.from(document.querySelectorAll('.ds-message'));
-  const assistantMessages = messages.filter((message) => getAssistantContentHosts(message).length > 0);
+  const messages = Array.from(document.querySelectorAll(".ds-message"));
+  const assistantMessages = messages.filter(
+    (message) => getAssistantContentHosts(message).length > 0,
+  );
   return assistantMessages.length > 0 ? assistantMessages : messages;
 }
 
@@ -7078,13 +8327,18 @@ function getAssistantResponseHost(message: Element): Element {
   if (hosts.length === 0) return message;
 
   // DeepSeek reuses the same content class for reasoning and final-answer blocks.
-  const responseHosts = hosts.filter((host) => !looksLikeReasoningContentHost(host));
+  const responseHosts = hosts.filter(
+    (host) => !looksLikeReasoningContentHost(host),
+  );
   return getLastElement(responseHosts) ?? getLastElement(hosts) ?? message;
 }
 
 function getAssistantContentHosts(message: Element): HTMLElement[] {
-  return Array.from(message.querySelectorAll<HTMLElement>(ASSISTANT_RESPONSE_CONTENT_SELECTOR))
-    .filter((host) => !host.parentElement?.closest(ASSISTANT_RESPONSE_CONTENT_SELECTOR));
+  return Array.from(
+    message.querySelectorAll<HTMLElement>(ASSISTANT_RESPONSE_CONTENT_SELECTOR),
+  ).filter(
+    (host) => !host.parentElement?.closest(ASSISTANT_RESPONSE_CONTENT_SELECTOR),
+  );
 }
 
 function looksLikeReasoningContentHost(host: HTMLElement): boolean {
@@ -7098,20 +8352,27 @@ function looksLikeReasoningContentHost(host: HTMLElement): boolean {
 
 function getFirstMeaningfulChildText(host: Element): string {
   for (const child of Array.from(host.childNodes)) {
-    const text = normalizeText(child.textContent ?? '');
+    const text = normalizeText(child.textContent ?? "");
     if (text) return text.slice(0, 80);
   }
 
-  return normalizeText(host.textContent ?? '').slice(0, 80);
+  return normalizeText(host.textContent ?? "").slice(0, 80);
 }
 
 function hasReasoningAncestorLabel(host: HTMLElement): boolean {
-  const boundary = host.closest('.ds-message');
+  const boundary = host.closest(".ds-message");
   let ancestor = host.parentElement;
   let depth = 0;
-  while (ancestor && ancestor !== boundary && depth < REASONING_HOST_ANCESTOR_SCAN_DEPTH) {
+  while (
+    ancestor &&
+    ancestor !== boundary &&
+    depth < REASONING_HOST_ANCESTOR_SCAN_DEPTH
+  ) {
     if (hasReasoningMetadata(ancestor)) return true;
-    if (looksLikeReasoningLabelText(getFirstMeaningfulChildText(ancestor)) && countContentHosts(ancestor) === 1) {
+    if (
+      looksLikeReasoningLabelText(getFirstMeaningfulChildText(ancestor)) &&
+      countContentHosts(ancestor) === 1
+    ) {
       return true;
     }
     ancestor = ancestor.parentElement;
@@ -7124,10 +8385,10 @@ function hasReasoningAncestorLabel(host: HTMLElement): boolean {
 function hasReasoningMetadata(host: Element): boolean {
   const metadata = [
     host.className,
-    host.getAttribute('aria-label') ?? '',
-    host.getAttribute('data-testid') ?? '',
-    host.getAttribute('data-role') ?? '',
-  ].join(' ');
+    host.getAttribute("aria-label") ?? "",
+    host.getAttribute("data-testid") ?? "",
+    host.getAttribute("data-role") ?? "",
+  ].join(" ");
   return REASONING_HOST_META_RE.test(metadata);
 }
 
@@ -7152,23 +8413,31 @@ function findRestoredToolTarget(
   const snippet = content.slice(0, 80);
   const isSameRoute = isToolRecordOnCurrentRoute(record);
 
-  const messageIdMatched = findRestoredToolTargetByMessageId(record, messages, usedMessages);
+  const messageIdMatched = findRestoredToolTargetByMessageId(
+    record,
+    messages,
+    usedMessages,
+  );
   if (messageIdMatched) return messageIdMatched;
 
   if (snippet.length >= 12) {
     const matched = messages.find((message) => {
       if (usedMessages.has(message)) return false;
-      return normalizeText(message.textContent ?? '').includes(snippet);
+      return normalizeText(message.textContent ?? "").includes(snippet);
     });
     if (matched) return matched;
   }
 
-  const indexed = findRestoredToolTargetByAssistantIndex(record, messages, usedMessages);
+  const indexed = findRestoredToolTargetByAssistantIndex(
+    record,
+    messages,
+    usedMessages,
+  );
   if (indexed) return indexed;
 
   if (!isSameRoute) return null;
 
-  if (record.source === 'storage') {
+  if (record.source === "storage") {
     return null;
   }
 
@@ -7183,10 +8452,12 @@ function findRestoredToolTargetByMessageId(
   const messageId = getToolRecordAssistantMessageId(record);
   if (!messageId) return null;
 
-  return messages.find((message) => {
-    if (usedMessages.has(message)) return false;
-    return elementHasMessageId(message, messageId);
-  }) ?? null;
+  return (
+    messages.find((message) => {
+      if (usedMessages.has(message)) return false;
+      return elementHasMessageId(message, messageId);
+    }) ?? null
+  );
 }
 
 function findRestoredToolTargetByAssistantIndex(
@@ -7202,9 +8473,13 @@ function findRestoredToolTargetByAssistantIndex(
   return message;
 }
 
-function getToolRecordAssistantMessageIndex(record: ToolCallRestoreRecord): number | null {
+function getToolRecordAssistantMessageIndex(
+  record: ToolCallRestoreRecord,
+): number | null {
   const value = record.metadata?.assistantMessageIndex;
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 function startRenderedToolCallCleaner(
@@ -7227,28 +8502,38 @@ function startRenderedToolCallCleaner(
 
   schedule();
 
-  scope.addCleanup('cleanup', mutationHub.subscribe({
-    matches: (mutations) => {
-      if (toolCapabilityScope !== scope || !scope.active) return false;
-      const restoreAction = getRestoredMessageMutationAction(mutations, {
-        hasPendingRecords: pendingRestoredToolRecordIds.size > 0,
-        restoredUiSelector: RESTORED_TOOL_UI_SELECTOR,
-      });
-      return restoreAction.schedulePendingRender || mutations.some(mutationMayContainCleanableText);
-    },
-    handle(mutations) {
-      const restoreAction = getRestoredMessageMutationAction(mutations, {
-        hasPendingRecords: pendingRestoredToolRecordIds.size > 0,
-        restoredUiSelector: RESTORED_TOOL_UI_SELECTOR,
-      });
-      if (restoreAction.requeueMountedRecords) requeueRestoredToolRecordsForCurrentRoute();
-      schedule();
-      if (restoreAction.schedulePendingRender && pendingRestoredToolRecordIds.size > 0) {
-        restoredRenderAttempts = 0;
-        scheduleRenderRestoredToolBlocks();
-      }
-    },
-  }));
+  scope.addCleanup(
+    "cleanup",
+    mutationHub.subscribe({
+      matches: (mutations) => {
+        if (toolCapabilityScope !== scope || !scope.active) return false;
+        const restoreAction = getRestoredMessageMutationAction(mutations, {
+          hasPendingRecords: pendingRestoredToolRecordIds.size > 0,
+          restoredUiSelector: RESTORED_TOOL_UI_SELECTOR,
+        });
+        return (
+          restoreAction.schedulePendingRender ||
+          mutations.some(mutationMayContainCleanableText)
+        );
+      },
+      handle(mutations) {
+        const restoreAction = getRestoredMessageMutationAction(mutations, {
+          hasPendingRecords: pendingRestoredToolRecordIds.size > 0,
+          restoredUiSelector: RESTORED_TOOL_UI_SELECTOR,
+        });
+        if (restoreAction.requeueMountedRecords)
+          requeueRestoredToolRecordsForCurrentRoute();
+        schedule();
+        if (
+          restoreAction.schedulePendingRender &&
+          pendingRestoredToolRecordIds.size > 0
+        ) {
+          restoredRenderAttempts = 0;
+          scheduleRenderRestoredToolBlocks();
+        }
+      },
+    }),
+  );
 }
 
 function stopRenderedToolCallCleaner(): void {
@@ -7259,7 +8544,7 @@ function stopRenderedToolCallCleaner(): void {
 }
 
 function mutationMayContainCleanableText(mutation: MutationRecord): boolean {
-  if (mutation.type === 'characterData') {
+  if (mutation.type === "characterData") {
     return containsCleanableText(mutation.target.textContent);
   }
 
@@ -7278,11 +8563,15 @@ function addedNodeMayContainCleanableText(node: Node): boolean {
   }
 
   if (!(node instanceof Element)) return false;
-  if (node.closest('.dpp-tool-block, .dpp-agent-container, script, style, textarea, input, [contenteditable="true"]')) {
+  if (
+    node.closest(
+      '.dpp-tool-block, .dpp-agent-container, script, style, textarea, input, [contenteditable="true"]',
+    )
+  ) {
     return false;
   }
 
-  if (node.matches('.ds-message') || node.querySelector('.ds-message')) {
+  if (node.matches(".ds-message") || node.querySelector(".ds-message")) {
     return true;
   }
 
@@ -7290,38 +8579,44 @@ function addedNodeMayContainCleanableText(node: Node): boolean {
 }
 
 function containsToolMarker(text: string | null | undefined): boolean {
-  return typeof text === 'string' && text.includes('<') && toolMarkerRe.test(text);
+  return (
+    typeof text === "string" && text.includes("<") && toolMarkerRe.test(text)
+  );
 }
 
 function containsCleanableText(text: string | null | undefined): boolean {
-  if (typeof text !== 'string' || !text) return false;
+  if (typeof text !== "string" || !text) return false;
   if (isInlineAgentContinuationRenderedText(text)) return true;
   if (containsInternalPromptMarker(text)) return true;
-  if (text.includes('<task_complete>') || text.includes('</task_complete>')) return true;
-  if (text.includes(LEGACY_TOOL_CALLS_OPEN_TAG) || text.includes('｜DSML｜')) return true;
-  if (!text.includes('<')) return false;
+  if (text.includes("<task_complete>") || text.includes("</task_complete>"))
+    return true;
+  if (text.includes(LEGACY_TOOL_CALLS_OPEN_TAG) || text.includes("｜DSML｜"))
+    return true;
+  if (!text.includes("<")) return false;
   if (hasLikelyToolMarkerPrefix(text)) return true;
   if (text.length > CLEANABLE_TEXT_DEEP_SCAN_MAX_CHARS) return false;
   return containsToolMarker(text);
 }
 
 function hasLikelyToolMarkerPrefix(text: string): boolean {
-  return text.includes('<memory_') ||
-    text.includes('</memory_') ||
-    text.includes('<web_') ||
-    text.includes('</web_') ||
-    text.includes('<artifact_') ||
-    text.includes('</artifact_') ||
-    text.includes('<skill_') ||
-    text.includes('</skill_') ||
-    text.includes('<mcp_') ||
-    text.includes('</mcp_') ||
-    text.includes('<python_') ||
-    text.includes('</python_') ||
-    text.includes('<shell_') ||
-    text.includes('</shell_') ||
-    text.includes('<task_complete>') ||
-    text.includes('</task_complete>');
+  return (
+    text.includes("<memory_") ||
+    text.includes("</memory_") ||
+    text.includes("<web_") ||
+    text.includes("</web_") ||
+    text.includes("<artifact_") ||
+    text.includes("</artifact_") ||
+    text.includes("<skill_") ||
+    text.includes("</skill_") ||
+    text.includes("<mcp_") ||
+    text.includes("</mcp_") ||
+    text.includes("<python_") ||
+    text.includes("</python_") ||
+    text.includes("<shell_") ||
+    text.includes("</shell_") ||
+    text.includes("<task_complete>") ||
+    text.includes("</task_complete>")
+  );
 }
 
 function cleanRenderedToolCalls() {
@@ -7337,102 +8632,127 @@ function startInlineAgentContinuationMessageHider(
   mutationHub: ContentMutationHub,
 ) {
   hideInlineAgentContinuationMessages(document);
-  scope.addCleanup('cleanup', mutationHub.subscribe({
-    matches: (mutations) => {
-      if (inlineAgentCapabilityScope !== scope || !scope.active) return false;
-      const restoreAction = getRestoredMessageMutationAction(mutations, {
-        hasPendingRecords: pendingRestoredInlineAgentTraceIds.size > 0,
-        restoredUiSelector: RESTORED_INLINE_AGENT_UI_SELECTOR,
-      });
-      return restoreAction.schedulePendingRender || mutations.some(mutationMayContainInlineAgentContinuation);
-    },
-    handle(mutations) {
-      const restoreAction = getRestoredMessageMutationAction(mutations, {
-        hasPendingRecords: pendingRestoredInlineAgentTraceIds.size > 0,
-        restoredUiSelector: RESTORED_INLINE_AGENT_UI_SELECTOR,
-      });
-      if (restoreAction.requeueMountedRecords) requeueRestoredInlineAgentTracesForCurrentRoute();
-      const roots = new Set<ParentNode>();
-      for (const mutation of mutations) {
-        if (mutation.type === 'characterData') {
-          const parent = mutation.target.parentElement;
-          if (isInlineAgentContinuationRenderedText(parent?.textContent)) {
-            const root = parent?.closest('.ds-message') ?? parent;
-            if (root) roots.add(root);
+  scope.addCleanup(
+    "cleanup",
+    mutationHub.subscribe({
+      matches: (mutations) => {
+        if (inlineAgentCapabilityScope !== scope || !scope.active) return false;
+        const restoreAction = getRestoredMessageMutationAction(mutations, {
+          hasPendingRecords: pendingRestoredInlineAgentTraceIds.size > 0,
+          restoredUiSelector: RESTORED_INLINE_AGENT_UI_SELECTOR,
+        });
+        return (
+          restoreAction.schedulePendingRender ||
+          mutations.some(mutationMayContainInlineAgentContinuation)
+        );
+      },
+      handle(mutations) {
+        const restoreAction = getRestoredMessageMutationAction(mutations, {
+          hasPendingRecords: pendingRestoredInlineAgentTraceIds.size > 0,
+          restoredUiSelector: RESTORED_INLINE_AGENT_UI_SELECTOR,
+        });
+        if (restoreAction.requeueMountedRecords)
+          requeueRestoredInlineAgentTracesForCurrentRoute();
+        const roots = new Set<ParentNode>();
+        for (const mutation of mutations) {
+          if (mutation.type === "characterData") {
+            const parent = mutation.target.parentElement;
+            if (isInlineAgentContinuationRenderedText(parent?.textContent)) {
+              const root = parent?.closest(".ds-message") ?? parent;
+              if (root) roots.add(root);
+            }
+            continue;
           }
-          continue;
+
+          for (const node of mutation.addedNodes) {
+            if (node instanceof Element) roots.add(node);
+          }
         }
 
-        for (const node of mutation.addedNodes) {
-          if (node instanceof Element) roots.add(node);
+        roots.forEach(hideInlineAgentContinuationMessages);
+        if (
+          restoreAction.schedulePendingRender &&
+          pendingRestoredInlineAgentTraceIds.size > 0
+        ) {
+          restoredInlineAgentRenderAttempts = 0;
+          scheduleRenderRestoredInlineAgentTraces();
         }
-      }
-
-      roots.forEach(hideInlineAgentContinuationMessages);
-      if (restoreAction.schedulePendingRender && pendingRestoredInlineAgentTraceIds.size > 0) {
-        restoredInlineAgentRenderAttempts = 0;
-        scheduleRenderRestoredInlineAgentTraces();
-      }
-    },
-  }));
+      },
+    }),
+  );
 }
 
 function stopInlineAgentContinuationMessageHider(): void {
-  for (const message of document.querySelectorAll<HTMLElement>('[data-dpp-hidden-inline-agent-continuation="true"]')) {
-    message.style.removeProperty('display');
-    message.removeAttribute('data-dpp-hidden-inline-agent-continuation');
+  for (const message of document.querySelectorAll<HTMLElement>(
+    '[data-dpp-hidden-inline-agent-continuation="true"]',
+  )) {
+    message.style.removeProperty("display");
+    message.removeAttribute("data-dpp-hidden-inline-agent-continuation");
   }
 }
 
-function mutationMayContainInlineAgentContinuation(mutation: MutationRecord): boolean {
-  if (mutation.type === 'characterData') {
+function mutationMayContainInlineAgentContinuation(
+  mutation: MutationRecord,
+): boolean {
+  if (mutation.type === "characterData") {
     return isInlineAgentContinuationRenderedText(mutation.target.textContent);
   }
-  return [...mutation.addedNodes]
-    .some((node) => nodeMatchesOrContains(node, '.ds-message'));
+  return [...mutation.addedNodes].some((node) =>
+    nodeMatchesOrContains(node, ".ds-message"),
+  );
 }
 
 function hideInlineAgentContinuationMessages(root: ParentNode) {
   const messages = getInlineAgentContinuationMessageCandidates(root);
   for (const message of messages) {
     if (!isInlineAgentContinuationRenderedText(message.textContent)) continue;
-    message.setAttribute('data-dpp-hidden-inline-agent-continuation', 'true');
-    message.style.display = 'none';
+    message.setAttribute("data-dpp-hidden-inline-agent-continuation", "true");
+    message.style.display = "none";
   }
 }
 
-function isInlineAgentContinuationRenderedText(text: string | null | undefined): boolean {
-  if (typeof text !== 'string' || !text) return false;
+function isInlineAgentContinuationRenderedText(
+  text: string | null | undefined,
+): boolean {
+  if (typeof text !== "string" || !text) return false;
   // isInlineAgentContinuationStructure (tags only) is a strict superset of
   // isInlineAgentContinuationPrompt (tags + keywords), so the keyword check
   // is redundant here — the placeholder covers the history-restored case and
   // the structural check covers the live-rendered case.
-  return text.includes(INLINE_AGENT_CONTINUATION_PLACEHOLDER) ||
-    isInlineAgentContinuationStructure(text);
+  return (
+    text.includes(INLINE_AGENT_CONTINUATION_PLACEHOLDER) ||
+    isInlineAgentContinuationStructure(text)
+  );
 }
 
-function getInlineAgentContinuationMessageCandidates(root: ParentNode): HTMLElement[] {
+function getInlineAgentContinuationMessageCandidates(
+  root: ParentNode,
+): HTMLElement[] {
   const messages: HTMLElement[] = [];
-  if (root instanceof HTMLElement && root.matches('.ds-message')) {
+  if (root instanceof HTMLElement && root.matches(".ds-message")) {
     messages.push(root);
   }
-  if ('querySelectorAll' in root) {
-    messages.push(...Array.from(root.querySelectorAll<HTMLElement>('.ds-message')));
+  if ("querySelectorAll" in root) {
+    messages.push(
+      ...Array.from(root.querySelectorAll<HTMLElement>(".ds-message")),
+    );
   }
   return messages;
 }
 
 function getToolCleanupRoots(): Element[] {
   const roots = new Set<Element>();
-  const activeMessage = toolBlockEl?.closest('.ds-message');
+  const activeMessage = toolBlockEl?.closest(".ds-message");
   if (activeMessage) roots.add(activeMessage);
 
-  for (const block of document.querySelectorAll(`#${TOOL_BLOCK_ID}, .dpp-tool-block`)) {
-    const message = block.closest('.ds-message');
+  for (const block of document.querySelectorAll(
+    `#${TOOL_BLOCK_ID}, .dpp-tool-block`,
+  )) {
+    const message = block.closest(".ds-message");
     if (message) roots.add(message);
   }
 
-  const messages = document.querySelectorAll('.ds-message');
+  const messages = document.querySelectorAll(".ds-message");
   const minIndex = Math.max(0, messages.length - CLEANUP_MESSAGE_SCAN_LIMIT);
   for (let i = messages.length - 1; i >= 0; i--) {
     if (i < minIndex) break;
@@ -7460,11 +8780,13 @@ function stripToolCallTextNodes(root: Element) {
         // owned by hideInlineAgentContinuationMessages (which hides the whole
         // .ds-message). Letting strip touch it here can leave an empty shell
         // when DeepSeek re-renders and drops the display:none, so skip it.
-        parent.closest('[data-dpp-hidden-inline-agent-continuation]') ||
+        parent.closest("[data-dpp-hidden-inline-agent-continuation]") ||
         // Detached artifact cards live outside .dpp-tool-block but must be
         // exempt from tool-call text stripping just like the block itself.
-        parent.closest('.dpp-tool-block, .dpp-artifact-results') ||
-        parent.closest('script, style, textarea, input, [contenteditable="true"]')
+        parent.closest(".dpp-tool-block, .dpp-artifact-results") ||
+        parent.closest(
+          'script, style, textarea, input, [contenteditable="true"]',
+        )
       ) {
         return NodeFilter.FILTER_REJECT;
       }
@@ -7488,21 +8810,23 @@ function stripToolCallTextNodes(root: Element) {
   let lastNodeEndsWithNewline = false;
 
   for (const textNode of textNodes) {
-    const original = textNode.nodeValue ?? '';
+    const original = textNode.nodeValue ?? "";
     if (!activeTool && !containsCleanableText(original)) {
       lastNodeEndsWithNewline = /\n$/.test(original);
       continue;
     }
-    const sanitizedOriginal = sanitizeRenderedControlText(
-      original,
-      { replaceTaskComplete: shouldReplaceRenderedTaskCompleteBlock(textNode) },
-    );
+    const sanitizedOriginal = sanitizeRenderedControlText(original, {
+      replaceTaskComplete: shouldReplaceRenderedTaskCompleteBlock(textNode),
+    });
     let cursor = 0;
-    let next = '';
+    let next = "";
 
     while (cursor < sanitizedOriginal.length) {
       if (activeTool) {
-        const closeRe = new RegExp(`<\\s*/\\s*${escapeRegExp(activeTool)}\\s*>`, 'i');
+        const closeRe = new RegExp(
+          `<\\s*/\\s*${escapeRegExp(activeTool)}\\s*>`,
+          "i",
+        );
         const closeMatch = closeRe.exec(sanitizedOriginal.slice(cursor));
         if (!closeMatch) {
           cursor = sanitizedOriginal.length;
@@ -7517,7 +8841,7 @@ function stripToolCallTextNodes(root: Element) {
       if (!openMatch) {
         let rest = sanitizedOriginal.slice(cursor);
         if (stripTailLeadingNewlines) {
-          rest = rest.replace(/^\n+/, '');
+          rest = rest.replace(/^\n+/, "");
           stripTailLeadingNewlines = false;
         }
         next += rest;
@@ -7526,7 +8850,7 @@ function stripToolCallTextNodes(root: Element) {
 
       let before = sanitizedOriginal.slice(cursor, cursor + openMatch.index);
       if (stripTailLeadingNewlines) {
-        before = before.replace(/^\n+/, '');
+        before = before.replace(/^\n+/, "");
         stripTailLeadingNewlines = false;
       }
       // Collapse excess blank lines right before the open tag down to a
@@ -7559,51 +8883,60 @@ function stripToolCallTextNodes(root: Element) {
  * `<pre>` rendering.
  */
 function collapseRenderedExcessBlankLines(text: string): string {
-  if (!text.includes('\n\n\n')) return text;
-  if (!text.includes('```')) return text.replace(/\n{3,}/g, '\n\n');
+  if (!text.includes("\n\n\n")) return text;
+  if (!text.includes("```")) return text.replace(/\n{3,}/g, "\n\n");
 
-  let output = '';
+  let output = "";
   let inFence = false;
   let cursor = 0;
   while (cursor < text.length) {
-    const fenceIndex = text.indexOf('```', cursor);
+    const fenceIndex = text.indexOf("```", cursor);
     if (fenceIndex === -1) {
       output += inFence
         ? text.slice(cursor)
-        : text.slice(cursor).replace(/\n{3,}/g, '\n\n');
+        : text.slice(cursor).replace(/\n{3,}/g, "\n\n");
       break;
     }
     const segment = text.slice(cursor, fenceIndex);
-    output += inFence ? segment : segment.replace(/\n{3,}/g, '\n\n');
-    output += '```';
+    output += inFence ? segment : segment.replace(/\n{3,}/g, "\n\n");
+    output += "```";
     inFence = !inFence;
     cursor = fenceIndex + 3;
   }
   return output;
 }
 
-function sanitizeRenderedControlText(text: string, options: { replaceTaskComplete: boolean }): string {
+function sanitizeRenderedControlText(
+  text: string,
+  options: { replaceTaskComplete: boolean },
+): string {
   const sanitized = sanitizeInternalPromptText(text);
-  return options.replaceTaskComplete ? replaceTaskCompleteBlocks(sanitized) : sanitized;
+  return options.replaceTaskComplete
+    ? replaceTaskCompleteBlocks(sanitized)
+    : sanitized;
 }
 
 function shouldReplaceRenderedTaskCompleteBlock(textNode: Text): boolean {
   const parent = textNode.parentElement;
   if (!parent) return false;
-  if (parent.closest('pre, code')) return false;
+  if (parent.closest("pre, code")) return false;
 
-  const message = parent.closest('.ds-message');
+  const message = parent.closest(".ds-message");
   if (!message) return false;
-  return getAssistantContentHosts(message).some((host) => host.contains(parent));
+  return getAssistantContentHosts(message).some((host) =>
+    host.contains(parent),
+  );
 }
 
 function pruneEmptyToolContainers(start: HTMLElement, boundary: Element) {
   let el: HTMLElement | null = start;
-  while (el && el !== boundary && !el.classList.contains('ds-message')) {
+  while (el && el !== boundary && !el.classList.contains("ds-message")) {
     const parent: HTMLElement | null = el.parentElement;
-    const hasVisibleText = (el.textContent ?? '').trim().length > 0;
+    const hasVisibleText = (el.textContent ?? "").trim().length > 0;
     const hasProtectedChild = Boolean(
-      el.querySelector('.dpp-tool-block, img, svg, canvas, video, button, input, textarea'),
+      el.querySelector(
+        ".dpp-tool-block, img, svg, canvas, video, button, input, textarea",
+      ),
     );
 
     if (!hasVisibleText && !hasProtectedChild) {
@@ -7618,9 +8951,9 @@ function pruneEmptyToolContainers(start: HTMLElement, boundary: Element) {
 
 function collapseToolBlock(block: HTMLElement | null = toolBlockEl) {
   if (!block) return;
-  block.removeAttribute('id');
+  block.removeAttribute("id");
   toolCapabilityScope?.setTimeout(() => {
-    block.setAttribute('data-collapsed', 'true');
+    block.setAttribute("data-collapsed", "true");
   }, 1500);
 }
 
@@ -7659,17 +8992,21 @@ function placeToolBlock(
 // --- Background image feature (unchanged) ---
 
 function getToolbarBottom(): number {
-  const root = document.getElementById('root');
+  const root = document.getElementById("root");
   if (!root) return 0;
 
   function walk(el: Element): number {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
     if (
-      rect.top >= -2 && rect.top <= 5 &&
-      rect.height > 30 && rect.height <= 80 &&
+      rect.top >= -2 &&
+      rect.top <= 5 &&
+      rect.height > 30 &&
+      rect.height <= 80 &&
       rect.width > 300 &&
-      (style.position === 'absolute' || style.position === 'sticky' || style.position === 'fixed')
+      (style.position === "absolute" ||
+        style.position === "sticky" ||
+        style.position === "fixed")
     ) {
       return rect.bottom;
     }
@@ -7686,8 +9023,10 @@ function getToolbarBottom(): number {
 function hasVisibleBackground(style: CSSStyleDeclaration): boolean {
   const bg = style.backgroundColor;
   const bgImg = style.backgroundImage;
-  return (bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') ||
-         (bgImg !== 'none' && bgImg !== '');
+  return (
+    (bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") ||
+    (bgImg !== "none" && bgImg !== "")
+  );
 }
 
 function getPromptTextarea(): HTMLTextAreaElement | null {
@@ -7698,7 +9037,7 @@ function findDeepSeekInputBox(): HTMLElement | null {
   const textarea = getPromptTextarea();
   if (!textarea) return null;
 
-  const root = document.getElementById('root');
+  const root = document.getElementById("root");
   const textareaRect = textarea.getBoundingClientRect();
   let candidate: HTMLElement | null = null;
   let el: Element | null = textarea.parentElement;
@@ -7711,7 +9050,10 @@ function findDeepSeekInputBox(): HTMLElement | null {
         return el;
       }
 
-      if (!candidate && isPromptInputFrameCandidate(rect, textareaRect, style)) {
+      if (
+        !candidate &&
+        isPromptInputFrameCandidate(rect, textareaRect, style)
+      ) {
         candidate = el;
       }
     }
@@ -7726,16 +9068,17 @@ function isPromptInputFrameCandidate(
   textareaRect: DOMRect,
   style: CSSStyleDeclaration,
 ): boolean {
-  return rect.width >= textareaRect.width &&
+  return (
+    rect.width >= textareaRect.width &&
     rect.height >= textareaRect.height &&
     rect.height <= Math.max(260, textareaRect.height + 180) &&
-    rect.width <= Math.max(textareaRect.width + 260, textareaRect.width * 1.25) &&
-    (
-      hasVisibleBackground(style) ||
+    rect.width <=
+      Math.max(textareaRect.width + 260, textareaRect.width * 1.25) &&
+    (hasVisibleBackground(style) ||
       Number.parseFloat(style.borderRadius) > 0 ||
       Number.parseFloat(style.borderTopWidth) > 0 ||
-      Number.parseFloat(style.borderBottomWidth) > 0
-    );
+      Number.parseFloat(style.borderBottomWidth) > 0)
+  );
 }
 
 function isTightPromptInputFrame(
@@ -7748,14 +9091,16 @@ function isTightPromptInputFrame(
     Number.parseFloat(style.borderTopWidth) > 0 ||
     Number.parseFloat(style.borderBottomWidth) > 0;
 
-  return isPromptInputFrameCandidate(rect, textareaRect, style) &&
+  return (
+    isPromptInputFrameCandidate(rect, textareaRect, style) &&
     borderRadius >= 12 &&
-    (hasVisibleBackground(style) || hasBorder || style.overflow === 'hidden');
+    (hasVisibleBackground(style) || hasBorder || style.overflow === "hidden")
+  );
 }
 
 function patchContainerBackgrounds() {
-  if (!document.body.classList.contains('dpp-bg-active')) return;
-  const root = document.getElementById('root');
+  if (!document.body.classList.contains("dpp-bg-active")) return;
+  const root = document.getElementById("root");
   if (!root) return;
 
   const textarea = getPromptTextarea();
@@ -7768,14 +9113,14 @@ function patchContainerBackgrounds() {
   while (el && el !== root && el !== document.body) {
     const style = getComputedStyle(el);
     if (hasVisibleBackground(style)) {
-      (el as HTMLElement).setAttribute('data-dpp-transparent', '');
+      (el as HTMLElement).setAttribute("data-dpp-transparent", "");
     }
 
-    if (style.position === 'sticky') {
+    if (style.position === "sticky") {
       for (const child of el.children) {
         if (child.contains(textarea)) continue;
         if (hasVisibleBackground(getComputedStyle(child))) {
-          (child as HTMLElement).setAttribute('data-dpp-transparent', '');
+          (child as HTMLElement).setAttribute("data-dpp-transparent", "");
         }
       }
     }
@@ -7785,14 +9130,15 @@ function patchContainerBackgrounds() {
 }
 
 function removeBackground() {
-  document.getElementById('dpp-bg')?.remove();
-  document.getElementById('dpp-bg-style')?.remove();
-  document.body.classList.remove('dpp-bg-active');
-  document.body.style.removeProperty('--dpp-overlay-light');
-  document.body.style.removeProperty('--dpp-overlay-dark');
-  document.body.style.removeProperty('--dpp-blur');
-  document.querySelectorAll('[data-dpp-transparent]')
-    .forEach((element) => element.removeAttribute('data-dpp-transparent'));
+  document.getElementById("dpp-bg")?.remove();
+  document.getElementById("dpp-bg-style")?.remove();
+  document.body.classList.remove("dpp-bg-active");
+  document.body.style.removeProperty("--dpp-overlay-light");
+  document.body.style.removeProperty("--dpp-overlay-dark");
+  document.body.style.removeProperty("--dpp-blur");
+  document
+    .querySelectorAll("[data-dpp-transparent]")
+    .forEach((element) => element.removeAttribute("data-dpp-transparent"));
 }
 
 function applyPetConfig(config: PetConfig | null) {
@@ -7805,7 +9151,7 @@ function applyPetConfig(config: PetConfig | null) {
   }
 
   const host = ensurePet();
-  host.style.setProperty('--dpp-pet-size', `${normalizedConfig.size}px`);
+  host.style.setProperty("--dpp-pet-size", `${normalizedConfig.size}px`);
   host.style.opacity = normalizedConfig.opacity.toFixed(2);
   host.dataset.motion = String(normalizedConfig.motion);
   host.dataset.position = normalizedConfig.position;
@@ -7818,21 +9164,21 @@ function ensurePet(): HTMLElement {
 
   if (petHostEl?.isConnected) return petHostEl;
 
-  const host = document.createElement('div');
+  const host = document.createElement("div");
   host.id = PET_HOST_ID;
-  host.setAttribute('aria-hidden', 'true');
-  host.dataset.state = 'idle';
-  host.dataset.motion = 'true';
+  host.setAttribute("aria-hidden", "true");
+  host.dataset.state = "idle";
+  host.dataset.motion = "true";
   host.innerHTML = createPetMarkup();
-  host.addEventListener('pointerdown', handlePetPointerDown);
-  host.addEventListener('pointermove', handlePetPointerMove);
-  host.addEventListener('pointerup', handlePetPointerUp);
-  host.addEventListener('pointercancel', handlePetPointerCancel);
-  host.addEventListener('pointerenter', handlePetPointerEnter);
+  host.addEventListener("pointerdown", handlePetPointerDown);
+  host.addEventListener("pointermove", handlePetPointerMove);
+  host.addEventListener("pointerup", handlePetPointerUp);
+  host.addEventListener("pointercancel", handlePetPointerCancel);
+  host.addEventListener("pointerenter", handlePetPointerEnter);
   document.body.appendChild(host);
   petHostEl = host;
-  petBubbleEl = host.querySelector<HTMLElement>('.dpp-pet-bubble');
-  petBubbleTextEl = host.querySelector<HTMLElement>('.dpp-pet-bubble-text');
+  petBubbleEl = host.querySelector<HTMLElement>(".dpp-pet-bubble");
+  petBubbleTextEl = host.querySelector<HTMLElement>(".dpp-pet-bubble-text");
   return host;
 }
 
@@ -7875,7 +9221,7 @@ function schedulePetIdle(delay = PET_IDLE_DELAY_MS) {
   clearPetSleepTimer();
   petIdleTimer = setTimeout(() => {
     if (petHostEl?.isConnected) {
-      applyPetState('idle');
+      applyPetState("idle");
       schedulePetSleep();
     }
     petIdleTimer = null;
@@ -7886,8 +9232,8 @@ function schedulePetSleep() {
   if (!currentPetConfig?.enabled || !petHostEl?.isConnected) return;
   clearPetSleepTimer();
   petSleepTimer = setTimeout(() => {
-    if (petHostEl?.isConnected && petHostEl.dataset.state === 'idle') {
-      applyPetState('sleepy');
+    if (petHostEl?.isConnected && petHostEl.dataset.state === "idle") {
+      applyPetState("sleepy");
     }
     petSleepTimer = null;
   }, PET_SLEEP_DELAY_MS);
@@ -7922,7 +9268,8 @@ function triggerPetBubble(state: PetState) {
 function armPetBubbleRepeat() {
   clearPetBubbleRepeatTimer();
   const span = PET_BUBBLE_REPEAT_MAX_MS - PET_BUBBLE_REPEAT_MIN_MS;
-  const delay = PET_BUBBLE_REPEAT_MIN_MS + Math.floor(Math.random() * (span + 1));
+  const delay =
+    PET_BUBBLE_REPEAT_MIN_MS + Math.floor(Math.random() * (span + 1));
   petBubbleRepeatTimer = setTimeout(() => {
     petBubbleRepeatTimer = null;
     const state = petBubbleState;
@@ -7937,11 +9284,11 @@ function showPetBubble(line: string) {
   if (!line || !petBubbleEl || !petBubbleTextEl) return;
   rememberPetLine(line);
   petBubbleTextEl.textContent = line;
-  petBubbleEl.dataset.visible = 'true';
+  petBubbleEl.dataset.visible = "true";
   if (petBubbleHideTimer) clearTimeout(petBubbleHideTimer);
   petBubbleHideTimer = setTimeout(() => {
     petBubbleHideTimer = null;
-    if (petBubbleEl) petBubbleEl.dataset.visible = 'false';
+    if (petBubbleEl) petBubbleEl.dataset.visible = "false";
   }, PET_BUBBLE_VISIBLE_MS);
 }
 
@@ -7952,7 +9299,7 @@ function hidePetBubble() {
     clearTimeout(petBubbleHideTimer);
     petBubbleHideTimer = null;
   }
-  if (petBubbleEl) petBubbleEl.dataset.visible = 'false';
+  if (petBubbleEl) petBubbleEl.dataset.visible = "false";
 }
 
 function clearPetBubbleRepeatTimer() {
@@ -7975,7 +9322,7 @@ function updatePetFromTokenSpeed(progress: ResponseTokenSpeedPayload) {
     schedulePetIdle();
     return;
   }
-  setPetState(progress.textLength > 0 ? 'speaking' : 'thinking');
+  setPetState(progress.textLength > 0 ? "speaking" : "thinking");
 }
 
 function applyPetPosition(host: HTMLElement, config: PetConfig) {
@@ -7983,29 +9330,32 @@ function applyPetPosition(host: HTMLElement, config: PetConfig) {
 }
 
 function getPetPositionStyle(config: PetConfig): Partial<CSSStyleDeclaration> {
-  if (config.position === 'custom' && config.customPosition) {
+  if (config.position === "custom" && config.customPosition) {
     return getPetCustomPositionStyle(config.customPosition, config.size);
   }
 
   const base: Partial<CSSStyleDeclaration> = {
-    top: 'auto',
+    top: "auto",
     bottom: `${PET_BOTTOM_OFFSET_PX}px`,
   };
-  if (config.position === 'bottom-left') {
+  if (config.position === "bottom-left") {
     return {
       ...base,
       left: `${PET_SIDE_OFFSET_PX}px`,
-      right: 'auto',
+      right: "auto",
     };
   }
   return {
     ...base,
     right: `${PET_SIDE_OFFSET_PX}px`,
-    left: 'auto',
+    left: "auto",
   };
 }
 
-function getPetCustomPositionStyle(position: PetCustomPosition, size: number): Partial<CSSStyleDeclaration> {
+function getPetCustomPositionStyle(
+  position: PetCustomPosition,
+  size: number,
+): Partial<CSSStyleDeclaration> {
   const width = size;
   const height = size * PET_HEIGHT_RATIO;
   const left = clampPetPixelPosition(
@@ -8021,18 +9371,30 @@ function getPetCustomPositionStyle(position: PetCustomPosition, size: number): P
   return {
     left: `${left}px`,
     top: `${top}px`,
-    right: 'auto',
-    bottom: 'auto',
+    right: "auto",
+    bottom: "auto",
   };
 }
 
-function clampPetPixelPosition(value: number, viewportSize: number, petSize: number): number {
-  const max = Math.max(PET_CUSTOM_EDGE_MARGIN_PX, viewportSize - petSize - PET_CUSTOM_EDGE_MARGIN_PX);
+function clampPetPixelPosition(
+  value: number,
+  viewportSize: number,
+  petSize: number,
+): number {
+  const max = Math.max(
+    PET_CUSTOM_EDGE_MARGIN_PX,
+    viewportSize - petSize - PET_CUSTOM_EDGE_MARGIN_PX,
+  );
   return Math.min(max, Math.max(PET_CUSTOM_EDGE_MARGIN_PX, value));
 }
 
 function handlePetPointerDown(event: PointerEvent) {
-  if (event.button !== 0 || !currentPetConfig?.enabled || !petHostEl?.isConnected) return;
+  if (
+    event.button !== 0 ||
+    !currentPetConfig?.enabled ||
+    !petHostEl?.isConnected
+  )
+    return;
 
   const rect = petHostEl.getBoundingClientRect();
   petDragState = {
@@ -8043,7 +9405,7 @@ function handlePetPointerDown(event: PointerEvent) {
     startTop: rect.top,
     moved: false,
   };
-  petHostEl.dataset.dragging = 'true';
+  petHostEl.dataset.dragging = "true";
   hidePetBubble();
   petHostEl.setPointerCapture(event.pointerId);
   event.preventDefault();
@@ -8051,19 +9413,33 @@ function handlePetPointerDown(event: PointerEvent) {
 }
 
 function handlePetPointerMove(event: PointerEvent) {
-  if (!petDragState || event.pointerId !== petDragState.pointerId || !petHostEl?.isConnected) return;
+  if (
+    !petDragState ||
+    event.pointerId !== petDragState.pointerId ||
+    !petHostEl?.isConnected
+  )
+    return;
 
   const rect = petHostEl.getBoundingClientRect();
   const deltaX = event.clientX - petDragState.startClientX;
   const deltaY = event.clientY - petDragState.startClientY;
-  const left = clampPetPixelPosition(petDragState.startLeft + deltaX, window.innerWidth, rect.width);
-  const top = clampPetPixelPosition(petDragState.startTop + deltaY, window.innerHeight, rect.height);
+  const left = clampPetPixelPosition(
+    petDragState.startLeft + deltaX,
+    window.innerWidth,
+    rect.width,
+  );
+  const top = clampPetPixelPosition(
+    petDragState.startTop + deltaY,
+    window.innerHeight,
+    rect.height,
+  );
 
-  petDragState.moved = petDragState.moved || Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3;
+  petDragState.moved =
+    petDragState.moved || Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3;
   petHostEl.style.left = `${left}px`;
   petHostEl.style.top = `${top}px`;
-  petHostEl.style.right = 'auto';
-  petHostEl.style.bottom = 'auto';
+  petHostEl.style.right = "auto";
+  petHostEl.style.bottom = "auto";
   event.preventDefault();
   event.stopPropagation();
 }
@@ -8082,7 +9458,12 @@ function handlePetPointerEnter() {
 }
 
 function finishPetDrag(event: PointerEvent) {
-  if (!petDragState || event.pointerId !== petDragState.pointerId || !petHostEl?.isConnected) return;
+  if (
+    !petDragState ||
+    event.pointerId !== petDragState.pointerId ||
+    !petHostEl?.isConnected
+  )
+    return;
 
   const moved = petDragState.moved;
   petDragState = null;
@@ -8094,11 +9475,11 @@ function finishPetDrag(event: PointerEvent) {
   if (moved && currentPetConfig) {
     const config = normalizePetConfig({
       ...currentPetConfig,
-      position: 'custom',
+      position: "custom",
       customPosition: getPetCustomPosition(petHostEl),
     });
     currentPetConfig = config;
-    void sendRuntimeMessage({ type: 'SAVE_PET', payload: config });
+    void sendRuntimeMessage({ type: "SAVE_PET", payload: config });
   }
 
   // After dragging, reschedule the current looping state because hidePetBubble paused it.
@@ -8115,8 +9496,12 @@ function finishPetDrag(event: PointerEvent) {
 function getPetCustomPosition(host: HTMLElement): PetCustomPosition {
   const rect = host.getBoundingClientRect();
   return {
-    x: clampPetRatio((rect.left + rect.width / 2) / Math.max(window.innerWidth, 1)),
-    y: clampPetRatio((rect.top + rect.height / 2) / Math.max(window.innerHeight, 1)),
+    x: clampPetRatio(
+      (rect.left + rect.width / 2) / Math.max(window.innerWidth, 1),
+    ),
+    y: clampPetRatio(
+      (rect.top + rect.height / 2) / Math.max(window.innerHeight, 1),
+    ),
   };
 }
 
@@ -8127,25 +9512,26 @@ function clampPetRatio(value: number): number {
 
 function installPetResizeListener() {
   if (petResizeListenerInstalled) return;
-  window.addEventListener('resize', handlePetViewportResize);
+  window.addEventListener("resize", handlePetViewportResize);
   petResizeListenerInstalled = true;
 }
 
 function uninstallPetResizeListener() {
   if (!petResizeListenerInstalled) return;
-  window.removeEventListener('resize', handlePetViewportResize);
+  window.removeEventListener("resize", handlePetViewportResize);
   petResizeListenerInstalled = false;
 }
 
 function handlePetViewportResize() {
-  if (!currentPetConfig?.enabled || !petHostEl?.isConnected || petDragState) return;
+  if (!currentPetConfig?.enabled || !petHostEl?.isConnected || petDragState)
+    return;
   applyPetPosition(petHostEl, currentPetConfig);
 }
 
 function injectPetStyles() {
   if (document.getElementById(PET_STYLE_ID)) return;
 
-  const style = document.createElement('style');
+  const style = document.createElement("style");
   const spriteUrl = escapeCssUrl(chrome.runtime.getURL(PET_SPRITE_PATH));
   style.id = PET_STYLE_ID;
   style.textContent = `
@@ -8394,11 +9780,11 @@ function createPetMarkup(): string {
 
 function escapeCssUrl(url: string): string {
   return url
-    .replace(/\\/g, '\\\\')
+    .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
-    .replace(/\)/g, '\\)')
-    .replace(/\n/g, '\\a ')
-    .replace(/\r/g, '\\d ');
+    .replace(/\)/g, "\\)")
+    .replace(/\n/g, "\\a ")
+    .replace(/\r/g, "\\d ");
 }
 
 function applyBackground(config: BackgroundConfig | null) {
@@ -8408,45 +9794,54 @@ function applyBackground(config: BackgroundConfig | null) {
     return;
   }
 
-  const imageUrl = (normalizedConfig.type === 'url' ? normalizedConfig.url : normalizedConfig.imageData) || null;
+  const imageUrl =
+    (normalizedConfig.type === "url"
+      ? normalizedConfig.url
+      : normalizedConfig.imageData) || null;
 
   if (!imageUrl) {
     removeBackground();
     return;
   }
 
-  const existingBg = document.getElementById('dpp-bg');
-  const existingStyle = document.getElementById('dpp-bg-style');
+  const existingBg = document.getElementById("dpp-bg");
+  const existingStyle = document.getElementById("dpp-bg-style");
 
-  document.body.classList.add('dpp-bg-active');
+  document.body.classList.add("dpp-bg-active");
 
   const overlayAlpha = (1 - normalizedConfig.opacity).toFixed(3);
   const blurPx = ((1 - normalizedConfig.opacity) * 8).toFixed(1);
-  document.body.style.setProperty('--dpp-overlay-light', `rgba(255, 255, 255, ${overlayAlpha})`);
-  document.body.style.setProperty('--dpp-overlay-dark', `rgba(30, 30, 30, ${overlayAlpha})`);
-  document.body.style.setProperty('--dpp-blur', `blur(${blurPx}px)`);
+  document.body.style.setProperty(
+    "--dpp-overlay-light",
+    `rgba(255, 255, 255, ${overlayAlpha})`,
+  );
+  document.body.style.setProperty(
+    "--dpp-overlay-dark",
+    `rgba(30, 30, 30, ${overlayAlpha})`,
+  );
+  document.body.style.setProperty("--dpp-blur", `blur(${blurPx}px)`);
 
   const topOffset = getToolbarBottom();
 
-  const bgDiv = existingBg || document.createElement('div');
-  bgDiv.id = 'dpp-bg';
+  const bgDiv = existingBg || document.createElement("div");
+  bgDiv.id = "dpp-bg";
   Object.assign(bgDiv.style, {
-    position: 'fixed',
+    position: "fixed",
     top: `${topOffset}px`,
-    left: '0',
-    right: '0',
-    bottom: '0',
-    zIndex: '-1',
+    left: "0",
+    right: "0",
+    bottom: "0",
+    zIndex: "-1",
     backgroundImage: `url("${escapeCssUrl(imageUrl)}")`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-    pointerEvents: 'none',
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+    pointerEvents: "none",
   });
   if (!existingBg) document.body.prepend(bgDiv);
 
-  const styleEl = existingStyle || document.createElement('style');
-  styleEl.id = 'dpp-bg-style';
+  const styleEl = existingStyle || document.createElement("style");
+  styleEl.id = "dpp-bg-style";
   styleEl.textContent = `
     #dpp-bg::after {
       content: '';
@@ -8491,5 +9886,4 @@ function applyBackground(config: BackgroundConfig | null) {
   if (!existingStyle) document.head.appendChild(styleEl);
 
   patchContainerBackgrounds();
-
 }

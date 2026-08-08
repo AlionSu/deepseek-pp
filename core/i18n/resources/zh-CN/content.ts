@@ -60,9 +60,6 @@ export const content = {
       daysAgo: '{count}天前',
     },
   },
-  uxPolish: {
-    downloadCode: '下载',
-  },
   toolBlock: {
     title: '已调用工具（{count}次）',
     pythonInterpreter: 'Python 解释器',
@@ -106,6 +103,10 @@ export const content = {
     toolGroup: '已调用 {count} 次工具',
     reasoningStep: '已思考 · 第 {step} 步',
     reasoningNotPersisted: '该步骤的思考过程未保留在消息流中。',
+    codeRun: '运行',
+    codeRunning: '运行中…',
+    codeRunFailed: '运行失败',
+    codeRunnerUnavailable: '代码运行器不可用',
     concurrencyGuard: 'Agent 正在执行中，已忽略此消息触发的重复任务。如需中断，请点击 Agent 面板的「停止」。',
   },
   permission: {

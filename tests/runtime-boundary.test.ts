@@ -235,7 +235,7 @@ describe('runtime sender and envelope boundary', () => {
     expectInOrder(content, [
       'decodeRuntimeMessageEnvelope(message)',
       'createExtensionRuntimeMessageContext(sender',
-      "if (message.type === 'STATE_UPDATED')",
+      /if \(message\.type === ['"]STATE_UPDATED['"]\)/,
     ]);
     expect(projectSidebar).toContain('createExtensionRuntimeMessageContext(sender');
     expect(offscreen).toContain('createExtensionRuntimeMessageContext(port.sender ?? {}');
@@ -254,11 +254,13 @@ describe('runtime sender and envelope boundary', () => {
   });
 });
 
-function expectInOrder(source: string, fragments: string[]): void {
+function expectInOrder(source: string, fragments: Array<string | RegExp>): void {
   let previous = -1;
   for (const fragment of fragments) {
-    const index = source.indexOf(fragment);
-    expect(index, `missing ${fragment}`).toBeGreaterThan(previous);
+    const index = typeof fragment === 'string'
+      ? source.indexOf(fragment)
+      : source.search(fragment);
+    expect(index, `missing ${String(fragment)}`).toBeGreaterThan(previous);
     previous = index;
   }
 }

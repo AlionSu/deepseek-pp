@@ -51,6 +51,11 @@ function decodeTrace(value: unknown, path: string): InlineAgentTraceRecord {
   if (!INLINE_AGENT_LOOP_STATUSES.has(String(trace.status))) {
     throw new Error(`${path}.status is not supported`);
   }
+  if (trace.initialExecutions !== undefined) {
+    if (!Array.isArray(trace.initialExecutions) || !trace.initialExecutions.every(isToolExecutionRecord)) {
+      throw new Error(`${path}.initialExecutions must contain valid tool execution records`);
+    }
+  }
   if (!Array.isArray(trace.steps)) throw new Error(`${path}.steps must be an array`);
   const steps = trace.steps.map((step, index) => decodeStep(step, `${path}.steps[${index}]`));
   requireFiniteNumber(trace.totalSteps, `${path}.totalSteps`);

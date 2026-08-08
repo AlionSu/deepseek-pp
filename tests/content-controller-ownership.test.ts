@@ -16,22 +16,21 @@ describe('Content controller ownership contract', () => {
       'export',
       'history',
       'project',
-      'ux-polish',
       'background',
       'pet',
     ]) {
-      expect(contentSource).toContain(`createDomCapability('${id}'`);
+      expect(contentSource).toMatch(new RegExp(`createDomCapability\\(\\s*[\"']${id}[\"']`));
     }
-    expect(contentSource).not.toContain("createDomCapability('tool-inline-chat'");
-    expect(contentSource).not.toContain("createDomCapability('multimodal-export'");
-    expect(contentSource).not.toContain("createDomCapability('history-project-ux'");
+    expect(contentSource).not.toMatch(/createDomCapability\([\"']tool-inline-chat[\"']/);
+    expect(contentSource).not.toMatch(/createDomCapability\([\"']multimodal-export[\"']/);
+    expect(contentSource).not.toMatch(/createDomCapability\([\"']history-project-ux[\"']/);
   });
 
   it('routes token and tool refresh through one event-driven navigation owner', () => {
     expect(mainWorldSource).toContain('createMainWorldNavigationController({');
-    expect(mainWorldSource).toContain("bridge.post({ type: 'NAVIGATION_CHANGED' });");
-    expect(contentSource).toContain("case 'NAVIGATION_CHANGED':");
-    expect(contentSource).toContain("window.dispatchEvent(new Event('dpp:navigation'));");
+    expect(mainWorldSource).toMatch(/bridge\.post\(\{ type: [\"']NAVIGATION_CHANGED[\"'] \}\);/);
+    expect(contentSource).toContain('case "NAVIGATION_CHANGED":');
+    expect(contentSource).toContain('window.dispatchEvent(new Event("dpp:navigation"));');
     expect(contentSource).not.toContain('TOKEN_SPEED_ROUTE_CHECK_MS');
     expect(contentSource).not.toContain('TOOL_BLOCK_ROUTE_CHECK_MS');
     expect(contentSource).not.toContain('tokenSpeedRouteTimer');
@@ -39,21 +38,21 @@ describe('Content controller ownership contract', () => {
   });
 
   it('waits for the shared navigation event before executing an unbound new-chat tool', () => {
-    expect(contentSource).toContain('bindNewChatToolCallToBrowserSession(call, grant?.chatSessionId');
-    expect(contentSource).toContain("from './content/tool-session-binding'");
+    expect(contentSource).toMatch(/bindNewChatToolCallToBrowserSession\(\s*call,\s*grant\?\.chatSessionId/);
+    expect(contentSource).toMatch(/from [\"']\.\/content\/tool-session-binding[\"'];/);
   });
 
   it('routes both worlds through the shared document lifecycle instead of entrypoint listeners', () => {
     expect(contentSource).toContain('replaceContentDocumentLifecycle({');
     expect(mainWorldSource).toContain('replaceContentDocumentLifecycle({');
-    expect(contentSource).not.toContain("window.addEventListener('pagehide'");
-    expect(mainWorldSource).not.toContain("window.addEventListener('pagehide'");
+    expect(contentSource).not.toMatch(/window\.addEventListener\([\"']pagehide[\"']/);
+    expect(mainWorldSource).not.toMatch(/window\.addEventListener\([\"']pagehide[\"']/);
   });
 
   it('removes capability-owned transient UI and resolves permission waits during teardown', () => {
     expect(contentSource).toContain('finishActivePermissionRequest(false);');
-    expect(contentSource).toContain("document.querySelectorAll('.dpp-tool-block, .dpp-artifact-results')");
+    expect(contentSource).toMatch(/document\s*\.querySelectorAll\([\"']\.dpp-tool-block, \.dpp-artifact-results[\"']\)/);
     expect(contentSource).toContain('removeInlineAgentStyles();');
-    expect(contentSource).toContain("document.querySelectorAll('[data-dpp-transparent]')");
+    expect(contentSource).toMatch(/document\s*\.querySelectorAll\([\"']\[data-dpp-transparent\][\"']\)/);
   });
 });

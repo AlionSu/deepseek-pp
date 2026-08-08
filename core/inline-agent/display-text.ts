@@ -3,6 +3,9 @@ import {
   stripDanglingLeadingPunctuation,
   TASK_COMPLETE_BLOCK_RE,
 } from './prompt';
+import { stripRetiredArtifactProtocolBlocks } from './retired-artifact';
+import { stripToolCalls } from '../interceptor/tool-parser';
+import type { ToolDescriptor } from '../types';
 
 /**
  * Display-layer answer extraction (Issue #551, pivoted by UI review): the
@@ -32,334 +35,36 @@ export function getInlineAgentProcessText(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Artifact deliverables (Issue #551 stream redesign): the model delivers files
-// by writing `<artifact_create>{"filename":"x.html","content":"…"}</artifact_create>`
-// as plain text (the artifact tools are not in the loop descriptor catalog, so
-// the XML stays in the text stream). The display layer converts every
-// artifact block into a plain fenced code block BEFORE tool-call stripping,
-// so the raw JSON is never shown and the answer no longer depends on the
-// 8000-char step clamp. `artifact_bundle_create` emits one block per file.
-// `convertInlineAgentArtifactBlocks` is pure and deterministic: the same raw
-// text always converts to the same markdown, which is what makes the
-// persisted "body + code blocks" finalText form round-trip through refresh.
-// The DeepSeek native renderer takes over chart (mermaid/xychart-beta) and
-// runnable (html/svg/xml) fences from here — the plugin no longer renders
-// artifact previews of its own, and only those natively special-cased
-// languages get a fence label. Every other deliverable renders as a plain
-// unlabeled code block, exactly like official support: the plugin adds no
-// language handling beyond what the native pipeline already provides.
+// Artifact protocol retirement (Issue: drop the plugin artifact extension):
+// the plugin no longer converts `<artifact_create>` / `<artifact_bundle_create>`
+// XML into display shapes. The model delivers files as plain markdown fences
+// (````html / xychart-beta …). At the stored RESPONSE boundary xychart
+// shorthand is normalized to Mermaid, then DeepSeek owns the final chart cards and native
+// copy/download/run code
+// blocks, native preview panel).
+//
+// Retirement contract — no silent swallow: artifact XML that still arrives
+// from in-flight sessions (learned model behavior) is a retired internal
+// control protocol: it is stripped by {@link stripRetiredArtifactProtocolBlocks}
+// BEFORE the ordinary tool-call strip, so it can never surface as raw protocol
+// bytes. Stripping alone is not enough: the loop's nudge decision runs on the
+// same stripped text, so a turn whose visible tail still promises a
+// deliverable (e.g. "now creating a report for you" without anything
+// renderable following) is nudged to re-deliver in a renderable form instead
+// of ending on an empty promise. `stripRetiredArtifactProtocolBlocks` only
+// ever removes artifact XML — fenced code blocks, plain text, and every other
+// tool tag pass through byte-for-byte (covered by tests).
 // ---------------------------------------------------------------------------
 
 export const INLINE_AGENT_TRUNCATION_MARKER = '...[truncated]';
 
-/** Fence used for artifact code blocks (see pickArtifactFence). */
-const ARTIFACT_BASE_FENCE_LENGTH = 4;
-const ARTIFACT_BLOCK_OPEN_RE = /<(artifact_create|artifact_bundle_create)\s*>/g;
-const ARTIFACT_FILENAME_RE = /"filename"\s*:\s*"((?:[^"\\]|\\.)*)"/;
-const ARTIFACT_CONTENT_RE = /"content"\s*:\s*"/;
-const ARTIFACT_PARAM_SUMMARY_MAX_CHARS = 120;
-
-/**
- * Markdown language labels by file extension (lowercased). Only extensions the
- * DeepSeek native renderer special-cases as runnable code blocks (html/svg/xml)
- * are mapped; anything else falls back to an unlabeled fence.
- */
-const ARTIFACT_LANGUAGE_BY_EXT: Record<string, string> = {
-  html: 'html',
-  htm: 'html',
-  svg: 'svg',
-  xml: 'xml',
-};
-
-/**
- * Normalizes the artifact `language` enum to a markdown fence label. Only
- * languages the DeepSeek native renderer special-cases get a label: runnable
- * code blocks (html/svg/xml) and chart cards (mermaid — xychart-beta/xychart
- * normalize to `mermaid` because the native chart card is a mermaid
- * renderer). Every other deliverable renders as a plain unlabeled code block,
- * matching official support exactly — the plugin adds no language handling of
- * its own.
- */
-function normalizeArtifactLanguage(language: unknown, filename: string): string {
-  if (typeof language === 'string' && language.trim()) {
-    const normalized = language.trim().toLowerCase();
-    const byEnum: Record<string, string> = {
-      html: 'html',
-      svg: 'svg',
-      xml: 'xml',
-      // Chart deliverables: the DeepSeek native renderer charts `mermaid`
-      // fences (its chart card is a mermaid renderer), so xychart-beta /
-      // xychart labels normalize to `mermaid` to make the native pipeline
-      // take over instead of showing a plain code block.
-      mermaid: 'mermaid',
-      'xychart-beta': 'mermaid',
-      xychart: 'mermaid',
-    };
-    if (normalized in byEnum) return byEnum[normalized];
-  }
-  const extension = filename.split('.').pop()?.toLowerCase() ?? '';
-  return ARTIFACT_LANGUAGE_BY_EXT[extension] ?? '';
-}
-
-/**
- * The artifact fence is FIXED at 4 backticks unless the content itself
- * contains a run of 4+ backticks (then the fence grows past the longest run).
- * The fixed default is deliberate: a truncated artifact block (persisted step
- * text, old traces) and its complete counterpart (persisted finalText) then
- * convert to byte-identical fences, which is what lets the answer resolver
- * recognize them as the same origin after code-blockification.
- */
-function pickArtifactFence(content: string): string {
-  let maxRun = 0;
-  let run = 0;
-  for (let i = 0; i < content.length; i += 1) {
-    if (content[i] === '`') {
-      run += 1;
-      if (run > maxRun) maxRun = run;
-    } else {
-      run = 0;
-    }
-  }
-  return '`'.repeat(maxRun >= ARTIFACT_BASE_FENCE_LENGTH ? maxRun + 1 : ARTIFACT_BASE_FENCE_LENGTH);
-}
-
-/**
- * Prefix-preserving JSON-fragment unescape for salvaged artifact blocks.
- * Incomplete escapes at the end of a truncated fragment (e.g. a cut-off
- * `\n` or `\u00`) are dropped, so `unescape(prefix(raw))` is always a prefix
- * of `unescape(raw)` — the resolver's same-origin prefix check stays valid.
- */
-function unescapeJsonFragment(raw: string): string {
-  let out = '';
-  let i = 0;
-  while (i < raw.length) {
-    const ch = raw[i];
-    if (ch !== '\\') {
-      out += ch;
-      i += 1;
-      continue;
-    }
-    const next = raw[i + 1];
-    if (next === undefined) break; // trailing backslash: incomplete escape
-    switch (next) {
-      case '"': out += '"'; i += 2; break;
-      case '\\': out += '\\'; i += 2; break;
-      case '/': out += '/'; i += 2; break;
-      case 'n': out += '\n'; i += 2; break;
-      case 't': out += '\t'; i += 2; break;
-      case 'r': out += '\r'; i += 2; break;
-      case 'b': out += '\b'; i += 2; break;
-      case 'f': out += '\f'; i += 2; break;
-      case 'u': {
-        const hex = raw.slice(i + 2, i + 6);
-        if (hex.length < 4 || !/^[0-9a-fA-F]{4}$/.test(hex)) break; // incomplete escape
-        out += String.fromCharCode(parseInt(hex, 16));
-        i += 6;
-        break;
-      }
-      default:
-        out += next;
-        i += 2;
-    }
-  }
-  return out;
-}
-
-function escapeArtifactFilename(filename: string): string {
-  // Filenames are user-facing plain text: drop markdown-significant chars so
-  // the header can never inject formatting.
-  return filename.replace(/[*`]/g, '').trim() || 'artifact';
-}
-
-/**
- * Renders one artifact file as a plain fenced code block.
- *
- * `style` controls the block's shape:
- * - `'closed'` (final/restore): a well-formed block; a truncated fragment
- *   carries the explicit `...[truncated]` marker inside the fence.
- * - `'open'` (live streaming): NO closing fence and NO marker, so the partial
- *   content visibly grows with the token stream — the markdown renderer
- *   auto-closes the fence at the end of the text.
- */
-function renderArtifactCodeBlock(
-  filename: string,
-  content: string,
-  language: unknown,
-  truncated: boolean,
-  style: 'closed' | 'open' = 'closed',
-): string {
-  const fence = pickArtifactFence(content);
-  const lang = normalizeArtifactLanguage(language, filename);
-  const header = `${fence}${lang}\n${content}`;
-  if (style === 'open') return header;
-  // The truncation marker sits INSIDE the block (honest labeling, same marker
-  // as clampText). The block is always well-formed (closed fence), so the
-  // markdown renderer shows partial content + marker; the resolver strips the
-  // trailing marker + fence to compare against the complete block.
-  const marker = truncated ? `\n${INLINE_AGENT_TRUNCATION_MARKER}` : '';
-  return `${header}${marker}\n${fence}`;
-}
-
-function stringifyArtifactPayload(payload: unknown): string {
-  try {
-    return JSON.stringify(payload, null, 2);
-  } catch {
-    return String(payload);
-  }
-}
-
-function renderArtifactCreateBlock(
-  body: string,
-  truncated: boolean,
-  style: 'closed' | 'open',
-): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    parsed = null;
-  }
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const record = parsed as Record<string, unknown>;
-    const filename = typeof record.filename === 'string' ? record.filename : 'artifact';
-    const content = typeof record.content === 'string' ? record.content : stringifyArtifactPayload(record);
-    // A parseable block is complete regardless of the stream mode: always
-    // render the closed, well-formed form.
-    return renderArtifactCodeBlock(filename, content, record.language, false, 'closed');
-  }
-  // Best-effort salvage of a truncated / malformed block: pull the filename
-  // and content fields out of the raw fragment and mark the truncation.
-  const filenameMatch = ARTIFACT_FILENAME_RE.exec(body);
-  const filename = filenameMatch ? unescapeJsonFragment(filenameMatch[1]) : 'artifact';
-  const contentMatch = ARTIFACT_CONTENT_RE.exec(body);
-  const content = contentMatch
-    ? unescapeJsonFragment(body.slice(contentMatch.index + contentMatch[0].length))
-    : body;
-  // Streaming: emit the partial as an OPEN block (no marker, no closing
-  // fence); final/restore: closed block with the truncation marker.
-  return renderArtifactCodeBlock(filename, content, undefined, truncated, style);
-}
-
-function renderArtifactBundleBlock(
-  body: string,
-  truncated: boolean,
-  style: 'closed' | 'open',
-): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    parsed = null;
-  }
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const record = parsed as Record<string, unknown>;
-    const files = Array.isArray(record.files) ? record.files : [];
-    const blocks: string[] = [];
-    for (const file of files) {
-      if (file && typeof file === 'object' && !Array.isArray(file)) {
-        const fileRecord = file as Record<string, unknown>;
-        const filename = typeof fileRecord.filename === 'string' ? fileRecord.filename : 'artifact';
-        const content = typeof fileRecord.content === 'string'
-          ? fileRecord.content
-          : stringifyArtifactPayload(fileRecord);
-        blocks.push(renderArtifactCodeBlock(filename, content, fileRecord.language, false, 'closed'));
-      }
-    }
-    if (blocks.length > 0) return blocks.join('\n\n');
-    // A bundle with no parseable files still delivers its payload: show the
-    // decoded JSON body rather than the raw XML.
-    return renderArtifactCodeBlock('artifact_bundle', stringifyArtifactPayload(record), 'json', truncated, style);
-  }
-  return renderArtifactCreateBlock(body, truncated, style);
-}
-
-export interface InlineAgentArtifactConversionOptions {
-  /**
-   * What to do with artifact blocks whose JSON cannot be parsed:
-   * - `'hide'`: render nothing until the block completes (not used anymore;
-   *   kept for API stability).
-   * - `'stream'` (live streaming): best-effort decode of the fragment as an
-   *   OPEN code block (no truncation marker, no closing fence) so the
-   *   deliverable visibly grows with the token stream; the markdown renderer
-   *   auto-closes the fence at the end of the text.
-   * - `'salvage'` (final answer / restore): best-effort decode as a closed
-   *   code block with an explicit truncation marker.
-   * Defaults to `'salvage'`.
-   */
-  partial?: 'hide' | 'stream' | 'salvage';
-}
-
-/**
- * Converts every `<artifact_create>` / `<artifact_bundle_create>` block in the
- * raw model text into "filename + fenced code block" markdown. Blocks are
- * scanned linearly; an artifact block without its closing tag (truncated by
- * the 8000-char step clamp or an old trace) is salvaged up to the end of the
- * text. The output is deterministic markdown — the raw JSON is never shown.
- */
-export function convertInlineAgentArtifactBlocks(
-  text: string,
-  options?: InlineAgentArtifactConversionOptions,
-): string {
-  if (!text.includes('<artifact_create>') && !text.includes('<artifact_bundle_create>')) {
-    return text;
-  }
-  const partial = options?.partial ?? 'salvage';
-
-  interface BlockRange { start: number; end: number; name: string; }
-  const blocks: BlockRange[] = [];
-  ARTIFACT_BLOCK_OPEN_RE.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let scanFrom = 0;
-  while ((match = ARTIFACT_BLOCK_OPEN_RE.exec(text)) !== null) {
-    const name = match[1];
-    const start = match.index;
-    const closeTag = `</${name}>`;
-    const closeIndex = text.indexOf(closeTag, ARTIFACT_BLOCK_OPEN_RE.lastIndex);
-    if (closeIndex === -1) {
-      // Unclosed block (truncated text): salvage the remainder.
-      blocks.push({ start, end: text.length, name });
-      break;
-    }
-    blocks.push({ start, end: closeIndex + closeTag.length, name });
-    scanFrom = closeIndex + closeTag.length;
-    ARTIFACT_BLOCK_OPEN_RE.lastIndex = scanFrom;
-  }
-
-  if (blocks.length === 0) return text;
-
-  let output = '';
-  let cursor = 0;
-  const style: 'closed' | 'open' = partial === 'stream' ? 'open' : 'closed';
-  for (const block of blocks) {
-    output += text.slice(cursor, block.start);
-    const hasClose = text.slice(block.start, block.end).endsWith(`</${block.name}>`);
-    const bodyStart = block.start + block.name.length + 2;
-    const bodyEnd = hasClose ? block.end - (block.name.length + 3) : text.length;
-    const body = text.slice(bodyStart, bodyEnd).trim();
-    const truncated = !hasClose;
-    const rendered = block.name === 'artifact_bundle_create'
-      ? renderArtifactBundleBlock(body, truncated, style)
-      : renderArtifactCreateBlock(body, truncated, style);
-    if (partial === 'hide' && rendered.includes(INLINE_AGENT_TRUNCATION_MARKER)) {
-      // An unparseable block is (probably) still streaming in: show nothing
-      // until it completes instead of flashing a [truncated] block.
-      output += '';
-    } else {
-      output += rendered;
-    }
-    cursor = block.end;
-  }
-  output += text.slice(cursor);
-  return output;
-}
-
 /**
  * Removes the trailing truncation suffix from a display text so two texts of
- * the same origin (one clamped, one complete) can be compared. The suffix is:
- * the `...[truncated]` marker, and — when a salvaged artifact block emitted
- * the marker inside a closed fence — the trailing fence line. Iterated so
- * `content\n````\n...[truncated]` and `content\n...[truncated]` (unclosed
- * clamp cut) both normalize to `content`.
+ * the same origin (one clamped, one complete) can be compared. The suffix is
+ * the `...[truncated]` marker, and — for legacy persisted texts — a trailing
+ * fence line that an old salvage conversion emitted inside a closed fence.
+ * Iterated so `content\n````\n...[truncated]` and `content\n...[truncated]`
+ * (unclosed clamp cut) both normalize to `content`.
  */
 export function stripInlineAgentTruncationSuffix(text: string): string {
   let value = text.trimEnd();
@@ -393,13 +98,10 @@ export function stripInlineAgentTruncationSuffix(text: string): string {
  * runs). `fromStep` tells the caller the step body IS the answer and may be
  * replaced without a further equality check.
  *
- * Since the stream redesign, both candidates are code-blockified display
- * texts: a truncated step (clamped mid-artifact) carries a `...[truncated]`
- * marker (+ closing fence from the salvage conversion), so the prefix
+ * Both candidates may carry a `...[truncated]` clamp marker, so the prefix
  * comparison normalizes both sides with
  * {@link stripInlineAgentTruncationSuffix} first. That keeps the same-origin
- * detection working after code-blockification without ever treating unrelated
- * texts as one.
+ * detection working without ever treating unrelated texts as one.
  */
 export function resolveInlineAgentAnswerText(
   finalAnswer: string,
@@ -422,7 +124,7 @@ export function resolveInlineAgentAnswerText(
  * has no useful string field (the caller then falls back to the result
  * summary).
  */
-const ARTIFACT_PARAM_PRIORITY_FIELDS = [
+const TOOL_PARAM_PRIORITY_FIELDS = [
   'query',
   'url',
   'filename',
@@ -437,16 +139,47 @@ const ARTIFACT_PARAM_PRIORITY_FIELDS = [
   'expression',
   'code',
 ];
+const TOOL_PARAM_SUMMARY_MAX_CHARS = 120;
 
 export function summarizeInlineAgentToolParams(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   const record = payload as Record<string, unknown>;
-  for (const key of ARTIFACT_PARAM_PRIORITY_FIELDS) {
+  for (const key of TOOL_PARAM_PRIORITY_FIELDS) {
     const value = record[key];
     if (typeof value !== 'string' || !value.trim()) continue;
     const clean = value.trim().replace(/\s+/g, ' ');
-    if (clean.length <= ARTIFACT_PARAM_SUMMARY_MAX_CHARS) return clean;
-    return `${clean.slice(0, ARTIFACT_PARAM_SUMMARY_MAX_CHARS)}…`;
+    if (clean.length <= TOOL_PARAM_SUMMARY_MAX_CHARS) return clean;
+    return `${clean.slice(0, TOOL_PARAM_SUMMARY_MAX_CHARS)}…`;
   }
   return null;
+}
+
+/**
+ * The user-facing final text: retired artifact-protocol XML stripped first
+ * (control channel — see module header), then tool-call XML of the active
+ * catalog, then the `<task_complete>` control block. The remaining markdown
+ * body (plain fences) is what the native history renderer takes over on the
+ * committed final web response.
+ */
+export function getInlineAgentDisplayFinalText(
+  text: string,
+  descriptors: readonly ToolDescriptor[],
+): string {
+  const withoutRetiredProtocol = stripRetiredArtifactProtocolBlocks(text);
+  const withoutToolCalls = stripToolCalls(withoutRetiredProtocol, { descriptors });
+  return getInlineAgentAnswerText(withoutToolCalls);
+}
+
+/**
+ * Step bodies show the model's working notes with the retired artifact
+ * protocol and tool-call XML removed and the internal `<task_complete>`
+ * control block stripped.
+ */
+export function getInlineAgentDisplayStepText(
+  text: string,
+  descriptors: readonly ToolDescriptor[],
+): string {
+  const withoutRetiredProtocol = stripRetiredArtifactProtocolBlocks(text);
+  const withoutToolCalls = stripToolCalls(withoutRetiredProtocol, { descriptors });
+  return getInlineAgentProcessText(withoutToolCalls);
 }

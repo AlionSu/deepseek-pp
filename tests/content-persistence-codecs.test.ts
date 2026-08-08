@@ -80,6 +80,24 @@ describe('Content persistence codecs', () => {
       .toThrow('status is not supported');
   });
 
+  it('round-trips initial trigger-turn executions and rejects corrupt payloads', () => {
+    const withInitial = createTrace({
+      initialExecutions: [structuredClone(CONTRACT_EXECUTION_RECORD)],
+    });
+    const [decoded] = decodeInlineAgentTraces([withInitial]);
+    expect(decoded.initialExecutions).toEqual([CONTRACT_EXECUTION_RECORD]);
+
+    // The field is optional: traces predating it decode without it.
+    const [legacy] = decodeInlineAgentTraces([createTrace({ initialExecutions: undefined })]);
+    expect(legacy.initialExecutions).toBeUndefined();
+
+    // Corrupt payloads fail visibly (never silently filtered).
+    expect(() => decodeInlineAgentTraces([createTrace({
+      initialExecutions: [{}],
+    })]))
+      .toThrow('initialExecutions must contain valid tool execution records');
+  });
+
   it('does not overwrite corrupt tool-block state during an upsert', async () => {
     const storage = createMemorySlot({ present: true, value: [{ id: 'corrupt' }] });
     const store = createToolExecutionBlockStore(storage);

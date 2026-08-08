@@ -43,6 +43,12 @@ export interface InlineAgentRendererLabels {
   reasoningStep: (stepNumber: number) => string;
   /** Explanation shown when a folded reasoning note is expanded. */
   reasoningNotPersisted: string;
+  /** Run action on agent-console code blocks (incremental, non-native languages only). */
+  codeRun: string;
+  /** Run action while a console code block is executing. */
+  codeRunning: string;
+  /** Run action failure label. */
+  codeRunFailed: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,10 +384,20 @@ export function injectInlineAgentStyles(): void {
       max-height: 160px;
       overflow-y: auto;
     }
+    /*
+     * Adopted native reasoning host (the FIRST native turn's thought block,
+     * e.g. "Thought (N s)"): aligned with the agent step flow. The adoption
+     * is CSS-only — the host DOM is never moved — and the class only
+     * neutralizes indent chrome (plugin's own and the host-level native one)
+     * so the block sits at the same left edge and visual level as the
+     * reasoning notes / tool groups of the agent stream: the whole run record
+     * reads as one flow (Issue: unified agent run record). Content and
+     * interaction (the native fold toggle) are untouched.
+     */
     .dpp-agent-reasoning-adopted {
-      margin-left: 16px;
-      border-left: 1px solid var(--dpp-ui-border);
-      padding-left: 16px;
+      margin: 2px 0;
+      padding-left: 0;
+      border-left: none;
     }
     /* Reasoning notes: real captured thinking text, expanded on click. */
     .dpp-agent-reasoning-note {
@@ -452,6 +468,53 @@ export function injectInlineAgentStyles(): void {
       padding: 6px 0;
       font-size: 13px;
       color: var(--dpp-ui-text-muted);
+    }
+    /* Incremental code-run support (non-native languages only): DeepSeek owns
+       html/svg/xml/mermaid presentation, while history cleanup normalizes
+       xychart shorthand to Mermaid. The agent console only adds a run action to code
+       blocks whose language the
+       native pipeline does not run (javascript/typescript/python). */
+    .dpp-agent-code-run-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 2px 0 6px;
+    }
+    .dpp-agent-code-run {
+      padding: 2px 10px;
+      font-size: 12px;
+      line-height: 1.6;
+      border: 1px solid var(--dpp-ui-border);
+      border-radius: 6px;
+      background: var(--dpp-ui-surface-muted);
+      color: var(--dpp-ui-text);
+      cursor: pointer;
+    }
+    .dpp-agent-code-run:hover {
+      border-color: var(--dpp-ui-accent);
+      color: var(--dpp-ui-accent);
+    }
+    .dpp-agent-code-run:focus-visible {
+      outline: 2px solid var(--dpp-ui-accent);
+      outline-offset: 1px;
+    }
+    .dpp-agent-code-run:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .dpp-agent-code-run-output {
+      margin: 0 0 6px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      background: var(--dpp-ui-accent-panel);
+      color: var(--dpp-ui-text-muted);
+      font-family: 'SF Mono', Monaco, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 240px;
+      overflow-y: auto;
     }
     .dpp-agent-starting::before {
       content: '';
@@ -781,15 +844,136 @@ export function updateStepStatus(step: HTMLElement, status: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Agent-stream text rendering: the narration body is plain markdown. Artifact
-// deliverables arrive as fenced code blocks (converted by
-// `convertInlineAgentArtifactBlocks` in display-text), and the DeepSeek page's
-// own native renderer takes over their presentation (chart cards, runnable
-// code blocks) on the native final-answer message — the plugin renders no
-// artifact previews of its own.
+// Incremental code-run support (native renderer does not run these): the
+// DeepSeek presents html/svg/xml runnable blocks and Mermaid chart cards. The
+// stored RESPONSE boundary converts xychart shorthand to Mermaid, so the plugin
+// never renders any of those deliverables itself. For languages the native pipeline
+// only renders as plain code
+// (javascript/typescript/python) the agent console adds a run action that
+// executes through the extension's sandbox runner — an increment on top of
+// native rendering, never a replacement of it.
+// ---------------------------------------------------------------------------
+const AGENT_NATIVE_DELIVERABLE_CODE_LANGS = new Set([
+  'html',
+  'htm',
+  'svg',
+  'xml',
+  'mermaid',
+  'xychart',
+  'xychart-beta',
+]);
+const AGENT_RUNNABLE_CODE_LANGS: Record<string, 'javascript' | 'typescript' | 'python'> = {
+  javascript: 'javascript',
+  js: 'javascript',
+  typescript: 'typescript',
+  ts: 'typescript',
+  python: 'python',
+  py: 'python',
+};
+
+export interface AgentCodeRunResult {
+  ok: boolean;
+  output?: unknown;
+  detail?: string;
+  error?: { message: string };
+}
+
+export type AgentCodeRunner = (
+  code: string,
+  language: 'javascript' | 'typescript' | 'python',
+) => Promise<AgentCodeRunResult>;
+
+function formatAgentCodeRunOutput(result: AgentCodeRunResult, labels?: Partial<InlineAgentRendererLabels>): string {
+  const output = result.output && typeof result.output === 'object'
+    ? result.output as Record<string, unknown>
+    : {};
+  const lines: string[] = [];
+  if (!result.ok && result.error?.message) lines.push(`error: ${result.error.message}`);
+  if (result.detail && !output.stdout && !output.stderr && !output.result) lines.push(result.detail);
+  if (typeof output.stdout === 'string' && output.stdout) lines.push(`stdout:\n${output.stdout}`);
+  if (typeof output.stderr === 'string' && output.stderr) lines.push(`stderr:\n${output.stderr}`);
+  if (typeof output.result === 'string' && output.result) lines.push(`result:\n${output.result}`);
+  const body = lines.filter(Boolean).join('\n\n');
+  return body || (result.ok ? 'OK' : labels?.codeRunFailed ?? 'Run failed');
+}
+
+/**
+ * Adds the incremental run action to every code block of a step body whose
+ * language is NOT natively rendered by DeepSeek (see
+ * {@link AGENT_RUNNABLE_CODE_LANGS}). Idempotent per block: re-running after
+ * a stream update skips already-hydrated blocks. Never touches native
+ * deliverables (html/svg/xml/mermaid or xychart shorthand).
+ */
+export function hydrateAgentStepCodeRunners(
+  step: HTMLElement,
+  runCode: AgentCodeRunner,
+  labels?: Partial<InlineAgentRendererLabels>,
+): void {
+  const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
+  if (!body) return;
+  for (const pre of body.querySelectorAll<HTMLElement>('pre[data-dpp-lang]')) {
+    if (pre.hasAttribute('data-dpp-code-run-ready')) continue;
+    const lang = (pre.getAttribute('data-dpp-lang') ?? '').trim().toLowerCase();
+    if (!lang || AGENT_NATIVE_DELIVERABLE_CODE_LANGS.has(lang)) continue;
+    const runnerLang = AGENT_RUNNABLE_CODE_LANGS[lang];
+    if (!runnerLang) continue;
+    pre.setAttribute('data-dpp-code-run-ready', 'true');
+
+    const code = pre.querySelector('code')?.textContent ?? '';
+
+    const row = document.createElement('div');
+    row.className = 'dpp-agent-code-run-row';
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'dpp-agent-code-run';
+    button.textContent = labels?.codeRun ?? 'Run';
+
+    const output = document.createElement('div');
+    output.className = 'dpp-agent-code-run-output';
+    output.hidden = true;
+
+    button.addEventListener('click', () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      const idleLabel = button.textContent;
+      button.textContent = labels?.codeRunning ?? 'Running…';
+      output.hidden = false;
+      output.textContent = '';
+      void runCode(code, runnerLang)
+        .then((result) => {
+          output.textContent = formatAgentCodeRunOutput(result, labels);
+        })
+        .catch((error: unknown) => {
+          output.textContent = error instanceof Error ? error.message : String(error);
+        })
+        .finally(() => {
+          button.disabled = false;
+          button.textContent = idleLabel;
+        });
+    });
+
+    row.appendChild(button);
+    pre.insertAdjacentElement('afterend', row);
+    row.insertAdjacentElement('afterend', output);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agent-stream text rendering: narration remains visible in the work log, but
+// deliverable languages owned by DeepSeek's native renderer are deliberately
+// omitted from this plugin DOM. Their complete Markdown bytes remain in the
+// step's data-dpp-raw-text / trace and are delivered in the native final-answer
+// message, where DeepSeek supplies language labels, highlighting, chart cards,
+// and copy/download/run/preview interactions. Hiding both closed and streaming
+// (unterminated) native fences prevents any plugin-owned grey code frame from
+// flashing before native delivery. Non-native runnable languages keep the
+// incremental sandbox action below.
 // ---------------------------------------------------------------------------
 export function renderAgentStreamText(text: string): string {
-  return renderInlineMarkdown(text);
+  return renderInlineMarkdown(text, {
+    omitFencedCodeLanguages: AGENT_NATIVE_DELIVERABLE_CODE_LANGS,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -35,8 +35,8 @@ describe('DeepSeek active protocol import boundary', () => {
     const passiveInterceptor = readFileSync('core/interceptor/fetch-hook.ts', 'utf8');
     expect(activeClient).not.toMatch(/from ['"].*interceptor/);
     expect(officialApi).not.toMatch(/from ['"].*interceptor/);
-    expect(passiveInterceptor).toContain("from '../deepseek/stream-codec'");
-    expect(passiveInterceptor).toContain("from '../deepseek/stream-metrics'");
+    expect(passiveInterceptor).toMatch(/from ['"]\.\.\/deepseek\/stream-codec['"]/);
+    expect(passiveInterceptor).toMatch(/from ['"]\.\.\/deepseek\/stream-metrics['"]/);
     expect(existsSync('core/interceptor/sse-parser.ts')).toBe(false);
     expect(existsSync('core/interceptor/token-speed.ts')).toBe(false);
   });

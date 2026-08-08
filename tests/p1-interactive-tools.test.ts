@@ -117,7 +117,7 @@ describe('P1 interactive tool contracts', () => {
     })).toThrow('language must be javascript, typescript, python, or html');
   });
 
-  it('keeps review-card tools out of sidepanel chat descriptors while artifact handles runnable outputs', () => {
+  it('keeps review-card tools out of sidepanel chat descriptors while artifact stays in the execution list', () => {
     const descriptors = [
       ...createMemoryToolDescriptors('en'),
       ...createArtifactToolDescriptors('en'),
@@ -129,6 +129,10 @@ describe('P1 interactive tool contracts', () => {
       .map((descriptor) => descriptor.name);
 
     expect(sidepanelNames).toContain('memory_save');
+    // Issue (drop plugin artifact extension): artifact tools are retired from
+    // the MODEL-FACING prompt only (request-augmentation + sidepanel prompt
+    // build); the sidepanel execution catalog keeps them so residual artifact
+    // XML from in-flight sessions is still parsed and executed.
     expect(sidepanelNames).toContain('artifact_create');
     expect(sidepanelNames).not.toContain('sandbox_run');
     expect(sidepanelNames).not.toContain('skill_draft_create');

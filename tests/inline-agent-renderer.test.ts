@@ -19,6 +19,7 @@ import {
   updateAgentConsoleHeader,
   updateStepStatus,
   updateStepStreamText,
+  hydrateAgentStepCodeRunners,
   type InlineAgentRendererLabels,
 } from '../core/inline-agent/renderer';
 import type { ToolExecutionRecord } from '../core/types';
@@ -605,39 +606,64 @@ describe('inline agent renderer', () => {
     expect(el.textContent).toBe('Starting…');
   });
 
-  it('renders artifact blocks as plain fenced code (no plugin preview UI)', () => {
-    // Artifact conversion yields plain fences; the stream renderer treats them
-    // like any markdown code block. The DeepSeek native renderer takes over
-    // the deliverable presentation on the native final-answer message.
+  it('omits native deliverable fences from the agent console', () => {
     const html = renderAgentStreamText([
       '我生成了文件。',
       '',
-      '````html',
+      '````HTML',
       '<h1>Hi</h1>',
       '````',
+      '',
+      '图表如下。',
+      '',
+      '```xychart-beta',
+      'title Revenue',
+      'line [1, 2, 3]',
+      '```',
+      '',
+      '交付完成。',
     ].join('\n'));
 
-    expect(html).not.toContain('<strong>demo.html</strong>');
-    expect(html).toContain('<pre><code>&lt;h1&gt;Hi&lt;/h1&gt;');
+    expect(html).toContain('<p>我生成了文件。</p>');
+    expect(html).toContain('<p>图表如下。</p>');
+    expect(html).toContain('<p>交付完成。</p>');
+    expect(html).not.toContain('<pre');
+    expect(html).not.toContain('&lt;h1&gt;Hi&lt;/h1&gt;');
+    expect(html).not.toContain('xychart-beta');
     expect(html).not.toContain('dpp-agent-artifact-preview');
     expect(html).not.toContain('iframe');
+  });
+
+  it('hides an unterminated native fence throughout streaming without losing raw text', () => {
+    const step = createAgentStepElement(0);
+    const streamed = '交付物生成中。\n\n```html\n<!DOCTYPE html>\n<html>';
+
+    updateStepStreamText(step, streamed);
+
+    const body = step.querySelector<HTMLElement>('.dpp-agent-step-body');
+    expect(body?.getAttribute('data-dpp-raw-text')).toBe(streamed);
+    expect(body?.textContent).toContain('交付物生成中。');
+    expect(body?.querySelector('pre')).toBeNull();
+    expect(body?.textContent).not.toContain('<!DOCTYPE html>');
   });
 
   it('leaves non-artifact narration as plain markdown', () => {
     const html = renderAgentStreamText('普通正文 **加粗**。\n\n```js\nx\n```');
     expect(html).toContain('<strong>加粗</strong>');
-    expect(html).toContain('<pre><code>x\n</code></pre>');
+    expect(html).toContain('<pre data-dpp-lang="js"><code>x\n</code></pre>');
     expect(html).not.toContain('dpp-agent-artifact-preview');
   });
 
 
-  it('renders artifact block text without any preview placeholders', () => {
+  it('never restores native deliverables as plugin preview placeholders or code frames', () => {
     const container = createAgentContainer();
     const stream = getAgentConsoleBody(container);
     expect(stream).not.toBeNull();
     if (stream) {
-      stream.innerHTML = renderAgentStreamText('````html\n<h1>Hi</h1>\n````');
+      stream.innerHTML = renderAgentStreamText('说明。\n\n````html\n<h1>Hi</h1>\n````');
     }
+    expect(stream?.textContent).toContain('说明。');
+    expect(stream?.querySelector('pre')).toBeNull();
     expect(stream?.querySelector('iframe')).toBeNull();
     expect(stream?.querySelector('.dpp-agent-artifact-preview')).toBeNull();
   });
@@ -698,5 +724,81 @@ describe('inline agent renderer', () => {
     expect(autoCollapseCompletedReasoningHost(host)).toBe(false);
     expect(onClick).not.toHaveBeenCalled();
     expect(host.hasAttribute('data-dpp-reasoning-auto-folded')).toBe(false);
+  });
+
+  it('adds the incremental run action only to non-native code languages', () => {
+    // DeepSeek presents html/svg/xml/mermaid itself; xychart shorthand is
+    // normalized to Mermaid in stored history. The plugin only adds a run action for
+    // languages the native
+    // pipeline does not run (javascript/typescript/python).
+    const step = createAgentStepElement(0);
+    updateStepStreamText(step, [
+      '```python',
+      'print(1)',
+      '```',
+      '',
+      '```html',
+      '<h1>native</h1>',
+      '```',
+      '',
+      '```mermaid',
+      'graph TD; A-->B',
+      '```',
+    ].join('\n'));
+
+    const runCode = vi.fn(async () => ({ ok: true, output: { stdout: '1' } }));
+    hydrateAgentStepCodeRunners(step, runCode, {
+      codeRun: 'Run',
+      codeRunning: 'Running…',
+      codeRunFailed: 'Run failed',
+    });
+
+    const pythonPre = step.querySelector<HTMLElement>('pre[data-dpp-lang="python"]');
+    expect(pythonPre).not.toBeNull();
+    const runButton = pythonPre?.nextElementSibling?.querySelector('.dpp-agent-code-run') ?? null;
+    expect(runButton).not.toBeNull();
+    expect(runButton?.textContent).toBe('Run');
+
+    // Native deliverables never become plugin-owned <pre> elements at all;
+    // only the non-native Python block can receive the incremental runner.
+    expect(step.querySelector('pre[data-dpp-lang="html"]')).toBeNull();
+    expect(step.querySelector('pre[data-dpp-lang="mermaid"]')).toBeNull();
+    expect(step.querySelectorAll('.dpp-agent-code-run')).toHaveLength(1);
+
+    // Clicking runs the block's code through the injected runner and shows
+    // the output.
+    runButton?.dispatchEvent(new MouseEvent('click'));
+    expect(runCode).toHaveBeenCalledWith('print(1)\n', 'python');
+  });
+
+  it('renders run failures and keeps the run action usable', async () => {
+    const step = createAgentStepElement(0);
+    updateStepStreamText(step, '```js\nconsole.log(1)\n```');
+
+    const runCode = vi.fn(async () => ({ ok: false, error: { message: 'boom' } }));
+    hydrateAgentStepCodeRunners(step, runCode, {
+      codeRun: 'Run',
+      codeRunning: 'Running…',
+      codeRunFailed: 'Run failed',
+    });
+
+    const runButton = step.querySelector<HTMLButtonElement>('.dpp-agent-code-run');
+    expect(runButton).not.toBeNull();
+    runButton?.dispatchEvent(new MouseEvent('click'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const output = step.querySelector<HTMLElement>('.dpp-agent-code-run-output');
+    expect(output?.textContent).toContain('boom');
+  });
+
+  it('marks adopted native reasoning hosts flush with the agent stream', () => {
+    injectInlineAgentStyles();
+    const rules = [...document.querySelectorAll('style')].map((el) => el.textContent ?? '').join('\n');
+
+    const adoptedRule = rules.match(/\.dpp-agent-reasoning-adopted \{([\s\S]*?)\n    \}/)?.[1] ?? '';
+    expect(adoptedRule).toContain('margin: 2px 0;');
+    expect(adoptedRule).not.toContain('margin-left: 16px');
+    expect(adoptedRule).not.toContain('border-left: 1px');
   });
 });

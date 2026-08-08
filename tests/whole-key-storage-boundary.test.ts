@@ -28,9 +28,9 @@ describe('whole-key persistence boundaries', () => {
     const recorder = source.slice(start, end);
 
     expect(recorder).toContain('sendRuntimeMessageStrict');
-    expect(recorder).toContain('usageProgressWrites.persist');
+    expect(recorder).toMatch(/usageProgressWrites\s*\.persist/);
     expect(recorder).toContain('.catch((error) =>');
-    expect(recorder).toContain("console.error('[DeepSeek++] Failed to persist usage turn.'");
+    expect(recorder).toMatch(/console\.error\(['"]\[DeepSeek\+\+\] Failed to persist usage turn\.['"]/);
     expect(recorder).not.toContain('void sendRuntimeMessage({');
   });
 

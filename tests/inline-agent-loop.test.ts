@@ -308,6 +308,78 @@ describe('runInlineAgentLoop', () => {
     }));
   });
 
+  it('nudges a turn whose visible tail promises a deliverable after retired artifact XML', async () => {
+    // Issue (artifact deliverable silently swallowed): the model emits
+    // `<artifact_create>` XML (retired internal protocol, not in the loop
+    // catalog), the display layer strips it, and the user is left with an
+    // empty promise ("现在为你创建…"). The nudge decision must run on the
+    // USER-VISIBLE text, so this turn is nudged into a renderable re-delivery
+    // instead of completing silently.
+    vi.useFakeTimers();
+    adapterMocks.submitPromptStreaming
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onTextChunk(
+          '现在为你创建一份包含折线图和增速分析的可视化报告。\n' +
+          '<artifact_create>{"filename":"report.html","content":"<h1>报告</h1>"}</artifact_create>',
+        );
+        return { assistantText: '', responseMessageId: 102, requestMessageId: 101, finished: true };
+      })
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onTextChunk('```html\n<h1>报告</h1>\n```');
+        return { assistantText: '', responseMessageId: 103, requestMessageId: 102, finished: true };
+      });
+
+    const post = vi.fn();
+
+    const run = runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool: vi.fn(),
+      signal: new AbortController().signal,
+    });
+    await vi.advanceTimersByTimeAsync(7_000);
+    await run;
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(2);
+    // The nudge prompt shows the model the USER-VISIBLE tail: the empty
+    // promise, with the retired protocol bytes removed.
+    const nudgePrompt = adapterMocks.submitPromptStreaming.mock.calls[1][0].prompt as string;
+    expect(nudgePrompt).toContain('现在为你创建一份包含折线图和增速分析的可视化报告。');
+    expect(nudgePrompt).not.toContain('artifact_create');
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
+      finalText: '```html\n<h1>报告</h1>\n```',
+      totalSteps: 1,
+    }));
+  });
+
+  it('completes without nudging when a renderable deliverable follows the promise', async () => {
+    // A promise followed by an actual fenced deliverable is a complete turn:
+    // the tail is a renderable body, not an empty promise.
+    adapterMocks.submitPromptStreaming.mockImplementationOnce(async (_input, handlers) => {
+      handlers.onTextChunk([
+        '现在为你创建以下可视化报告：',
+        '',
+        '```html',
+        '<h1>报告</h1>',
+        '```',
+      ].join('\n'));
+      return { assistantText: '', responseMessageId: 102, requestMessageId: 101, finished: true };
+    });
+
+    const post = vi.fn();
+
+    await runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool: vi.fn(),
+      signal: new AbortController().signal,
+    });
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
+      finalText: '现在为你创建以下可视化报告：\n\n```html\n<h1>报告</h1>\n```',
+      totalSteps: 1,
+    }));
+  });
+
   it('retries a timed-out step once when no text was received, then reports the timeout', async () => {
     vi.useFakeTimers();
     adapterMocks.submitPromptStreaming.mockImplementation((_input, _handlers, signal) =>
@@ -379,6 +451,90 @@ describe('runInlineAgentLoop', () => {
       totalSteps: 0,
     }));
     expect(post).not.toHaveBeenCalledWith('AGENT_LOOP_ERROR', expect.anything());
+  });
+
+  it('nudges a "让我再抓取" continuation sentence instead of stopping the run', async () => {
+    // Reproducible mid-output stop: a turn that ends with a common Chinese
+    // first-person continuation sentence ("让我再抓取…获取更完整的月度数据。")
+    // promised further tool work but was previously treated as a completed
+    // final answer, so the whole run stopped on a message that read as
+    // normal. The detector must nudge exactly like "我会调用 …" phrasings.
+    const pendingSentence = '基于已有搜索结果，我已经获得了大量数据。让我再抓取雪球那篇详尽的24个月梳理文章，获取更完整的月度数据。';
+    vi.useFakeTimers();
+    adapterMocks.submitPromptStreaming
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onTextChunk(pendingSentence);
+        return {
+          assistantText: '',
+          responseMessageId: 102,
+          requestMessageId: 101,
+          finished: true,
+        };
+      })
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onTextChunk('<task_complete>{"summary":"完整月度数据已整理完成。"}</task_complete>');
+        return {
+          assistantText: '',
+          responseMessageId: 104,
+          requestMessageId: 103,
+          finished: true,
+        };
+      });
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    const run = runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+    await vi.advanceTimersByTimeAsync(7000);
+    await run;
+
+    // The nudge turn was issued instead of silently ending on the sentence.
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(2);
+    expect(adapterMocks.submitPromptStreaming.mock.calls[1]?.[0].prompt)
+      .toContain('This is no-tool-call correction attempt 1.');
+    expect(post).not.toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
+      finalText: pendingSentence,
+    }));
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
+      finalText: expect.stringContaining('完整月度数据已整理完成'),
+      totalTools: 1,
+    }));
+  });
+
+  it('fails visibly when the response stream ends without FINISHED', async () => {
+    // A server-side cut (connection dropped, response interrupted) ends the
+    // SSE stream without the terminal FINISHED patches. The partial text must
+    // never be presented as a finished turn: the loop reports AGENT_LOOP_ERROR
+    // with the interruption instead of stopping on a seemingly normal message.
+    adapterMocks.submitPromptStreaming.mockImplementationOnce(async (_input, handlers) => {
+      handlers.onTextChunk('让我再抓取雪球那篇详尽的24个月梳理文章');
+      return {
+        assistantText: '',
+        responseMessageId: 102,
+        requestMessageId: 101,
+        finished: false,
+      };
+    });
+
+    const post = vi.fn();
+    const executeTool = vi.fn();
+
+    await runInlineAgentLoop(createPayload(), {
+      post,
+      executeTool,
+      signal: new AbortController().signal,
+    });
+
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_ERROR', expect.objectContaining({
+      error: expect.stringContaining('response stream ended before completion'),
+    }));
+    expect(post).not.toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
+      finalText: expect.stringContaining('让我再抓取'),
+    }));
   });
 });
 

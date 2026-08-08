@@ -50,6 +50,7 @@ import {
   extractTaskCompleteSignal,
   shouldNudge,
 } from '../prompt';
+import { stripRetiredArtifactProtocolBlocks } from '../retired-artifact';
 import type {
   InlineAgentStartPayload,
   InlineAgentReasoningChunkMsg,
@@ -326,7 +327,17 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
         resolvedFinalText = text;
         return true;
       }
-      const nudging = shouldNudge(payload.originalPrompt, collectedExecutions, text);
+      // Nudge decisions run on the USER-VISIBLE text: retired artifact XML
+      // (an internal control protocol the loop cannot execute) is stripped
+      // first, so a turn whose visible tail still promises a deliverable
+      // ("now creating a report for you" with nothing renderable following)
+      // is nudged instead of ending on an empty promise — the deliverable
+      // must never be silently swallowed.
+      const nudging = shouldNudge(
+        payload.originalPrompt,
+        collectedExecutions,
+        stripRetiredArtifactProtocolBlocks(text),
+      );
       if (nudge.currentTurnIsNudge) {
         if (nudging) {
           stopNotice = buildInlineAgentBudgetNotice(locale, stepIndex + 1);
@@ -350,15 +361,28 @@ export async function runPiInlineAgentLoop(deps: PiLoopAdapterDeps): Promise<voi
       if (turnsElapsed === 0) return [];
       if (!lastTurnHasTools && !nudge.nudgedInStep && hasContinuableChain()
         && !extractTaskCompleteSignal(lastTurnText)
-        && shouldNudge(payload.originalPrompt, collectedExecutions, lastTurnText)) {
+        && shouldNudge(
+          payload.originalPrompt,
+          collectedExecutions,
+          stripRetiredArtifactProtocolBlocks(lastTurnText),
+        )) {
         nudge.count += 1;
         nudge.nudgedInStep = true;
         nudge.pendingTurn = true;
         nudge.active = true;
-        nudge.lastAssistantText = lastTurnText;
+        // The nudge shows the model what the USER saw: retired artifact XML
+        // is internal protocol, so the model sees the visible tail (e.g. the
+        // empty promise) and re-delivers in a renderable form.
+        nudge.lastAssistantText = stripRetiredArtifactProtocolBlocks(lastTurnText);
         return [{
           role: 'user',
-          content: buildNudgePrompt(payload.originalPrompt, lastTurnText, collectedExecutions, nudge.count, locale),
+          content: buildNudgePrompt(
+            payload.originalPrompt,
+            nudge.lastAssistantText,
+            collectedExecutions,
+            nudge.count,
+            locale,
+          ),
           timestamp: Date.now(),
         }];
       }

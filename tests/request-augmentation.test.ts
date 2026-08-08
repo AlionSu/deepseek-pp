@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TOOL_DESCRIPTORS } from '../core/tool';
+import { createArtifactToolDescriptors } from '../core/artifact';
 import { createBrowserControlToolDescriptors } from '../core/browser-control/tool';
 import {
   augmentRequestBody,
@@ -143,6 +144,38 @@ describe('augmentRequestBody', () => {
     expect(result.augmented).toContain('</memory_save>');
     expect(result.augmented).toContain('Invalid formats: <invoke name="memory_save">...</invoke>, <tool_call>...</tool_call>');
     expect(result.augmented).not.toContain('## 角色');
+  });
+
+  it('retires artifact tools from the model-facing prompt while keeping execution descriptors', () => {
+    // Issue (drop plugin artifact extension): the model must never see
+    // artifact_create / artifact_bundle_create in its Available Tools, or it
+    // keeps delivering files as artifact XML that no layer can render. The
+    // retirement filters the MODEL-FACING projection only — the descriptors
+    // themselves still exist for parsing/executing historical and residual
+    // calls.
+    const withArtifacts = [
+      ...DEFAULT_TOOL_DESCRIPTORS,
+      ...createArtifactToolDescriptors('en'),
+    ];
+    const result = augmentRequestBody(JSON.stringify({
+      prompt: 'create a report',
+      parent_message_id: null,
+      thinking_enabled: false,
+      search_enabled: false,
+    }), {
+      memories: [],
+      skills: [],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: withArtifacts,
+      messageCount: 0,
+    });
+
+    const augmented = JSON.parse(result?.body ?? '{}').prompt as string;
+    expect(augmented).not.toContain('artifact_create');
+    expect(augmented).not.toContain('artifact_bundle_create');
+    expect(augmented).not.toContain('Create downloadable file');
+    expect(augmented).toContain('memory_save');
   });
 
   it('uses locale-aware default tool descriptors when none are provided', () => {

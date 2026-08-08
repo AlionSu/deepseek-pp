@@ -542,6 +542,60 @@ describe('fetch hook request lifecycle', () => {
     }
   });
 
+  it('sends the original fetch and XHR when request augmentation rejects', async () => {
+    const nativeFetch = window.fetch;
+    const nativeXMLHttpRequest = globalThis.XMLHttpRequest;
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    const FakeXMLHttpRequest = createFakeXMLHttpRequest('', 204);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    window.fetch = fetchImpl;
+    vi.stubGlobal('XMLHttpRequest', FakeXMLHttpRequest);
+    onRequestBody.mockRejectedValue(new Error('DeepSeek++ main/content bridge disconnected.'));
+
+    const requestBody = '{"prompt":"hello"}';
+    let uninstallFetch: (() => void) | null = null;
+    let uninstallXHR: (() => void) | null = null;
+    try {
+      uninstallFetch = hookFetch();
+      const response = await window.fetch('https://chat.deepseek.com/api/v0/chat/completion', {
+        method: 'POST',
+        body: requestBody,
+      });
+      expect(response.status).toBe(204);
+      expect(fetchImpl).toHaveBeenCalledWith(
+        'https://chat.deepseek.com/api/v0/chat/completion',
+        expect.objectContaining({ method: 'POST', body: requestBody }),
+      );
+
+      uninstallXHR = hookXHR();
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', 'https://chat.deepseek.com/api/v0/chat/completion');
+      xhr.send(requestBody);
+
+      await vi.waitFor(() => {
+        expect((xhr as unknown as FakeXMLHttpRequestInstance).sentBody).toBe(requestBody);
+      });
+      expect(consoleError).toHaveBeenCalledWith(
+        '[DeepSeek++] fetch request augmentation failed; sending original request',
+        expect.objectContaining({ message: 'DeepSeek++ main/content bridge disconnected.' }),
+      );
+      expect(consoleError).toHaveBeenCalledWith(
+        '[DeepSeek++] XHR request augmentation failed; sending original request',
+        expect.objectContaining({ message: 'DeepSeek++ main/content bridge disconnected.' }),
+      );
+      expect(consoleError).not.toHaveBeenCalledWith(
+        '[DeepSeek++] intercepted XHR request failed',
+        expect.anything(),
+      );
+    } finally {
+      uninstallXHR?.();
+      uninstallFetch?.();
+      consoleError.mockRestore();
+      window.fetch = nativeFetch;
+      vi.stubGlobal('XMLHttpRequest', nativeXMLHttpRequest);
+    }
+  });
+
   it('cancels XHR network failures without publishing a false completion', async () => {
     const nativeXMLHttpRequest = globalThis.XMLHttpRequest;
     const rawWire = 'data: {"p":"response/content","o":"APPEND","v":"partial"}\n\n';

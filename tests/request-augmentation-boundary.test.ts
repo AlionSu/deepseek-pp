@@ -6,11 +6,11 @@ describe('Content request augmentation boundary', () => {
     const source = readFileSync('entrypoints/content.ts', 'utf8');
     const start = source.indexOf('async function handleAugmentRequestBody');
     const end = source.indexOf('\nasync function resolveProjectContextForRequestBody', start);
-    const handler = source.slice(start, end);
+    const handler = source.slice(start, end).replace(/\s+/g, ' ');
     const routeIndex = handler.indexOf('isDeepSeekAugmentableWebRoute(data.route)');
-    const decodeIndex = handler.indexOf('decodeAugmentableDeepSeekRequest(data.route, data.body)');
+    const decodeIndex = handler.indexOf('decodeAugmentableDeepSeekRequest');
     const passthroughIndex = handler.indexOf('if (!decodedRequest)');
-    const replayScopeIndex = handler.indexOf('resolveRegenerateAuthorizationScopeForRequest(decodedRequest.body)');
+    const replayScopeIndex = handler.indexOf('resolveRegenerateAuthorizationScopeForRequest');
     const correlationIndex = handler.indexOf('pendingToolAuthorizationCorrelations.begin');
 
     expect(start).toBeGreaterThanOrEqual(0);
@@ -27,7 +27,7 @@ describe('Content request augmentation boundary', () => {
       'consumePendingMultimodalMediaForRequest',
       'createContentToolAuthorization',
       'resolveProjectContextForRequestBody',
-      "type: 'TOUCH_MEMORIES'",
+      'type: "TOUCH_MEMORIES"',
     ]) {
       expect(handler.indexOf(privilegedOperation), privilegedOperation).toBeGreaterThan(decodeIndex);
     }

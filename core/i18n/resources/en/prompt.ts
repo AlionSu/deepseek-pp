@@ -13,12 +13,13 @@ export const prompt = {
   inlineAgent: {
     continuationIntro: 'These are the tool results just executed for the tool-continuation task. Continue like a real agent, using the original task and these tool results to move the work forward.',
     continuationEnough: 'If the results are enough, output the final answer. Only call more tools when more information, verification, or file changes are truly needed.',
-    continuationNoPseudo: 'Do not ask the user to click continue, and do not output pseudo tool-call JSON. When more action is needed, output only executable XML tool tags.',
+    continuationNoPseudo: 'Do not ask the user to click continue, and do not output pseudo tool-call JSON. When more action is needed, output only executable XML tool tags. Deliver files, HTML pages, and charts as Markdown fenced code blocks (e.g. ```html, ```xychart-beta, ```mermaid) so the page renders them natively; never use artifact XML tags.',
+    nativeChartSyntax: 'When emitting a ```xychart-beta fence, its body must use native Mermaid XY Chart syntax directly. Valid body example:\ntitle "ARR"\nx-axis ["2024-01", "2024-02"]\ny-axis "ARR ($B)" 0 --> 50\nline [1, 2]\nYou may use bar [...]. Do not use x-label, y-label, chart-type, data:, series:, xy ..., or a Markdown table as the chart body.',
     failureRecovery: 'At least one tool failed. Do not stop because of a recoverable error; read summary/detail/error, fix the parameters or choose a suitable next step, and continue completing the task.',
     nudgeNoTools: 'The previous reply did not include executable tool XML, so the automated continuation cannot proceed.',
     nudgeChoice: 'Choose exactly one path based on the original task and tool results:',
     nudgeNextTool: '1. If the task is still incomplete, this turn MUST directly output the next executable tool XML.',
-    nudgeComplete: '2. If the task is complete, output <task_complete>{"summary":"..."}</task_complete>.',
+    nudgeComplete: '2. If the task is complete, output <task_complete>{"summary":"..."}</task_complete>. Deliver files, HTML pages, and charts as Markdown fenced code blocks (e.g. ```html, ```xychart-beta); never use artifact XML tags.',
     nudgeCount: 'This is no-tool-call correction attempt {count}.',
   },
   automation: {

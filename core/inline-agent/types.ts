@@ -77,6 +77,15 @@ export interface InlineAgentTraceRecord {
   agentTaskPrompt: string;
   status: InlineAgentLoopStatus;
   steps: InlineAgentTraceStepRecord[];
+  /**
+   * Tool executions of the ORIGINAL native turn that triggered the agent
+   * (the full pre-loop execution set, including non-continuable tools such
+   * as memory_save). Persisted so a restored console renders the complete
+   * run record: the old-style tool block is suppressed for agent-owned
+   * messages, and these executions render as the first (new style) tool
+   * group instead — the count must not be lost on refresh.
+   */
+  initialExecutions?: ToolExecutionRecord[];
   totalSteps: number;
   totalTools: number;
   finalText: string;

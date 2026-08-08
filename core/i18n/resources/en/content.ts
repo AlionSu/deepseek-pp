@@ -60,9 +60,6 @@ export const content = {
       daysAgo: '{count}d ago',
     },
   },
-  uxPolish: {
-    downloadCode: 'Download',
-  },
   toolBlock: {
     title: 'Called tools ({count})',
     pythonInterpreter: 'Python interpreter',
@@ -106,6 +103,10 @@ export const content = {
     toolGroup: 'Ran {count} tool calls',
     reasoningStep: 'Thought · step {step}',
     reasoningNotPersisted: 'The thinking process for this step is not retained in the message stream.',
+    codeRun: 'Run',
+    codeRunning: 'Running…',
+    codeRunFailed: 'Run failed',
+    codeRunnerUnavailable: 'Code runner unavailable',
     concurrencyGuard: 'An agent is still running. A duplicate task from this message was skipped. To interrupt, click Stop in the agent panel.',
   },
   permission: {

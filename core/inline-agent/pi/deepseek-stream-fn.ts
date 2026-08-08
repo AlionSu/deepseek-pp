@@ -198,6 +198,18 @@ export function createDeepSeekStreamFn(deps: DeepSeekStreamFnDeps): StreamFn {
 
         const result = await submitTurn(request, callbacks, signal);
 
+        // Fail-closed stream termination (Issue: mid-output silent stop): a
+        // DeepSeek web stream is only complete once the server patches
+        // FINISHED onto the response. When the stream ends without it (the
+        // connection dropped or the server interrupted the response), the
+        // partial text must NEVER be presented as a finished turn — surface
+        // it as a visible error so the loop reports AGENT_LOOP_ERROR instead
+        // of stopping on a seemingly normal message. User aborts keep their
+        // silent 'aborted' semantics.
+        if (!result.finished && !signal?.aborted) {
+          throw new Error('DeepSeek response stream ended before completion (the response was interrupted).');
+        }
+
         // The conversation chain authority: the page session, not this turn's
         // transcript, owns the next parent message id.
         session.setParentMessageId(result.responseMessageId);

@@ -243,22 +243,6 @@ export const LEGAL_BRIDGE_CASES = {
     expectedSource: MAIN,
     message: { source: MAIN, type: 'NAVIGATION_CHANGED' },
   }],
-  REGISTER_AGENT_REPLAY: [{
-    name: 'content registers the agent final-answer replay',
-    expectedSource: CONTENT,
-    message: {
-      source: CONTENT,
-      type: 'REGISTER_AGENT_REPLAY',
-      payload: {
-        chatSessionId: 'session-1',
-        prompt: '<original_task>task</original_task>\n<tool_results>[]</tool_results>',
-        content: '```mermaid\nxychart-beta\n```',
-        reasoning: 'think',
-        responseMessageId: 42,
-        createdAt: 1786000000000,
-      },
-    },
-  }],
   DPP_BRIDGE_READY: [{
     name: 'main acknowledges the transferred port',
     expectedSource: MAIN,
@@ -393,32 +377,6 @@ export const MALFORMED_BRIDGE_PAYLOAD_CASES = {
     name: 'navigation event travels in the wrong direction',
     expectedSource: CONTENT,
     message: { source: CONTENT, type: 'NAVIGATION_CHANGED' },
-    target: 'reject-at-T2.1-boundary',
-  }],
-  REGISTER_AGENT_REPLAY: [{
-    name: 'replay registration travels in the wrong direction',
-    expectedSource: MAIN,
-    message: {
-      source: MAIN,
-      type: 'REGISTER_AGENT_REPLAY',
-      payload: {
-        chatSessionId: 'session-1',
-        prompt: 'prompt',
-        content: 'content',
-        reasoning: '',
-        responseMessageId: 42,
-        createdAt: 1786000000000,
-      },
-    },
-    target: 'reject-at-T2.1-boundary',
-  }, {
-    name: 'replay registration has a non-string content field',
-    expectedSource: CONTENT,
-    message: {
-      source: CONTENT,
-      type: 'REGISTER_AGENT_REPLAY',
-      payload: { chatSessionId: 'session-1', prompt: 'prompt', content: 7, reasoning: '', createdAt: 1 },
-    },
     target: 'reject-at-T2.1-boundary',
   }],
   DPP_BRIDGE_READY: [{

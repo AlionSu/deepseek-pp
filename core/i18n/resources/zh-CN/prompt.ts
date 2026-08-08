@@ -13,12 +13,13 @@ export const prompt = {
   inlineAgent: {
     continuationIntro: '以下是工具续跑任务刚刚执行的工具结果。请像真正的 Agent 一样，基于原始任务和这些工具结果继续推进。',
     continuationEnough: '如果结果已经足够，请输出最终结论；只有确实需要更多信息、验证或文件修改时才继续调用工具。',
-    continuationNoPseudo: '不要要求用户点击继续，也不要输出伪工具调用 JSON；需要继续操作时只输出可执行 XML 工具标签。',
+    continuationNoPseudo: '不要要求用户点击继续，也不要输出伪工具调用 JSON；需要继续操作时只输出可执行 XML 工具标签。文件、HTML 页面与图表等交付物请直接用 Markdown 围栏代码块输出（如 ```html、```xychart-beta、```mermaid），不要使用 artifact XML 标签。',
+    nativeChartSyntax: '若输出 ```xychart-beta 围栏，正文必须直接使用 Mermaid XY Chart 原生语法。有效正文示例：\ntitle "ARR"\nx-axis ["2024-01", "2024-02"]\ny-axis "ARR ($B)" 0 --> 50\nline [1, 2]\n可使用 bar [...]；不要使用 x-label、y-label、chart-type、data:、series:、xy ... 或 Markdown 表格充当图表正文。',
     failureRecovery: '至少一个工具执行失败。不要因为可恢复错误就停止；先阅读 summary/detail/error，并修正参数或改用合适的下一步继续完成任务。',
     nudgeNoTools: '上一轮回复没有包含任何可执行工具 XML，因此自动化续跑无法继续执行。',
     nudgeChoice: '请根据原始任务和工具结果二选一：',
     nudgeNextTool: '1. 如果任务仍未完成，本轮必须直接输出下一步可执行工具 XML。',
-    nudgeComplete: '2. 如果任务已经完成，输出 <task_complete>{"summary":"..."}</task_complete>。',
+    nudgeComplete: '2. 如果任务已经完成，输出 <task_complete>{"summary":"..."}</task_complete>。文件、HTML 页面与图表等交付物用 Markdown 围栏代码块输出（如 ```html、```xychart-beta），不要使用 artifact XML 标签。',
     nudgeCount: '这是第 {count} 次无工具调用纠偏。',
   },
   automation: {

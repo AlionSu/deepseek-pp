@@ -24,8 +24,8 @@ import { normalizeMcpToolDescriptor, type McpServerConfig } from '../core/mcp';
 const legalCases = Object.values(LEGAL_BRIDGE_CASES).flat();
 const malformedPayloadCases = Object.values(MALFORMED_BRIDGE_PAYLOAD_CASES).flat();
 describe('bridge message compatibility contract', () => {
-  it('keeps one exhaustive authority for all 17 port message types', () => {
-    expect(BRIDGE_MESSAGE_TYPES).toHaveLength(17);
+  it('keeps one exhaustive authority for all 16 port message types', () => {
+    expect(BRIDGE_MESSAGE_TYPES).toHaveLength(16);
     expect(new Set(BRIDGE_MESSAGE_TYPES).size).toBe(BRIDGE_MESSAGE_TYPES.length);
     expect(Object.keys(LEGAL_BRIDGE_CASES).sort()).toEqual([...BRIDGE_MESSAGE_TYPES].sort());
     expect(Object.keys(MALFORMED_BRIDGE_PAYLOAD_CASES).sort()).toEqual([...BRIDGE_MESSAGE_TYPES].sort());
@@ -268,7 +268,7 @@ describe('bridge message compatibility contract', () => {
     expect(isolatedBridgeSource).toContain('dependencies.syncRuntimeState();');
     expect(isolatedBridgeSource).toContain("message.type === 'SYNC_HOOK_STATE_REQUEST'");
     expect(mainWorldBridgeSource).toContain("post({ type: 'SYNC_HOOK_STATE_REQUEST' });");
-    expect(mainWorldBridgeSource).toContain("pending.reject(new Error('DeepSeek++ main/content bridge disconnected.'))");
+    expect(mainWorldBridgeSource).toContain('pending.resolve(null)');
   });
 });
 

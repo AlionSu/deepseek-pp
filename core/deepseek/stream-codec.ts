@@ -50,6 +50,25 @@ export interface DeepSeekSseFrameDecoder {
   finish(): DeepSeekSseFrame[];
 }
 
+/**
+ * Encodes one DeepSeek SSE event using the released page wire shape.
+ *
+ * Every payload line must be carried by an SSE `data:` field; emitting raw
+ * JSON between event boundaries makes the page's eventsource parser treat the
+ * JSON key as an unknown SSE field and fail the whole completion. The trailing
+ * blank line is part of the frame contract and lets incremental parsers commit
+ * the final event without waiting for transport EOF.
+ */
+export function encodeDeepSeekSseEvent(event: SSEEvent): string {
+  const lines: string[] = [];
+  if (event.id !== undefined) lines.push(`id: ${event.id}`);
+  if (event.type && event.type !== 'message') lines.push(`event: ${event.type}`);
+  for (const line of event.data.split(/\r\n|\r|\n/)) {
+    lines.push(`data: ${line}`);
+  }
+  return `${lines.join('\n')}\n\n`;
+}
+
 export function createDeepSeekStreamSummary(): DeepSeekStreamSummary {
   return {
     assistantText: '',

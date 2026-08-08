@@ -1,19 +1,27 @@
-import { DEEPSEEK_BYPASS_HOOK_HEADER } from '../deepseek/contracts';
+import { DEEPSEEK_BYPASS_HOOK_HEADER } from "../deepseek/contracts";
 import {
   isDeepSeekAugmentableWebRoute,
   matchDeepSeekWebRoute,
   normalizeDeepSeekMessageId,
   type DeepSeekAugmentableWebRoute,
-} from '../deepseek/request-codec';
-import type { ToolCall, ToolCallRestoreRecord, ToolCallSource, ToolDescriptor } from '../types';
-import { isInlineAgentContinuationRequest } from '../inline-agent/prompt';
-import { sanitizeInternalPromptText } from '../prompt';
-import { createToolInvocationCatalog } from '../tool';
+} from "../deepseek/request-codec";
+import type {
+  ToolCall,
+  ToolCallRestoreRecord,
+  ToolCallSource,
+  ToolDescriptor,
+} from "../types";
+import { isInlineAgentContinuationRequest } from "../inline-agent/prompt";
+import { sanitizeInternalPromptText } from "../prompt";
+import { createToolInvocationCatalog } from "../tool";
 import {
   findFirstXmlToolTag,
   getPartialXmlToolTagTailLength,
-} from '../tool/xml-tags';
-import { stripToolCallsFromHistory, stripToolCallsFromIDBResult } from './history-cleanup';
+} from "../tool/xml-tags";
+import {
+  stripToolCallsFromHistory,
+  stripToolCallsFromIDBResult,
+} from "./history-cleanup";
 import {
   consumeDeepSeekSseFrames,
   createDeepSeekSseFrameDecoder,
@@ -24,31 +32,27 @@ import {
   isResponseTextPatchPath,
   replaceDeepSeekSseFrameData,
   type DeepSeekSseFrame,
-} from '../deepseek/stream-codec';
-import {
-  AGENT_REPLAY_REGISTRATION_TTL_MS,
-  buildAgentReplaySse,
-  isAgentReplayRegistration,
-  matchAgentReplayRegistration,
-  type AgentReplayRegistration,
-} from './agent-replay';
+} from "../deepseek/stream-codec";
 import {
   createResponseTokenSpeedTracker,
   type ResponseTokenSpeedPayload,
-} from '../deepseek/stream-metrics';
-import { createStreamingToolTextAccumulator } from './streaming-tool-text';
-import { createStreamingToolCallParser, type ToolCallPayloadChunk } from './streaming-tool-call-parser';
-import { extractToolCalls } from './tool-parser';
+} from "../deepseek/stream-metrics";
+import { createStreamingToolTextAccumulator } from "./streaming-tool-text";
+import {
+  createStreamingToolCallParser,
+  type ToolCallPayloadChunk,
+} from "./streaming-tool-call-parser";
+import { extractToolCalls } from "./tool-parser";
 
 const BYPASS_HOOK_HEADER = DEEPSEEK_BYPASS_HOOK_HEADER;
 const TOKEN_SPEED_EMIT_INTERVAL_MS = 250;
 const INITIAL_HOOK_STATE_WAIT_MS = 1_500;
-const DEFAULT_APP_VERSION = '2.0.0';
-const DEEPSEEK_CLIENT_PLATFORM = 'web';
+const DEFAULT_APP_VERSION = "2.0.0";
+const DEEPSEEK_CLIENT_PLATFORM = "web";
 const RESPONSE_TOOL_FALLBACK_PARSE_MAX_CHARS = 120_000;
-const FETCH_HOOK_MARKER = Symbol.for('deepseek-pp.fetch-hook-installed');
-const XHR_HOOK_MARKER = Symbol.for('deepseek-pp.xhr-hook-installed');
-const IDB_HOOK_MARKER = Symbol.for('deepseek-pp.idb-hook-installed');
+const FETCH_HOOK_MARKER = Symbol.for("deepseek-pp.fetch-hook-installed");
+const XHR_HOOK_MARKER = Symbol.for("deepseek-pp.xhr-hook-installed");
+const IDB_HOOK_MARKER = Symbol.for("deepseek-pp.idb-hook-installed");
 
 let initialHookStateWaitComplete = false;
 let initialHookStateReadyResolved = false;
@@ -73,13 +77,6 @@ interface HookState {
   onResponseComplete: (complete: ResponseCompletePayload) => void;
   onRequestTerminal: (terminal: RequestTerminalPayload) => void;
   onMemoriesUsed: (ids: number[]) => void;
-  /**
-   * Pending agent final-answer replay: the next completion request that
-   * matches (same chat session + byte-equal prompt) is short-circuited with
-   * the synthetic response instead of reaching the server, so the page's
-   * native renderer presents the agent's final turn.
-   */
-  pendingAgentReplay: AgentReplayRegistration | null;
 }
 
 function createEmptyHookState(): HookState {
@@ -95,7 +92,6 @@ function createEmptyHookState(): HookState {
     onResponseComplete: () => {},
     onRequestTerminal: () => {},
     onMemoriesUsed: () => {},
-    pendingAgentReplay: null,
   };
 }
 
@@ -103,39 +99,9 @@ let hookState: HookState = createEmptyHookState();
 
 export function updateHookState(partial: Partial<HookState>) {
   hookState = { ...hookState, ...partial };
-  if (Object.prototype.hasOwnProperty.call(partial, 'toolDescriptors')) {
+  if (Object.prototype.hasOwnProperty.call(partial, "toolDescriptors")) {
     markInitialHookStateReady();
   }
-}
-
-let pendingAgentReplayClearTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * Registers the pending agent final-answer replay. The registration expires
- * after {@link AGENT_REPLAY_REGISTRATION_TTL_MS} if the matching page request
- * never arrives (failed input drive, user navigated away), so a stale entry
- * can never hijack a later request that happens to match by chance.
- * Invalid shapes are dropped (fail closed at the hook trust boundary).
- */
-export function registerPendingAgentReplay(registration: unknown): void {
-  if (!isAgentReplayRegistration(registration)) return;
-  if (pendingAgentReplayClearTimer !== null) {
-    clearTimeout(pendingAgentReplayClearTimer);
-  }
-  hookState = { ...hookState, pendingAgentReplay: registration };
-  pendingAgentReplayClearTimer = setTimeout(() => {
-    pendingAgentReplayClearTimer = null;
-    if (hookState.pendingAgentReplay === registration) {
-      hookState = { ...hookState, pendingAgentReplay: null };
-    }
-  }, AGENT_REPLAY_REGISTRATION_TTL_MS);
-}
-
-function consumePendingAgentReplay(body: string): AgentReplayRegistration | null {
-  if (!matchAgentReplayRegistration(body, hookState.pendingAgentReplay)) return null;
-  const registration = hookState.pendingAgentReplay;
-  hookState = { ...hookState, pendingAgentReplay: null };
-  return registration;
 }
 
 export function installFetchHook(): () => void {
@@ -176,7 +142,7 @@ export interface RequestTerminalPayload {
   requestId: string;
 }
 
-export type { ResponseTokenSpeedPayload } from '../deepseek/stream-metrics';
+export type { ResponseTokenSpeedPayload } from "../deepseek/stream-metrics";
 
 export interface RequestContext {
   requestId: string;
@@ -184,7 +150,7 @@ export interface RequestContext {
   agentTaskPrompt: string;
   chatSessionId: string | null;
   parentMessageId: number | null;
-  promptOptions: ResponseCompletePayload['promptOptions'];
+  promptOptions: ResponseCompletePayload["promptOptions"];
   suppressPageEvents: boolean;
   toolDescriptors: ToolDescriptor[];
   // The active local skill's skillDir for the current request (isolated by requestId);
@@ -198,7 +164,7 @@ interface RequestContextOverrides {
   originalPrompt?: string;
   agentTaskPrompt?: string;
   toolDescriptors?: ToolDescriptor[];
-  promptOptions?: ResponseCompletePayload['promptOptions'];
+  promptOptions?: ResponseCompletePayload["promptOptions"];
   activeLocalSkillDir?: string;
 }
 
@@ -208,81 +174,112 @@ export interface RequestBodyModification {
   agentTaskPrompt: string;
   requestId?: string;
   toolDescriptors?: ToolDescriptor[];
-  promptOptions?: ResponseCompletePayload['promptOptions'];
+  promptOptions?: ResponseCompletePayload["promptOptions"];
   // The current request's active local skill skillDir computed at augment time;
   // travels with the request into RequestContext for cwd pinning during response-stream parsing (request-scoped isolation).
   activeLocalSkillDir?: string;
 }
 
 export function hookFetch(): () => void {
-  const currentFetch = window.fetch as typeof window.fetch & { [FETCH_HOOK_MARKER]?: true };
+  const currentFetch = window.fetch as typeof window.fetch & {
+    [FETCH_HOOK_MARKER]?: true;
+  };
   if (currentFetch[FETCH_HOOK_MARKER]) return () => undefined;
   const originalFetch = window.fetch;
 
-  const hookedFetch = async function (this: Window, input: RequestInfo | URL, init?: RequestInit) {
-    const url = typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.href
+  const hookedFetch = async function (
+    this: Window,
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input instanceof Request
+            ? input.url
+            : null;
+    const method =
+      init?.method !== undefined
+        ? init.method
         : input instanceof Request
-          ? input.url
-          : null;
-    const method = init?.method !== undefined
-      ? init.method
-      : input instanceof Request
-        ? input.method
-        : 'GET';
-    const route = url !== null && typeof method === 'string'
-      ? matchDeepSeekWebRoute({ url, method, baseUrl: document.baseURI })
-      : null;
+          ? input.method
+          : "GET";
+    const route =
+      url !== null && typeof method === "string"
+        ? matchDeepSeekWebRoute({ url, method, baseUrl: document.baseURI })
+        : null;
 
-    if (route === 'history') {
+    if (route === "history") {
       return interceptHistoryResponse(originalFetch.call(this, input, init));
     }
 
-    if (!isDeepSeekAugmentableWebRoute(route) || typeof init?.body !== 'string') {
+    if (
+      !isDeepSeekAugmentableWebRoute(route) ||
+      typeof init?.body !== "string"
+    ) {
       return originalFetch.call(this, input, init);
     }
 
     if (hasBypassHookHeader(init.headers)) {
-      return originalFetch.call(this, input, { ...init, headers: stripBypassHookHeader(init.headers) });
-    }
-
-    // Agent final-answer replay: a page completion request that matches the
-    // pending registration is short-circuited with the synthetic response so
-    // the page's native renderer presents the agent's final turn.
-    if (typeof init?.body === 'string') {
-      const replay = consumePendingAgentReplay(init.body);
-      if (replay) return buildAgentReplayResponse(replay, init.body);
+      return originalFetch.call(this, input, {
+        ...init,
+        headers: stripBypassHookHeader(init.headers),
+      });
     }
 
     await waitForInitialHookState();
     hookState.onHeadersCaptured(captureDeepSeekClientHeaders(init.headers));
     const originalContext = createRequestContext(init.body);
     const fallbackToolDescriptors = [...hookState.toolDescriptors];
-    let modified: RequestBodyModification | null;
+    let modified: RequestBodyModification | null = null;
+    let augmentationFailed = false;
     try {
-      modified = await hookState.onRequestBody(init.body, originalContext.requestId, route);
+      modified = await hookState.onRequestBody(
+        init.body,
+        originalContext.requestId,
+        route,
+      );
     } catch (error) {
-      hookState.onRequestTerminal({ requestId: originalContext.requestId });
-      throw error;
+      // DeepSeek++ request augmentation is additive. If the extension bridge
+      // is reloaded/disconnected (or augmentation otherwise fails), preserve
+      // the site's native request instead of turning an extension failure into
+      // a failed DeepSeek request.
+      augmentationFailed = true;
+      console.error(
+        "[DeepSeek++] fetch request augmentation failed; sending original request",
+        error,
+      );
     }
     const requestBody = modified?.body ?? init.body;
     const requestContext = createRequestContext(requestBody, {
       requestId: originalContext.requestId,
       ...(modified?.requestId ? { requestId: modified.requestId } : {}),
-      originalPrompt: modified?.originalPrompt ?? originalContext.originalPrompt,
-      agentTaskPrompt: modified?.agentTaskPrompt ?? originalContext.agentTaskPrompt,
-      toolDescriptors: modified?.toolDescriptors ?? fallbackToolDescriptors,
-      ...(modified?.promptOptions ? { promptOptions: modified.promptOptions } : {}),
+      originalPrompt:
+        modified?.originalPrompt ?? originalContext.originalPrompt,
+      agentTaskPrompt:
+        modified?.agentTaskPrompt ?? originalContext.agentTaskPrompt,
+      toolDescriptors: augmentationFailed
+        ? []
+        : (modified?.toolDescriptors ?? fallbackToolDescriptors),
+      ...(modified?.promptOptions
+        ? { promptOptions: modified.promptOptions }
+        : {}),
       ...(modified?.activeLocalSkillDir !== undefined
         ? { activeLocalSkillDir: modified.activeLocalSkillDir }
         : {}),
     });
     const requestInit = modified ? { ...init, body: modified.body } : init;
-    return interceptFetchResponse(originalFetch.call(this, input, requestInit), requestContext);
+    return interceptFetchResponse(
+      originalFetch.call(this, input, requestInit),
+      requestContext,
+    );
   };
-  Object.defineProperty(hookedFetch, FETCH_HOOK_MARKER, { value: true, configurable: true });
+  Object.defineProperty(hookedFetch, FETCH_HOOK_MARKER, {
+    value: true,
+    configurable: true,
+  });
   window.fetch = hookedFetch;
   return () => {
     if (window.fetch === hookedFetch) window.fetch = originalFetch;
@@ -290,21 +287,36 @@ export function hookFetch(): () => void {
 }
 
 export function hookXHR(): () => void {
-  const prototype = XMLHttpRequest.prototype as XMLHttpRequest & { [XHR_HOOK_MARKER]?: true };
+  const prototype = XMLHttpRequest.prototype as XMLHttpRequest & {
+    [XHR_HOOK_MARKER]?: true;
+  };
   if (prototype[XHR_HOOK_MARKER]) return () => undefined;
-  const xhrRoutes = new WeakMap<XMLHttpRequest, ReturnType<typeof matchDeepSeekWebRoute>>();
+  const xhrRoutes = new WeakMap<
+    XMLHttpRequest,
+    ReturnType<typeof matchDeepSeekWebRoute>
+  >();
   const xhrHeaders = new WeakMap<XMLHttpRequest, Record<string, string>>();
   const origOpen = XMLHttpRequest.prototype.open;
   const origSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
   const origSend = XMLHttpRequest.prototype.send;
 
-  XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: any[]) {
+  XMLHttpRequest.prototype.open = function (
+    method: string,
+    url: string | URL,
+    ...rest: any[]
+  ) {
     const previousRoute = xhrRoutes.get(this);
     const previousHeaders = xhrHeaders.get(this);
-    const routeUrl = typeof url === 'string' ? url : url instanceof URL ? url.href : null;
-    const route = typeof method === 'string' && routeUrl !== null
-      ? matchDeepSeekWebRoute({ method, url: routeUrl, baseUrl: document.baseURI })
-      : null;
+    const routeUrl =
+      typeof url === "string" ? url : url instanceof URL ? url.href : null;
+    const route =
+      typeof method === "string" && routeUrl !== null
+        ? matchDeepSeekWebRoute({
+            method,
+            url: routeUrl,
+            baseUrl: document.baseURI,
+          })
+        : null;
 
     // Native open() synchronously emits OPENED/readystatechange before it
     // returns. Publish this request's metadata first so a handler that calls
@@ -322,60 +334,92 @@ export function hookXHR(): () => void {
     }
   };
 
-  XMLHttpRequest.prototype.setRequestHeader = function (name: string, value: string) {
+  XMLHttpRequest.prototype.setRequestHeader = function (
+    name: string,
+    value: string,
+  ) {
     const headers = xhrHeaders.get(this);
     if (headers) headers[name] = value;
     return origSetRequestHeader.call(this, name, value);
   };
 
-  XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+  XMLHttpRequest.prototype.send = function (
+    body?: Document | XMLHttpRequestBodyInit | null,
+  ) {
     const route = xhrRoutes.get(this);
-    if (isDeepSeekAugmentableWebRoute(route) && typeof body === 'string') {
-      // Agent final-answer replay (XHR path): short-circuit the request with
-      // the synthetic response instead of reaching the server.
-      const replay = consumePendingAgentReplay(body);
-      if (replay) {
-        simulateAgentReplayXhrResponse(this, replay, body);
-        return;
-      }
+    if (isDeepSeekAugmentableWebRoute(route) && typeof body === "string") {
       const xhr = this;
       const sendChatRequest = async () => {
         const originalContext = createRequestContext(body);
         let cancelResponseInterceptor: (() => void) | null = null;
         try {
-          hookState.onHeadersCaptured(captureDeepSeekClientHeaders(xhrHeaders.get(xhr)));
+          hookState.onHeadersCaptured(
+            captureDeepSeekClientHeaders(xhrHeaders.get(xhr)),
+          );
           const fallbackToolDescriptors = [...hookState.toolDescriptors];
-          const modified = await hookState.onRequestBody(body, originalContext.requestId, route);
+          let modified: RequestBodyModification | null = null;
+          let augmentationFailed = false;
+          try {
+            modified = await hookState.onRequestBody(
+              body,
+              originalContext.requestId,
+              route,
+            );
+          } catch (error) {
+            // XMLHttpRequest.send() cannot surface this asynchronous failure to
+            // the page. The old path only logged the rejection and never called
+            // the native send(), leaving DeepSeek's UI in an infinite loading
+            // state. Fail open to the original request bytes instead.
+            augmentationFailed = true;
+            console.error(
+              "[DeepSeek++] XHR request augmentation failed; sending original request",
+              error,
+            );
+          }
           const requestBody = modified?.body ?? body;
-          cancelResponseInterceptor = setupXHRResponseInterceptor(xhr, createRequestContext(requestBody, {
-            requestId: originalContext.requestId,
-            ...(modified?.requestId ? { requestId: modified.requestId } : {}),
-            originalPrompt: modified?.originalPrompt ?? originalContext.originalPrompt,
-            agentTaskPrompt: modified?.agentTaskPrompt ?? originalContext.agentTaskPrompt,
-            toolDescriptors: modified?.toolDescriptors ?? fallbackToolDescriptors,
-            ...(modified?.promptOptions ? { promptOptions: modified.promptOptions } : {}),
-            ...(modified?.activeLocalSkillDir !== undefined
-              ? { activeLocalSkillDir: modified.activeLocalSkillDir }
-              : {}),
-          }));
+          cancelResponseInterceptor = setupXHRResponseInterceptor(
+            xhr,
+            createRequestContext(requestBody, {
+              requestId: originalContext.requestId,
+              ...(modified?.requestId ? { requestId: modified.requestId } : {}),
+              originalPrompt:
+                modified?.originalPrompt ?? originalContext.originalPrompt,
+              agentTaskPrompt:
+                modified?.agentTaskPrompt ?? originalContext.agentTaskPrompt,
+              toolDescriptors: augmentationFailed
+                ? []
+                : (modified?.toolDescriptors ?? fallbackToolDescriptors),
+              ...(modified?.promptOptions
+                ? { promptOptions: modified.promptOptions }
+                : {}),
+              ...(modified?.activeLocalSkillDir !== undefined
+                ? { activeLocalSkillDir: modified.activeLocalSkillDir }
+                : {}),
+            }),
+          );
           return origSend.call(xhr, requestBody);
         } catch (error) {
           if (cancelResponseInterceptor) cancelResponseInterceptor();
-          else hookState.onRequestTerminal({ requestId: originalContext.requestId });
+          else
+            hookState.onRequestTerminal({
+              requestId: originalContext.requestId,
+            });
           throw error;
         }
       };
       const reportSendFailure = (error: unknown) => {
-        console.error('[DeepSeek++] intercepted XHR request failed', error);
+        console.error("[DeepSeek++] intercepted XHR request failed", error);
       };
       if (initialHookStateWaitComplete) {
         void sendChatRequest().catch(reportSendFailure);
         return;
       }
-      void waitForInitialHookState().then(sendChatRequest).catch(reportSendFailure);
+      void waitForInitialHookState()
+        .then(sendChatRequest)
+        .catch(reportSendFailure);
       return;
     }
-    if (route === 'history') {
+    if (route === "history") {
       setupXHRHistoryInterceptor(this);
     }
     return origSend.call(this, body);
@@ -383,7 +427,10 @@ export function hookXHR(): () => void {
   const hookedOpen = prototype.open;
   const hookedSetRequestHeader = prototype.setRequestHeader;
   const hookedSend = prototype.send;
-  Object.defineProperty(prototype, XHR_HOOK_MARKER, { value: true, configurable: true });
+  Object.defineProperty(prototype, XHR_HOOK_MARKER, {
+    value: true,
+    configurable: true,
+  });
   return () => {
     if (prototype.open === hookedOpen) prototype.open = origOpen;
     if (prototype.setRequestHeader === hookedSetRequestHeader) {
@@ -394,24 +441,31 @@ export function hookXHR(): () => void {
   };
 }
 
-function captureDeepSeekClientHeaders(headersInit: HeadersInit | undefined): Record<string, string> | null {
+function captureDeepSeekClientHeaders(
+  headersInit: HeadersInit | undefined,
+): Record<string, string> | null {
   const headers = normalizeHeaders(headersInit);
   if (!headers) return null;
 
-  const authorization = headers.get('authorization');
+  const authorization = headers.get("authorization");
   if (!authorization) return null;
 
   return {
     Authorization: authorization,
-    'X-App-Version': headers.get('x-app-version') || DEFAULT_APP_VERSION,
-    'x-client-platform': headers.get('x-client-platform') || DEEPSEEK_CLIENT_PLATFORM,
-    'x-client-version': headers.get('x-client-version') || DEFAULT_APP_VERSION,
-    'x-client-locale': headers.get('x-client-locale') || getDeepSeekLocale(),
-    'x-client-timezone-offset': headers.get('x-client-timezone-offset') || String(-new Date().getTimezoneOffset() * 60),
+    "X-App-Version": headers.get("x-app-version") || DEFAULT_APP_VERSION,
+    "x-client-platform":
+      headers.get("x-client-platform") || DEEPSEEK_CLIENT_PLATFORM,
+    "x-client-version": headers.get("x-client-version") || DEFAULT_APP_VERSION,
+    "x-client-locale": headers.get("x-client-locale") || getDeepSeekLocale(),
+    "x-client-timezone-offset":
+      headers.get("x-client-timezone-offset") ||
+      String(-new Date().getTimezoneOffset() * 60),
   };
 }
 
-function normalizeHeaders(headersInit: HeadersInit | undefined): Headers | null {
+function normalizeHeaders(
+  headersInit: HeadersInit | undefined,
+): Headers | null {
   if (!headersInit) return null;
   try {
     return new Headers(headersInit);
@@ -421,7 +475,7 @@ function normalizeHeaders(headersInit: HeadersInit | undefined): Headers | null 
 }
 
 function getDeepSeekLocale(): string {
-  return document.documentElement.lang || navigator.language || 'en-US';
+  return document.documentElement.lang || navigator.language || "en-US";
 }
 
 function markInitialHookStateReady() {
@@ -446,25 +500,35 @@ async function waitForInitialHookState(): Promise<void> {
   initialHookStateWaitComplete = true;
 }
 
-export function createRequestContext(bodyStr: string, overrides: RequestContextOverrides = {}): RequestContext {
+export function createRequestContext(
+  bodyStr: string,
+  overrides: RequestContextOverrides = {},
+): RequestContext {
   const requestId = overrides.requestId ?? crypto.randomUUID();
   try {
     const body = JSON.parse(bodyStr) as Record<string, unknown>;
-    const bodyPrompt = typeof body.prompt === 'string' ? body.prompt : '';
-    const originalPrompt = typeof overrides.originalPrompt === 'string'
-      ? overrides.originalPrompt
-      : typeof body.prompt === 'string'
-        ? body.prompt
-        : '';
+    const bodyPrompt = typeof body.prompt === "string" ? body.prompt : "";
+    const originalPrompt =
+      typeof overrides.originalPrompt === "string"
+        ? overrides.originalPrompt
+        : typeof body.prompt === "string"
+          ? body.prompt
+          : "";
     return {
       requestId,
       originalPrompt,
       agentTaskPrompt: overrides.agentTaskPrompt ?? bodyPrompt,
-      chatSessionId: typeof body.chat_session_id === 'string' ? body.chat_session_id : null,
+      chatSessionId:
+        typeof body.chat_session_id === "string" ? body.chat_session_id : null,
       parentMessageId: normalizeDeepSeekMessageId(body.parent_message_id),
       promptOptions: overrides.promptOptions ?? readRequestPromptOptions(body),
-      suppressPageEvents: isInlineAgentContinuationRequest(originalPrompt, overrides.agentTaskPrompt ?? bodyPrompt),
-      toolDescriptors: overrides.toolDescriptors ?? [...hookState.toolDescriptors],
+      suppressPageEvents: isInlineAgentContinuationRequest(
+        originalPrompt,
+        overrides.agentTaskPrompt ?? bodyPrompt,
+      ),
+      toolDescriptors: overrides.toolDescriptors ?? [
+        ...hookState.toolDescriptors,
+      ],
       ...(overrides.activeLocalSkillDir !== undefined
         ? { activeLocalSkillDir: overrides.activeLocalSkillDir }
         : {}),
@@ -472,13 +536,19 @@ export function createRequestContext(bodyStr: string, overrides: RequestContextO
   } catch {
     return {
       requestId,
-      originalPrompt: overrides.originalPrompt ?? '',
-      agentTaskPrompt: overrides.agentTaskPrompt ?? overrides.originalPrompt ?? '',
+      originalPrompt: overrides.originalPrompt ?? "",
+      agentTaskPrompt:
+        overrides.agentTaskPrompt ?? overrides.originalPrompt ?? "",
       chatSessionId: null,
       parentMessageId: null,
       promptOptions: overrides.promptOptions ?? readRequestPromptOptions(null),
-      suppressPageEvents: isInlineAgentContinuationRequest(overrides.originalPrompt ?? '', overrides.agentTaskPrompt ?? ''),
-      toolDescriptors: overrides.toolDescriptors ?? [...hookState.toolDescriptors],
+      suppressPageEvents: isInlineAgentContinuationRequest(
+        overrides.originalPrompt ?? "",
+        overrides.agentTaskPrompt ?? "",
+      ),
+      toolDescriptors: overrides.toolDescriptors ?? [
+        ...hookState.toolDescriptors,
+      ],
       ...(overrides.activeLocalSkillDir !== undefined
         ? { activeLocalSkillDir: overrides.activeLocalSkillDir }
         : {}),
@@ -488,13 +558,15 @@ export function createRequestContext(bodyStr: string, overrides: RequestContextO
 
 function readRequestPromptOptions(
   body: Record<string, unknown> | null,
-): ResponseCompletePayload['promptOptions'] {
+): ResponseCompletePayload["promptOptions"] {
   return {
-    modelType: typeof body?.model_type === 'string' ? body.model_type : null,
+    modelType: typeof body?.model_type === "string" ? body.model_type : null,
     searchEnabled: body?.search_enabled === true,
     thinkingEnabled: body?.thinking_enabled === true,
     refFileIds: Array.isArray(body?.ref_file_ids)
-      ? body.ref_file_ids.filter((item): item is string => typeof item === 'string')
+      ? body.ref_file_ids.filter(
+          (item): item is string => typeof item === "string",
+        )
       : [],
   };
 }
@@ -504,7 +576,9 @@ function hasBypassHookHeader(headers: HeadersInit | undefined): boolean {
   return new Headers(headers).has(BYPASS_HOOK_HEADER);
 }
 
-function stripBypassHookHeader(headers: HeadersInit | undefined): HeadersInit | undefined {
+function stripBypassHookHeader(
+  headers: HeadersInit | undefined,
+): HeadersInit | undefined {
   if (!headers) return headers;
   const next = new Headers(headers);
   next.delete(BYPASS_HOOK_HEADER);
@@ -524,14 +598,18 @@ function createStreamingResponseToolState(
     return {
       append() {},
       finish() {},
-      getVisibleText() { return ''; },
+      getVisibleText() {
+        return "";
+      },
     };
   }
 
   const toolText = createStreamingToolTextAccumulator(descriptors);
-  const toolCalls = createStreamingToolCallParser(descriptors, { activeLocalSkillDir: options.activeLocalSkillDir });
+  const toolCalls = createStreamingToolCallParser(descriptors, {
+    activeLocalSkillDir: options.activeLocalSkillDir,
+  });
   const notifiedToolSignatures = new Set<string>();
-  let fallbackText = '';
+  let fallbackText = "";
   let fallbackTextTruncated = false;
   let legacyCallIndex = 0;
 
@@ -544,7 +622,9 @@ function createStreamingResponseToolState(
 
   const emitCompleted = (call: ToolCall) => {
     const callWithSource = { ...call, source: getSource() };
-    notifiedToolSignatures.add(createToolCallNotificationSignature(callWithSource));
+    notifiedToolSignatures.add(
+      createToolCallNotificationSignature(callWithSource),
+    );
     hookState.onToolCall(callWithSource);
   };
 
@@ -577,21 +657,26 @@ function createStreamingResponseToolState(
 
   function appendFallbackText(text: string) {
     if (fallbackTextTruncated) return;
-    if (fallbackText.length + text.length > RESPONSE_TOOL_FALLBACK_PARSE_MAX_CHARS) {
+    if (
+      fallbackText.length + text.length >
+      RESPONSE_TOOL_FALLBACK_PARSE_MAX_CHARS
+    ) {
       fallbackTextTruncated = true;
-      fallbackText = '';
+      fallbackText = "";
       return;
     }
     fallbackText += text;
   }
 
   function notifyLegacyFallbackToolCalls() {
-    if (fallbackTextTruncated || !fallbackText.includes('｜DSML｜')) return;
+    if (fallbackTextTruncated || !fallbackText.includes("｜DSML｜")) return;
     for (const call of extractToolCalls(fallbackText, { descriptors })) {
       const source = getSource();
       const callWithSource = {
         ...call,
-        id: call.id ?? `legacy:${source.requestId ?? 'request'}:${legacyCallIndex++}`,
+        id:
+          call.id ??
+          `legacy:${source.requestId ?? "request"}:${legacyCallIndex++}`,
         source,
       };
       const signature = createToolCallNotificationSignature(callWithSource);
@@ -603,13 +688,15 @@ function createStreamingResponseToolState(
 }
 
 function shouldRenderStreamingToolStart(call: ToolCall): boolean {
-  return call.name === 'artifact_create' || call.name === 'artifact_bundle_create';
+  return (
+    call.name === "artifact_create" || call.name === "artifact_bundle_create"
+  );
 }
 
 function createToolCallNotificationSignature(call: ToolCall): string {
   return call.id
     ? `id:${call.id}`
-    : `${call.provider?.id ?? ''}:${call.name}:${call.invocationName ?? ''}:${call.raw}`;
+    : `${call.provider?.id ?? ""}:${call.name}:${call.invocationName ?? ""}:${call.raw}`;
 }
 
 function createManualChatToolCallSource(
@@ -617,7 +704,7 @@ function createManualChatToolCallSource(
   assistantMessageId: number | null,
 ): ToolCallSource {
   return {
-    trigger: 'manual_chat',
+    trigger: "manual_chat",
     requestId: requestContext.requestId,
     chatSessionId: requestContext.chatSessionId,
     parentMessageId: requestContext.parentMessageId,
@@ -628,40 +715,61 @@ function createManualChatToolCallSource(
 // --- SSE stream interception: strip XML tool-call blocks from text events ---
 
 function isBatchPatch(parsed: any): boolean {
-  return parsed?.o === 'BATCH' && Array.isArray(parsed.v);
+  return parsed?.o === "BATCH" && Array.isArray(parsed.v);
 }
 
 function isFragmentCreationPatch(parsed: any): boolean {
-  return parsed?.p === 'response/fragments' && parsed.o === 'APPEND' && Array.isArray(parsed.v);
+  return (
+    parsed?.p === "response/fragments" &&
+    parsed.o === "APPEND" &&
+    Array.isArray(parsed.v)
+  );
 }
 
 function getDirectPatchText(parsed: any): string | null {
-  if (!parsed?.p && typeof parsed?.v === 'string') return parsed.v;
-  if (isResponseTextPatchPath(parsed?.p) && parsed.o === 'APPEND' && typeof parsed.v === 'string') return parsed.v;
-  if (isResponseTextPatchPath(parsed?.p) && typeof parsed.v === 'string' && !parsed.o) {
+  if (!parsed?.p && typeof parsed?.v === "string") return parsed.v;
+  if (
+    isResponseTextPatchPath(parsed?.p) &&
+    parsed.o === "APPEND" &&
+    typeof parsed.v === "string"
+  )
+    return parsed.v;
+  if (
+    isResponseTextPatchPath(parsed?.p) &&
+    typeof parsed.v === "string" &&
+    !parsed.o
+  ) {
     return parsed.v;
   }
   if (isFragmentCreationPatch(parsed)) {
     const parts: string[] = [];
     for (const frag of parsed.v) {
-      if (frag && typeof frag.content === 'string') parts.push(frag.content);
-      else if (frag && typeof frag.text === 'string') parts.push(frag.text);
+      if (frag && typeof frag.content === "string") parts.push(frag.content);
+      else if (frag && typeof frag.text === "string") parts.push(frag.text);
     }
-    return parts.length > 0 ? parts.join('') : null;
+    return parts.length > 0 ? parts.join("") : null;
   }
   return null;
 }
 
 function setDirectPatchText(parsed: any, value: string) {
-  if (!parsed?.p && typeof parsed?.v === 'string') {
+  if (!parsed?.p && typeof parsed?.v === "string") {
     parsed.v = value;
     return;
   }
-  if (isResponseTextPatchPath(parsed?.p) && parsed.o === 'APPEND' && typeof parsed.v === 'string') {
+  if (
+    isResponseTextPatchPath(parsed?.p) &&
+    parsed.o === "APPEND" &&
+    typeof parsed.v === "string"
+  ) {
     parsed.v = value;
     return;
   }
-  if (isResponseTextPatchPath(parsed?.p) && typeof parsed.v === 'string' && !parsed.o) {
+  if (
+    isResponseTextPatchPath(parsed?.p) &&
+    typeof parsed.v === "string" &&
+    !parsed.o
+  ) {
     parsed.v = value;
     return;
   }
@@ -670,7 +778,7 @@ function setDirectPatchText(parsed: any, value: string) {
     for (let i = 0; i < parsed.v.length; i++) {
       const frag = parsed.v[i];
       if (!frag) continue;
-      if (typeof frag.content === 'string') {
+      if (typeof frag.content === "string") {
         if (i === parsed.v.length - 1) {
           frag.content = remaining;
         } else {
@@ -678,7 +786,7 @@ function setDirectPatchText(parsed: any, value: string) {
           remaining = remaining.slice(frag.content.length);
           frag.content = portion;
         }
-      } else if (typeof frag.text === 'string') {
+      } else if (typeof frag.text === "string") {
         if (i === parsed.v.length - 1) {
           frag.text = remaining;
         } else {
@@ -696,48 +804,67 @@ function shouldEmitSanitizedTextPatch(parsed: any): boolean {
 }
 
 function isAnyFragmentCreationPatch(parsed: any): boolean {
-  return typeof parsed?.p === 'string' &&
-    parsed.p.endsWith('/fragments') &&
-    parsed.o === 'APPEND' &&
-    Array.isArray(parsed.v);
+  return (
+    typeof parsed?.p === "string" &&
+    parsed.p.endsWith("/fragments") &&
+    parsed.o === "APPEND" &&
+    Array.isArray(parsed.v)
+  );
 }
 
 function isResponsePatch(parsed: any): boolean {
-  if (!parsed || typeof parsed !== 'object') return false;
+  if (!parsed || typeof parsed !== "object") return false;
   if (!parsed.p) return true;
-  return typeof parsed.p === 'string' && (parsed.p === 'response' || parsed.p.startsWith('response/'));
+  return (
+    typeof parsed.p === "string" &&
+    (parsed.p === "response" || parsed.p.startsWith("response/"))
+  );
 }
 
 function getAnyDirectPatchText(parsed: any): string | null {
-  if (!parsed?.p && typeof parsed?.v === 'string') return parsed.v;
-  if (parsed?.p && parsed.o === 'APPEND' && typeof parsed.v === 'string') return parsed.v;
-  if (typeof parsed?.p === 'string' && typeof parsed.v === 'string' && !parsed.o) {
-    const lastSegment = parsed.p.split('/').pop();
-    if (lastSegment === 'content' || lastSegment === 'text' || lastSegment === 'markdown' || lastSegment === 'delta') {
+  if (!parsed?.p && typeof parsed?.v === "string") return parsed.v;
+  if (parsed?.p && parsed.o === "APPEND" && typeof parsed.v === "string")
+    return parsed.v;
+  if (
+    typeof parsed?.p === "string" &&
+    typeof parsed.v === "string" &&
+    !parsed.o
+  ) {
+    const lastSegment = parsed.p.split("/").pop();
+    if (
+      lastSegment === "content" ||
+      lastSegment === "text" ||
+      lastSegment === "markdown" ||
+      lastSegment === "delta"
+    ) {
       return parsed.v;
     }
   }
   if (isAnyFragmentCreationPatch(parsed)) {
     const parts: string[] = [];
     for (const frag of parsed.v) {
-      if (frag && typeof frag.content === 'string') parts.push(frag.content);
-      else if (frag && typeof frag.text === 'string') parts.push(frag.text);
+      if (frag && typeof frag.content === "string") parts.push(frag.content);
+      else if (frag && typeof frag.text === "string") parts.push(frag.text);
     }
-    return parts.length > 0 ? parts.join('') : null;
+    return parts.length > 0 ? parts.join("") : null;
   }
   return null;
 }
 
 function setAnyDirectPatchText(parsed: any, value: string) {
-  if (!parsed?.p && typeof parsed?.v === 'string') {
+  if (!parsed?.p && typeof parsed?.v === "string") {
     parsed.v = value;
     return;
   }
-  if (parsed?.p && parsed.o === 'APPEND' && typeof parsed.v === 'string') {
+  if (parsed?.p && parsed.o === "APPEND" && typeof parsed.v === "string") {
     parsed.v = value;
     return;
   }
-  if (typeof parsed?.p === 'string' && typeof parsed.v === 'string' && !parsed.o) {
+  if (
+    typeof parsed?.p === "string" &&
+    typeof parsed.v === "string" &&
+    !parsed.o
+  ) {
     parsed.v = value;
     return;
   }
@@ -746,7 +873,7 @@ function setAnyDirectPatchText(parsed: any, value: string) {
     for (let i = 0; i < parsed.v.length; i++) {
       const frag = parsed.v[i];
       if (!frag) continue;
-      if (typeof frag.content === 'string') {
+      if (typeof frag.content === "string") {
         if (i === parsed.v.length - 1) {
           frag.content = remaining;
         } else {
@@ -754,7 +881,7 @@ function setAnyDirectPatchText(parsed: any, value: string) {
           remaining = remaining.slice(frag.content.length);
           frag.content = portion;
         }
-      } else if (typeof frag.text === 'string') {
+      } else if (typeof frag.text === "string") {
         if (i === parsed.v.length - 1) {
           frag.text = remaining;
         } else {
@@ -767,12 +894,15 @@ function setAnyDirectPatchText(parsed: any, value: string) {
   }
 }
 
-function cloneParsedWithSanitizedInternalPrompt(parsed: any, visiblePrompt: string): any | null {
+function cloneParsedWithSanitizedInternalPrompt(
+  parsed: any,
+  visiblePrompt: string,
+): any | null {
   const cloned = JSON.parse(JSON.stringify(parsed));
   let changed = false;
 
   const apply = (node: any) => {
-    if (!node || typeof node !== 'object') return;
+    if (!node || typeof node !== "object") return;
 
     if (isBatchPatch(node)) {
       for (const item of node.v) {
@@ -785,10 +915,13 @@ function cloneParsedWithSanitizedInternalPrompt(parsed: any, visiblePrompt: stri
     if (text === null) return;
 
     const isResponseText = isResponsePatch(node);
-    const sanitized = sanitizeInternalPromptText(text, isResponseText ? undefined : visiblePrompt);
+    const sanitized = sanitizeInternalPromptText(
+      text,
+      isResponseText ? undefined : visiblePrompt,
+    );
     if (sanitized === text) return;
 
-    setAnyDirectPatchText(node, isResponseText ? '' : sanitized);
+    setAnyDirectPatchText(node, isResponseText ? "" : sanitized);
     changed = true;
   };
 
@@ -802,7 +935,7 @@ function cloneParsedWithCollapsedBlankLines(parsed: any): any | null {
   let changed = false;
 
   const apply = (node: any) => {
-    if (!node || typeof node !== 'object') return;
+    if (!node || typeof node !== "object") return;
 
     if (isBatchPatch(node)) {
       for (const item of node.v) {
@@ -834,23 +967,23 @@ function cloneParsedWithCollapsedBlankLines(parsed: any): any | null {
  * intact for `<pre>` rendering.
  */
 function collapseExcessBlankLines(text: string): string {
-  if (!text.includes('\n\n\n')) return text;
-  if (!text.includes('```')) return text.replace(/\n{3,}/g, '\n\n');
+  if (!text.includes("\n\n\n")) return text;
+  if (!text.includes("```")) return text.replace(/\n{3,}/g, "\n\n");
 
-  let output = '';
+  let output = "";
   let inFence = false;
   let cursor = 0;
   while (cursor < text.length) {
-    const fenceIndex = text.indexOf('```', cursor);
+    const fenceIndex = text.indexOf("```", cursor);
     if (fenceIndex === -1) {
       output += inFence
         ? text.slice(cursor)
-        : text.slice(cursor).replace(/\n{3,}/g, '\n\n');
+        : text.slice(cursor).replace(/\n{3,}/g, "\n\n");
       break;
     }
     const segment = text.slice(cursor, fenceIndex);
-    output += inFence ? segment : segment.replace(/\n{3,}/g, '\n\n');
-    output += '```';
+    output += inFence ? segment : segment.replace(/\n{3,}/g, "\n\n");
+    output += "```";
     inFence = !inFence;
     cursor = fenceIndex + 3;
   }
@@ -862,7 +995,7 @@ function extractCleanResponseTextForParsing(parsed: unknown): string | null {
   if (!text) return text;
 
   const sanitized = sanitizeInternalPromptText(text);
-  return sanitized === text ? text : '';
+  return sanitized === text ? text : "";
 }
 
 function cloneParsedWithTextPrefix(parsed: any, keepChars: number): any | null {
@@ -871,7 +1004,7 @@ function cloneParsedWithTextPrefix(parsed: any, keepChars: number): any | null {
   let touchedText = false;
 
   const apply = (node: any) => {
-    if (!node || typeof node !== 'object') return;
+    if (!node || typeof node !== "object") return;
 
     if (isBatchPatch(node)) {
       for (const item of node.v) {
@@ -884,7 +1017,7 @@ function cloneParsedWithTextPrefix(parsed: any, keepChars: number): any | null {
     if (text === null) return;
 
     touchedText = true;
-    const nextText = remaining > 0 ? text.slice(0, remaining) : '';
+    const nextText = remaining > 0 ? text.slice(0, remaining) : "";
     remaining = Math.max(0, remaining - text.length);
     setDirectPatchText(node, nextText);
   };
@@ -903,7 +1036,7 @@ function cloneParsedWithTextSuffix(parsed: any, skipChars: number): any | null {
   let keptText = false;
 
   const apply = (node: any) => {
-    if (!node || typeof node !== 'object') return;
+    if (!node || typeof node !== "object") return;
 
     if (isBatchPatch(node)) {
       for (const item of node.v) {
@@ -918,7 +1051,7 @@ function cloneParsedWithTextSuffix(parsed: any, skipChars: number): any | null {
     touchedText = true;
     if (remainingSkip >= text.length) {
       remainingSkip -= text.length;
-      setDirectPatchText(node, '');
+      setDirectPatchText(node, "");
       return;
     }
 
@@ -937,9 +1070,9 @@ function cloneParsedWithTextSuffix(parsed: any, skipChars: number): any | null {
 export class XmlToolStreamFilter {
   private toolInvocationNameSet: ReadonlySet<string>;
   private visiblePrompt: string;
-  private state: 'NORMAL' | 'SUPPRESSING' = 'NORMAL';
+  private state: "NORMAL" | "SUPPRESSING" = "NORMAL";
   private currentTool: string | null = null;
-  private pendingText = '';
+  private pendingText = "";
   private pendingBlocks: Array<{
     block: string;
     separator: string;
@@ -964,9 +1097,14 @@ export class XmlToolStreamFilter {
    */
   private lastEmittedTextEndsWithNewline = false;
 
-  constructor(descriptors: readonly ToolDescriptor[] = [], visiblePrompt: string = '') {
+  constructor(
+    descriptors: readonly ToolDescriptor[] = [],
+    visiblePrompt: string = "",
+  ) {
     this.visiblePrompt = visiblePrompt;
-    this.toolInvocationNameSet = new Set(createToolInvocationCatalog(descriptors).invocationNames);
+    this.toolInvocationNameSet = new Set(
+      createToolInvocationCatalog(descriptors).invocationNames,
+    );
   }
 
   processFrames(
@@ -979,7 +1117,10 @@ export class XmlToolStreamFilter {
         continue;
       }
 
-      const sanitizedParsed = cloneParsedWithSanitizedInternalPrompt(frame.parsed, this.visiblePrompt);
+      const sanitizedParsed = cloneParsedWithSanitizedInternalPrompt(
+        frame.parsed,
+        this.visiblePrompt,
+      );
       const effectiveParsed = sanitizedParsed ?? frame.parsed;
       const effectiveBlock = sanitizedParsed
         ? replaceDeepSeekSseFrameData(frame, JSON.stringify(sanitizedParsed))
@@ -995,7 +1136,7 @@ export class XmlToolStreamFilter {
       const isFragmentCreation = isFragmentCreationPatch(effectiveParsed);
 
       // Text event — apply state machine
-      if (this.state === 'SUPPRESSING') {
+      if (this.state === "SUPPRESSING") {
         const previousPendingLength = this.pendingText.length;
         const searchText = this.pendingText + text;
         const closeTag = this.findFirstToolClose(searchText, this.currentTool!);
@@ -1009,8 +1150,8 @@ export class XmlToolStreamFilter {
             tailOffsetInCurrentText,
             frame,
           );
-          this.state = 'NORMAL';
-          this.pendingText = '';
+          this.state = "NORMAL";
+          this.pendingText = "";
           this.currentTool = null;
           if (toolTail) {
             this.processNormalTextBlock(
@@ -1025,7 +1166,10 @@ export class XmlToolStreamFilter {
           }
           continue;
         }
-        this.pendingText = this.getCloseSearchTail(searchText, this.currentTool!);
+        this.pendingText = this.getCloseSearchTail(
+          searchText,
+          this.currentTool!,
+        );
         if (isFragmentCreation || isBatchPatch(effectiveParsed)) {
           const modified = cloneParsedWithTextPrefix(effectiveParsed, 0);
           if (modified) {
@@ -1068,7 +1212,10 @@ export class XmlToolStreamFilter {
     if (this.stripTailLeadingNewlines) {
       const leadingNewlines = /^\n+/.exec(text);
       if (leadingNewlines) {
-        const modified = cloneParsedWithTextSuffix(parsed, leadingNewlines[0].length);
+        const modified = cloneParsedWithTextSuffix(
+          parsed,
+          leadingNewlines[0].length,
+        );
         if (!modified) {
           // The tail is nothing but blank lines: drop this frame entirely and
           // keep the flag so the next non-blank text block still gets trimmed.
@@ -1080,7 +1227,10 @@ export class XmlToolStreamFilter {
         }
         parsed = modified;
         text = modifiedText;
-        block = replaceDeepSeekSseFrameData(sourceFrame, JSON.stringify(modified));
+        block = replaceDeepSeekSseFrameData(
+          sourceFrame,
+          JSON.stringify(modified),
+        );
         this.stripTailLeadingNewlines = false;
       } else {
         this.stripTailLeadingNewlines = false;
@@ -1089,11 +1239,21 @@ export class XmlToolStreamFilter {
 
     const previousPendingLength = this.pendingText.length;
     this.pendingText += text;
-    this.pendingBlocks.push({ block, separator, sourceFrame, isFragmentCreation, parsed });
+    this.pendingBlocks.push({
+      block,
+      separator,
+      sourceFrame,
+      isFragmentCreation,
+      parsed,
+    });
 
     const found = this.findFirstToolOpen(this.pendingText);
     if (found) {
-      const closeTag = this.findFirstToolClose(this.pendingText, found.tool, found.endIndex);
+      const closeTag = this.findFirstToolClose(
+        this.pendingText,
+        found.tool,
+        found.endIndex,
+      );
       const tailStart = closeTag ? closeTag.endIndex : -1;
       const tailOffsetInCurrentText = tailStart - previousPendingLength;
 
@@ -1106,25 +1266,30 @@ export class XmlToolStreamFilter {
       // Collapse excess blank lines right before the open tag down to a
       // single paragraph break: agent-mode output often uses `\n\n\n` around
       // tool calls, and without this the stripped text keeps a blank row.
-      const collapsedBeforeOpen = textBeforeOpen.replace(/\n{3,}$/, '\n\n');
-      const openIdx = found.idx - (textBeforeOpen.length - collapsedBeforeOpen.length);
+      const collapsedBeforeOpen = textBeforeOpen.replace(/\n{3,}$/, "\n\n");
+      const openIdx =
+        found.idx - (textBeforeOpen.length - collapsedBeforeOpen.length);
       textBeforeOpen = collapsedBeforeOpen;
-      this.stripTailLeadingNewlines = textBeforeOpen.length > 0
-        ? /\n$/.test(textBeforeOpen)
-        : this.lastEmittedTextEndsWithNewline;
+      this.stripTailLeadingNewlines =
+        textBeforeOpen.length > 0
+          ? /\n$/.test(textBeforeOpen)
+          : this.lastEmittedTextEndsWithNewline;
       this.emitBlocksBeforeOpen(controller, openIdx);
       this.pendingBlocks = [];
 
       if (!closeTag) {
-        this.state = 'SUPPRESSING';
+        this.state = "SUPPRESSING";
         this.currentTool = found.tool;
-        this.pendingText = this.getCloseSearchTail(this.pendingText.slice(found.idx), found.tool);
+        this.pendingText = this.getCloseSearchTail(
+          this.pendingText.slice(found.idx),
+          found.tool,
+        );
         return;
       }
 
-      this.state = 'NORMAL';
+      this.state = "NORMAL";
       this.currentTool = null;
-      this.pendingText = '';
+      this.pendingText = "";
       const toolTail = this.getCurrentToolTail(
         parsed,
         text,
@@ -1156,7 +1321,7 @@ export class XmlToolStreamFilter {
     }
     this.lastEmittedTextEndsWithNewline = /\n$/.test(this.pendingText);
     this.pendingBlocks = [];
-    this.pendingText = '';
+    this.pendingText = "";
   }
 
   /**
@@ -1170,7 +1335,13 @@ export class XmlToolStreamFilter {
    */
   private emitCollapsedTrailingNewlines(
     controller: ReadableStreamDefaultController<Uint8Array>,
-    entry: { block: string; separator: string; sourceFrame: DeepSeekSseFrame; isFragmentCreation: boolean; parsed: any },
+    entry: {
+      block: string;
+      separator: string;
+      sourceFrame: DeepSeekSseFrame;
+      isFragmentCreation: boolean;
+      parsed: any;
+    },
   ) {
     const modified = cloneParsedWithCollapsedBlankLines(entry.parsed);
     if (modified === null) {
@@ -1200,7 +1371,10 @@ export class XmlToolStreamFilter {
   } | null {
     if (tailOffsetInCurrentText >= text.length) return null;
 
-    const modified = cloneParsedWithTextSuffix(parsed, Math.max(0, tailOffsetInCurrentText));
+    const modified = cloneParsedWithTextSuffix(
+      parsed,
+      Math.max(0, tailOffsetInCurrentText),
+    );
     if (!modified) return null;
 
     const modifiedText = extractResponseTextFromParsed(modified);
@@ -1212,13 +1386,16 @@ export class XmlToolStreamFilter {
       sourceFrame,
       parsed: modified,
       text: modifiedText,
-      isFragmentCreation: isFragmentCreation || isFragmentCreationPatch(modified),
+      isFragmentCreation:
+        isFragmentCreation || isFragmentCreationPatch(modified),
     };
   }
 
   private getCloseSearchTail(text: string, tool: string): string {
-    const tailLength = getPartialXmlToolTagTailLength(text, new Set([tool]), { closing: true });
-    return tailLength > 0 ? text.slice(-tailLength) : '';
+    const tailLength = getPartialXmlToolTagTailLength(text, new Set([tool]), {
+      closing: true,
+    });
+    return tailLength > 0 ? text.slice(-tailLength) : "";
   }
 
   flush(controller: ReadableStreamDefaultController<Uint8Array>) {
@@ -1227,7 +1404,7 @@ export class XmlToolStreamFilter {
       this.emitCollapsedTrailingNewlines(controller, b);
     }
     this.pendingBlocks = [];
-    this.pendingText = '';
+    this.pendingText = "";
   }
 
   private emit(
@@ -1237,24 +1414,44 @@ export class XmlToolStreamFilter {
   ) {
     // Released passive output always terminated a final buffered frame. Keep
     // that EOF contract while preserving an explicit LF/CRLF separator.
-    controller.enqueue(this.encoder.encode(block + (separator || '\n\n')));
+    controller.enqueue(this.encoder.encode(block + (separator || "\n\n")));
   }
 
-  private findFirstToolOpen(text: string): { idx: number; endIndex: number; tool: string } | null {
-    const match = findFirstXmlToolTag(text, this.toolInvocationNameSet, { closing: false });
-    return match ? { idx: match.index, endIndex: match.endIndex, tool: match.name } : null;
+  private findFirstToolOpen(
+    text: string,
+  ): { idx: number; endIndex: number; tool: string } | null {
+    const match = findFirstXmlToolTag(text, this.toolInvocationNameSet, {
+      closing: false,
+    });
+    return match
+      ? { idx: match.index, endIndex: match.endIndex, tool: match.name }
+      : null;
   }
 
-  private findFirstToolClose(text: string, tool: string, fromIndex = 0): { index: number; endIndex: number } | null {
-    const match = findFirstXmlToolTag(text, new Set([tool]), { closing: true, fromIndex });
+  private findFirstToolClose(
+    text: string,
+    tool: string,
+    fromIndex = 0,
+  ): { index: number; endIndex: number } | null {
+    const match = findFirstXmlToolTag(text, new Set([tool]), {
+      closing: true,
+      fromIndex,
+    });
     return match ? { index: match.index, endIndex: match.endIndex } : null;
   }
 
   private couldBePartialToolOpen(text: string): boolean {
-    return getPartialXmlToolTagTailLength(text, this.toolInvocationNameSet, { closing: false }) > 0;
+    return (
+      getPartialXmlToolTagTailLength(text, this.toolInvocationNameSet, {
+        closing: false,
+      }) > 0
+    );
   }
 
-  private emitBlocksBeforeOpen(controller: ReadableStreamDefaultController<Uint8Array>, idx: number) {
+  private emitBlocksBeforeOpen(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    idx: number,
+  ) {
     let charsSeen = 0;
 
     for (const entry of this.pendingBlocks) {
@@ -1268,14 +1465,21 @@ export class XmlToolStreamFilter {
         charsSeen += text.length;
       } else {
         const keepChars = idx - charsSeen;
-        if (keepChars > 0 || entry.isFragmentCreation || isBatchPatch(entry.parsed)) {
+        if (
+          keepChars > 0 ||
+          entry.isFragmentCreation ||
+          isBatchPatch(entry.parsed)
+        ) {
           const modified = cloneParsedWithTextPrefix(entry.parsed, keepChars);
           if (modified) {
             const collapsed = cloneParsedWithCollapsedBlankLines(modified);
             const effective = collapsed ?? modified;
             this.emit(
               controller,
-              replaceDeepSeekSseFrameData(entry.sourceFrame, JSON.stringify(effective)),
+              replaceDeepSeekSseFrameData(
+                entry.sourceFrame,
+                JSON.stringify(effective),
+              ),
               entry.separator,
             );
           }
@@ -1287,41 +1491,55 @@ export class XmlToolStreamFilter {
     // (plus the open tag itself when keepChars covered it). Track whether it
     // ended on a newline so a tool call that opens at the start of the next
     // frame can still collapse the blank lines correctly.
-    this.lastEmittedTextEndsWithNewline = /\n$/.test(this.pendingText.slice(0, idx));
+    this.lastEmittedTextEndsWithNewline = /\n$/.test(
+      this.pendingText.slice(0, idx),
+    );
   }
 }
 
 interface PassiveDeepSeekStreamState {
-  append(text: string, controller: ReadableStreamDefaultController<Uint8Array>): void;
-  finish(controller: ReadableStreamDefaultController<Uint8Array>): ResponseCompletePayload | null;
+  append(
+    text: string,
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void;
+  finish(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): ResponseCompletePayload | null;
   cancel(): void;
 }
 
-function createPassiveDeepSeekStreamState(requestContext: RequestContext): PassiveDeepSeekStreamState {
+function createPassiveDeepSeekStreamState(
+  requestContext: RequestContext,
+): PassiveDeepSeekStreamState {
   const frameDecoder = createDeepSeekSseFrameDecoder();
   const summary = createDeepSeekStreamSummary();
-  const filter = new XmlToolStreamFilter(requestContext.toolDescriptors, requestContext.originalPrompt);
+  const filter = new XmlToolStreamFilter(
+    requestContext.toolDescriptors,
+    requestContext.originalPrompt,
+  );
   let cancelled = false;
   let completed = false;
 
   const responseToolState = createStreamingResponseToolState(
     requestContext.toolDescriptors,
-    () => createManualChatToolCallSource(requestContext, summary.responseMessageId),
+    () =>
+      createManualChatToolCallSource(requestContext, summary.responseMessageId),
     {
       suppressEvents: requestContext.suppressPageEvents,
       activeLocalSkillDir: requestContext.activeLocalSkillDir,
     },
   );
-  const speedTracker = createResponseTokenSpeedTracker(
-    (progress) => {
-      if (!requestContext.suppressPageEvents && !cancelled) {
-        hookState.onResponseTokenSpeed(
-          attachResponseContextToTokenSpeedProgress(progress, requestContext, summary.responseMessageId),
-        );
-      }
-    },
-    TOKEN_SPEED_EMIT_INTERVAL_MS,
-  );
+  const speedTracker = createResponseTokenSpeedTracker((progress) => {
+    if (!requestContext.suppressPageEvents && !cancelled) {
+      hookState.onResponseTokenSpeed(
+        attachResponseContextToTokenSpeedProgress(
+          progress,
+          requestContext,
+          summary.responseMessageId,
+        ),
+      );
+    }
+  }, TOKEN_SPEED_EMIT_INTERVAL_MS);
 
   const processFrames = (
     frames: readonly DeepSeekSseFrame[],
@@ -1332,7 +1550,9 @@ function createPassiveDeepSeekStreamState(requestContext: RequestContext): Passi
     consumeDeepSeekSseFrames(frames, summary, {
       retainAssistantText: false,
       onParsed(parsed, event) {
-        speedTracker.updateServerStats(extractResponseUsageStatsFromParsed(parsed, event.type));
+        speedTracker.updateServerStats(
+          extractResponseUsageStatsFromParsed(parsed, event.type),
+        );
         const tokenSpeedText = extractResponseTextForTokenSpeed(parsed);
         if (tokenSpeedText) speedTracker.append(tokenSpeedText);
         const eventText = extractCleanResponseTextForParsing(parsed);
@@ -1374,99 +1594,6 @@ function createPassiveDeepSeekStreamState(requestContext: RequestContext): Passi
   };
 }
 
-function readReplayParentMessageId(rawBody: string): number | null {
-  try {
-    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-    return normalizeDeepSeekMessageId(parsed.parent_message_id);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Builds the synthetic fetch Response for an agent final-answer replay: the
- * page consumes the same `{p,o,v}` SSE patch stream it would get from the
- * server, so its native markdown/chart/code-block renderer takes over.
- */
-function buildAgentReplayResponse(
-  registration: AgentReplayRegistration,
-  rawBody: string,
-): Response {
-  const sse = buildAgentReplaySse(registration, readReplayParentMessageId(rawBody));
-  const bytes = new TextEncoder().encode(sse);
-  return new Response(new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  }), {
-    status: 200,
-    statusText: 'OK',
-    headers: { 'content-type': 'text/event-stream' },
-  });
-}
-
-/**
- * Simulates a completed XHR for an agent final-answer replay without touching
- * the network: the instance getters serve the synthetic SSE text and the
- * standard progress lifecycle events fire so the page's own XHR handler
- * parses the response exactly like a real stream.
- */
-function simulateAgentReplayXhrResponse(
-  xhr: XMLHttpRequest,
-  registration: AgentReplayRegistration,
-  rawBody: string,
-): void {
-  const sse = buildAgentReplaySse(registration, readReplayParentMessageId(rawBody));
-  let simulatedReadyState = 2;
-  const overrideProperty = (name: string, value: unknown) => {
-    try {
-      Object.defineProperty(xhr, name, { get: () => value, configurable: true });
-    } catch {
-      // Instance-level override failed (frozen object): fall through and let
-      // the page observe the real (never-started) XHR state; the replay then
-      // simply does not happen for this request.
-    }
-  };
-  try {
-    Object.defineProperty(xhr, 'readyState', { get: () => simulatedReadyState, configurable: true });
-  } catch {
-    return;
-  }
-  overrideProperty('status', 200);
-  overrideProperty('statusText', 'OK');
-  overrideProperty('responseText', sse);
-  overrideProperty('response', sse);
-  overrideProperty('responseURL', '');
-  try {
-    xhr.getResponseHeader = ((name: string) => (
-      String(name ?? '').toLowerCase() === 'content-type' ? 'text/event-stream' : null
-    )) as typeof xhr.getResponseHeader;
-    xhr.getAllResponseHeaders = (() => 'content-type: text/event-stream\r\n') as typeof xhr.getAllResponseHeaders;
-  } catch {
-    // Header overrides are best-effort; the response body getters still serve
-    // the synthetic stream.
-  }
-
-  const fire = (type: string) => {
-    const event = new Event(type);
-    const propertyHandler = (xhr as unknown as Record<string, unknown>)[`on${type}`];
-    if (typeof propertyHandler === 'function') {
-      (propertyHandler as (ev: Event) => void).call(xhr, event);
-    }
-    xhr.dispatchEvent(event);
-  };
-
-  simulatedReadyState = 3;
-  fire('readystatechange');
-  fire('progress');
-  simulatedReadyState = 4;
-  fire('readystatechange');
-  fire('progress');
-  fire('load');
-  fire('loadend');
-}
-
 export async function interceptFetchResponse(
   responsePromise: Promise<Response>,
   requestContext: RequestContext,
@@ -1499,49 +1626,55 @@ export async function interceptFetchResponse(
   let cancelled = false;
   let finished = false;
 
-  const stream = new ReadableStream({
-    async pull(controller) {
-      if (cancelled || finished) return;
-      try {
-        const { done, value } = await reader.read();
-        if (cancelled) return;
-        if (!done) {
-          getStreamState().append(decoder.decode(value, { stream: true }), controller);
-          return;
-        }
+  const stream = new ReadableStream(
+    {
+      async pull(controller) {
+        if (cancelled || finished) return;
+        try {
+          const { done, value } = await reader.read();
+          if (cancelled) return;
+          if (!done) {
+            getStreamState().append(
+              decoder.decode(value, { stream: true }),
+              controller,
+            );
+            return;
+          }
 
-        const finalText = decoder.decode();
-        if (finalText) getStreamState().append(finalText, controller);
-        const complete = getStreamState().finish(controller);
-        if (complete) hookState.onResponseComplete(complete);
-        finished = true;
-        controller.close();
-        notifyTerminal();
-      } catch (error) {
+          const finalText = decoder.decode();
+          if (finalText) getStreamState().append(finalText, controller);
+          const complete = getStreamState().finish(controller);
+          if (complete) hookState.onResponseComplete(complete);
+          finished = true;
+          controller.close();
+          notifyTerminal();
+        } catch (error) {
+          cancelled = true;
+          streamState?.cancel();
+          try {
+            await reader.cancel(error);
+          } finally {
+            try {
+              controller.error(error);
+            } finally {
+              notifyTerminal();
+            }
+          }
+        }
+      },
+      async cancel(reason) {
+        if (cancelled || finished) return;
         cancelled = true;
         streamState?.cancel();
         try {
-          await reader.cancel(error);
+          await reader.cancel(reason);
         } finally {
-          try {
-            controller.error(error);
-          } finally {
-            notifyTerminal();
-          }
+          notifyTerminal();
         }
-      }
+      },
     },
-    async cancel(reason) {
-      if (cancelled || finished) return;
-      cancelled = true;
-      streamState?.cancel();
-      try {
-        await reader.cancel(reason);
-      } finally {
-        notifyTerminal();
-      }
-    },
-  }, { highWaterMark: 0 });
+    { highWaterMark: 0 },
+  );
 
   return new Response(stream, {
     headers: response.headers,
@@ -1569,7 +1702,7 @@ function setupXHRResponseInterceptor(
   requestContext: RequestContext,
 ): () => void {
   let lastLen = 0;
-  let filteredResponse = '';
+  let filteredResponse = "";
   const streamState = createPassiveDeepSeekStreamState(requestContext);
   let responseFinished = false;
 
@@ -1580,8 +1713,12 @@ function setupXHRResponseInterceptor(
     hookState.onRequestTerminal({ requestId: requestContext.requestId });
   };
 
-  const origResponseTextDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText') ||
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(XMLHttpRequest.prototype), 'responseText');
+  const origResponseTextDesc =
+    Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, "responseText") ||
+    Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(XMLHttpRequest.prototype),
+      "responseText",
+    );
 
   // Create a fake controller that accumulates filtered text
   const fakeController = {
@@ -1591,7 +1728,7 @@ function setupXHRResponseInterceptor(
   } as unknown as ReadableStreamDefaultController<Uint8Array>;
 
   const consumeAvailableResponse = () => {
-    const raw = origResponseTextDesc?.get?.call(xhr) || '';
+    const raw = origResponseTextDesc?.get?.call(xhr) || "";
     const newData = raw.slice(lastLen);
     lastLen = raw.length;
     if (newData) streamState.append(newData, fakeController);
@@ -1610,39 +1747,45 @@ function setupXHRResponseInterceptor(
     if (xhr.readyState === 4 && xhr.status !== 0) finishResponse();
   };
 
-  xhr.addEventListener('readystatechange', function () {
+  xhr.addEventListener("readystatechange", function () {
     if (xhr.readyState === 3 || xhr.readyState === 4) {
       consumeAvailableResponse();
       finishSuccessfulResponse();
     }
   });
-  xhr.addEventListener('load', () => {
-    try {
-      finishResponse();
-    } finally {
-      notifyTerminal();
-    }
-  }, { once: true });
+  xhr.addEventListener(
+    "load",
+    () => {
+      try {
+        finishResponse();
+      } finally {
+        notifyTerminal();
+      }
+    },
+    { once: true },
+  );
   const notifyFailure = () => {
     streamState.cancel();
     notifyTerminal();
   };
-  xhr.addEventListener('abort', notifyFailure, { once: true });
-  xhr.addEventListener('error', notifyFailure, { once: true });
-  xhr.addEventListener('timeout', notifyFailure, { once: true });
+  xhr.addEventListener("abort", notifyFailure, { once: true });
+  xhr.addEventListener("error", notifyFailure, { once: true });
+  xhr.addEventListener("timeout", notifyFailure, { once: true });
 
-  Object.defineProperty(xhr, 'responseText', {
+  Object.defineProperty(xhr, "responseText", {
     get() {
-      if (xhr.readyState === 3 || xhr.readyState === 4) consumeAvailableResponse();
+      if (xhr.readyState === 3 || xhr.readyState === 4)
+        consumeAvailableResponse();
       finishSuccessfulResponse();
       return filteredResponse;
     },
     configurable: true,
   });
-  Object.defineProperty(xhr, 'response', {
+  Object.defineProperty(xhr, "response", {
     get() {
-      if (xhr.responseType === '' || xhr.responseType === 'text') {
-        if (xhr.readyState === 3 || xhr.readyState === 4) consumeAvailableResponse();
+      if (xhr.responseType === "" || xhr.responseType === "text") {
+        if (xhr.readyState === 3 || xhr.readyState === 4)
+          consumeAvailableResponse();
         finishSuccessfulResponse();
         return filteredResponse;
       }
@@ -1656,10 +1799,12 @@ function setupXHRResponseInterceptor(
 
 // --- History API interception: strip tool-call blocks from saved messages ---
 
-async function interceptHistoryResponse(responsePromise: Promise<Response>): Promise<Response> {
+async function interceptHistoryResponse(
+  responsePromise: Promise<Response>,
+): Promise<Response> {
   const response = await responsePromise;
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('json')) return response;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("json")) return response;
 
   try {
     const json = await response.json();
@@ -1675,16 +1820,24 @@ async function interceptHistoryResponse(responsePromise: Promise<Response>): Pro
 }
 
 function setupXHRHistoryInterceptor(xhr: XMLHttpRequest) {
-  const origResponseTextDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText') ||
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(XMLHttpRequest.prototype), 'responseText');
-  const origResponseDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response') ||
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(XMLHttpRequest.prototype), 'response');
+  const origResponseTextDesc =
+    Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, "responseText") ||
+    Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(XMLHttpRequest.prototype),
+      "responseText",
+    );
+  const origResponseDesc =
+    Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, "response") ||
+    Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(XMLHttpRequest.prototype),
+      "response",
+    );
 
   let cachedFiltered: string | null = null;
 
-  Object.defineProperty(xhr, 'responseText', {
+  Object.defineProperty(xhr, "responseText", {
     get() {
-      const raw = origResponseTextDesc?.get?.call(xhr) || '';
+      const raw = origResponseTextDesc?.get?.call(xhr) || "";
       if (xhr.readyState < 4) return raw;
       if (cachedFiltered !== null) return cachedFiltered;
       try {
@@ -1699,10 +1852,10 @@ function setupXHRHistoryInterceptor(xhr: XMLHttpRequest) {
   });
 
   // Also override response for XHR response getter
-  Object.defineProperty(xhr, 'response', {
+  Object.defineProperty(xhr, "response", {
     get() {
-      if (xhr.responseType === '' || xhr.responseType === 'text') {
-        const raw = origResponseTextDesc?.get?.call(xhr) || '';
+      if (xhr.responseType === "" || xhr.responseType === "text") {
+        const raw = origResponseTextDesc?.get?.call(xhr) || "";
         if (xhr.readyState < 4) return raw;
         if (cachedFiltered !== null) return cachedFiltered;
         try {
@@ -1732,14 +1885,16 @@ function getHistoryCleanupOptions() {
 // --- IndexedDB interception: strip tool-call blocks from cached messages ---
 
 function hookIndexedDB(): () => void {
-  const prototype = IDBObjectStore.prototype as IDBObjectStore & { [IDB_HOOK_MARKER]?: true };
+  const prototype = IDBObjectStore.prototype as IDBObjectStore & {
+    [IDB_HOOK_MARKER]?: true;
+  };
   if (prototype[IDB_HOOK_MARKER]) return () => undefined;
   const origGet = prototype.get;
   const origGetAll = prototype.getAll;
 
   prototype.get = function (...args) {
     const request = origGet.apply(this, args);
-    if (this.name === 'history-message') {
+    if (this.name === "history-message") {
       patchIDBRequest(request);
     }
     return request;
@@ -1747,14 +1902,17 @@ function hookIndexedDB(): () => void {
 
   prototype.getAll = function (...args) {
     const request = origGetAll.apply(this, args);
-    if (this.name === 'history-message') {
+    if (this.name === "history-message") {
       patchIDBRequest(request);
     }
     return request;
   };
   const hookedGet = prototype.get;
   const hookedGetAll = prototype.getAll;
-  Object.defineProperty(prototype, IDB_HOOK_MARKER, { value: true, configurable: true });
+  Object.defineProperty(prototype, IDB_HOOK_MARKER, {
+    value: true,
+    configurable: true,
+  });
   return () => {
     if (prototype.get === hookedGet) prototype.get = origGet;
     if (prototype.getAll === hookedGetAll) prototype.getAll = origGetAll;
@@ -1763,12 +1921,15 @@ function hookIndexedDB(): () => void {
 }
 
 function patchIDBRequest(request: IDBRequest) {
-  const origResultDesc = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'result');
+  const origResultDesc = Object.getOwnPropertyDescriptor(
+    IDBRequest.prototype,
+    "result",
+  );
   if (!origResultDesc) return;
 
   let cleaned = false;
 
-  Object.defineProperty(request, 'result', {
+  Object.defineProperty(request, "result", {
     get() {
       const result = origResultDesc.get!.call(this);
       if (result && !cleaned) {

@@ -79,6 +79,11 @@ export {
 } from './native-search-projection';
 
 export {
+  filterRetiredModelFacingTools,
+  isRetiredModelFacingTool,
+} from './model-facing';
+
+export {
   WEB_FETCH_DESCRIPTOR_ID,
   WEB_FETCH_PERMISSION_ERROR_CODE,
   isRetryableWebFetchPermissionPrecondition,

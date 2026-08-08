@@ -92,6 +92,7 @@ import {
   setBrowserControlEnabled,
 } from '../core/browser-control';
 import { filterSidepanelChatToolDescriptors } from '../core/tool/sidepanel';
+import { filterRetiredModelFacingTools } from '../core/tool/model-facing';
 import {
   addConversationToProject,
   bindPendingProjectConversation,
@@ -1512,10 +1513,16 @@ async function buildSidepanelPrompt(request: ChatPromptBuildRequest): Promise<{
     settings: await getMcpCapabilitySettings(),
     intent: request.prompt,
   }).descriptors;
+  // Model-facing retirement (drop plugin artifact extension): the sidepanel
+  // prompt must never list the retired artifact tools, or the model keeps
+  // delivering files as artifact XML. The EXECUTION catalog (enabledDescriptors)
+  // stays intact so residual artifact XML from in-flight sessions is still
+  // parsed and executed instead of leaking into the displayed markdown.
+  const modelFacingDescriptors = filterRetiredModelFacingTools(enabledDescriptors);
   const { augmented } = buildPromptAugmentation(request.prompt, {
     memories: memories.filter((memory) => memory.scope !== 'project'),
     presetContent: shouldInjectPreset ? activePreset?.content ?? null : null,
-    toolDescriptors: enabledDescriptors,
+    toolDescriptors: modelFacingDescriptors,
     thinkingEnabled: false,
     locale: currentBackgroundLocale,
     memoryEnabled: promptSettings.memoryEnabled,

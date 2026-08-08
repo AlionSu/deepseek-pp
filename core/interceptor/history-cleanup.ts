@@ -5,6 +5,7 @@ import {
   replaceTaskCompleteBlocks,
 } from '../inline-agent/prompt';
 import { sanitizeInternalPromptText } from '../prompt';
+import { normalizeInlineAgentNativeMarkdown } from '../inline-agent/native-markdown';
 import type { ToolCall, ToolCallRestoreRecord, ToolDescriptor } from '../types';
 import {
   createToolCallFromInvocation,
@@ -556,23 +557,64 @@ function sanitizeStoredMessageInternalPrompt(msg: any, options: { replaceTaskCom
 
   if (textFragments.length === 0) return;
 
-  const joined = textFragments.map((frag: any) => frag.content).join('');
+  if (options.replaceTaskComplete) {
+    const responseFragments = textFragments.filter(isStoredResponseFragment);
+    if (responseFragments.length > 0) {
+      // DeepSeek stores reasoning and final text as distinct THINK/RESPONSE
+      // fragments. Native-delivery normalization may change only the final
+      // response bytes (for example `xychart-beta` -> Mermaid). Never join the
+      // two roles and write them back into the first THINK fragment: doing so
+      // turns the deliverable into plain reasoning text and removes native
+      // code/chart rendering after refresh.
+      for (const fragment of textFragments) {
+        if (!isStoredResponseFragment(fragment)) {
+          fragment.content = sanitizeStoredControlText(fragment.content, {
+            replaceTaskComplete: false,
+          });
+        }
+      }
+      sanitizeStoredFragmentGroup(responseFragments, options);
+      return;
+    }
+  }
+
+  // Compatibility for legacy/untyped fragment arrays whose markdown can span
+  // multiple entries. These have no semantic role boundary to preserve.
+  sanitizeStoredFragmentGroup(textFragments, options);
+}
+
+function isStoredResponseFragment(fragment: any): boolean {
+  return typeof fragment?.type === 'string' && fragment.type.toUpperCase() === 'RESPONSE';
+}
+
+function sanitizeStoredFragmentGroup(
+  fragments: Array<{ content: string }>,
+  options: { replaceTaskComplete: boolean },
+): void {
+  const joined = fragments.map((fragment) => fragment.content).join('');
   const sanitizedJoined = sanitizeStoredControlText(joined, options);
   if (sanitizedJoined !== joined) {
-    textFragments.forEach((frag: any, index: number) => {
-      frag.content = index === 0 ? sanitizedJoined : '';
+    fragments.forEach((fragment, index) => {
+      fragment.content = index === 0 ? sanitizedJoined : '';
     });
     return;
   }
 
-  for (const frag of textFragments) {
-    frag.content = sanitizeStoredControlText(frag.content, options);
+  for (const fragment of fragments) {
+    fragment.content = sanitizeStoredControlText(fragment.content, options);
   }
 }
 
 function sanitizeStoredControlText(text: string, options: { replaceTaskComplete: boolean }): string {
   const sanitized = sanitizeInternalPromptText(text);
-  return options.replaceTaskComplete ? replaceTaskCompleteBlocks(sanitized) : sanitized;
+  if (!options.replaceTaskComplete) return sanitized;
+
+  // A web-backed inline-agent final turn is persisted by DeepSeek under the
+  // internal continuation user message. Normalize direct `xychart-beta`
+  // fences only in that typed RESPONSE fragment so a history reload keeps
+  // the identical native Mermaid chart card. Ordinary conversation messages
+  // never enter this branch and retain their original markdown bytes.
+  return normalizeInlineAgentNativeMarkdown(replaceTaskCompleteBlocks(sanitized));
 }
 
 function isInternalManagedAgentMessage(msg: any): boolean {

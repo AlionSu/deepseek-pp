@@ -59,7 +59,7 @@ describe('content bridge controllers', () => {
     expect(kernel.snapshot().resources.total).toBe(0);
   });
 
-  it('rejects pending MAIN augmentation on stop and opens a clean next epoch', async () => {
+  it('passes through pending MAIN augmentation on stop and opens a clean next epoch', async () => {
     const target = createFakeWindow();
     const port = createFakePort();
     const applyState = vi.fn();
@@ -96,7 +96,7 @@ describe('content bridge controllers', () => {
     });
     const staleHandler = port.onmessage;
     await kernel.stop('pagehide');
-    await expect(pending).rejects.toThrow('main/content bridge disconnected');
+    await expect(pending).resolves.toBeNull();
     await staleHandler?.({
       data: {
         source: BRIDGE_SOURCES.content,
@@ -111,6 +111,125 @@ describe('content bridge controllers', () => {
 
     await expect(kernel.start()).resolves.toBe(2);
     await kernel.stop('manual');
+  });
+
+  it('passes through a MAIN augmentation when the content bridge does not answer in time', async () => {
+    vi.useFakeTimers();
+    const target = createFakeWindow();
+    const port = createFakePort();
+    const controller = createMainWorldBridgeController({
+      target,
+      createSessionId: () => 'request-timeout',
+      applyState: vi.fn(),
+      clearState: vi.fn(),
+      reportError: vi.fn(),
+    });
+    const kernel = createContentLifecycleKernel([controller]);
+
+    try {
+      await kernel.start();
+      target.dispatchEvent(createHandshakeEvent(target, {
+        source: BRIDGE_SOURCES.content,
+        type: BRIDGE_HANDSHAKE_TYPES.init,
+      }, [port as unknown as MessagePort]));
+
+      const pending = controller.requestAugmentedBody('{}', 'request-1', 'completion');
+      await vi.advanceTimersByTimeAsync(8_100);
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      await kernel.stop('manual');
+      vi.useRealTimers();
+    }
+
+    expect(kernel.snapshot().resources.total).toBe(0);
+  });
+
+  it('passes through an augmentation error result instead of rejecting the native request', async () => {
+    const target = createFakeWindow();
+    const port = createFakePort();
+    const reportError = vi.fn();
+    const controller = createMainWorldBridgeController({
+      target,
+      createSessionId: createSequentialId('main'),
+      applyState: vi.fn(),
+      clearState: vi.fn(),
+      reportError,
+    });
+    const kernel = createContentLifecycleKernel([controller]);
+    await kernel.start();
+
+    try {
+      target.dispatchEvent(createHandshakeEvent(target, {
+        source: BRIDGE_SOURCES.content,
+        type: BRIDGE_HANDSHAKE_TYPES.init,
+      }, [port as unknown as MessagePort]));
+
+      const pending = controller.requestAugmentedBody('{}', 'request-1', 'completion');
+      port.emit({
+        source: BRIDGE_SOURCES.content,
+        type: 'AUGMENT_REQUEST_BODY_RESULT',
+        id: 'main-2',
+        ok: false,
+        error: 'DeepSeek++ main/content bridge disconnected.',
+      });
+
+      await expect(pending).resolves.toBeNull();
+      expect(reportError).toHaveBeenCalledWith(
+        '[DeepSeek++] request augmentation failed; sending original request',
+        expect.objectContaining({
+          message: 'DeepSeek++ main/content bridge disconnected.',
+        }),
+      );
+    } finally {
+      await kernel.stop('manual');
+    }
+  });
+
+  it('contains a synchronous port failure, drains pending augmentation, and reconnects', async () => {
+    const target = createFakeWindow();
+    const port = createFakePort();
+    const clearState = vi.fn();
+    const reportError = vi.fn();
+    const controller = createMainWorldBridgeController({
+      target,
+      createSessionId: createSequentialId('main'),
+      applyState: vi.fn(),
+      clearState,
+      reportError,
+    });
+    const kernel = createContentLifecycleKernel([controller]);
+    await kernel.start();
+
+    try {
+      target.dispatchEvent(createHandshakeEvent(target, {
+        source: BRIDGE_SOURCES.content,
+        type: BRIDGE_HANDSHAKE_TYPES.init,
+      }, [port as unknown as MessagePort]));
+      const pending = controller.requestAugmentedBody('{}', 'request-1', 'completion');
+      port.postMessage.mockImplementation(() => {
+        throw new Error('DeepSeek++ main/content bridge disconnected.');
+      });
+
+      expect(() => controller.post({
+        type: 'HEADERS_CAPTURED',
+        headers: { authorization: 'redacted' },
+      })).not.toThrow();
+
+      await expect(pending).resolves.toBeNull();
+      await vi.waitFor(() => expect(port.close).toHaveBeenCalledOnce());
+      expect(clearState).toHaveBeenCalledOnce();
+      expect(reportError).toHaveBeenCalledWith(
+        '[DeepSeek++] main/content bridge post failed; reconnecting',
+        expect.objectContaining({
+          message: 'DeepSeek++ main/content bridge disconnected.',
+        }),
+      );
+      await expect(
+        controller.requestAugmentedBody('{}', 'request-2', 'completion'),
+      ).resolves.toBeNull();
+    } finally {
+      await kernel.stop('manual');
+    }
   });
 
   it('gates isolated ingress and drains active augmentation before authorization cleanup', async () => {
@@ -229,6 +348,8 @@ describe('content bridge controllers', () => {
     expect(mainKernel.snapshot().resources.total).toBe(0);
     expect(isolatedKernel.snapshot().resources.total).toBe(0);
   });
+
+
 });
 
 interface FakePort {

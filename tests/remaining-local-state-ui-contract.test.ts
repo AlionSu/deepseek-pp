@@ -11,11 +11,11 @@ const toolResultRenderer = readFileSync('core/ui/tool-result-renderer.ts', 'utf8
 
 describe('remaining local-state receiving boundaries', () => {
   it('decodes complete Content Skill/Preset snapshots before committing them', () => {
-    expect(content).toContain("decodeSkillLibrary(message.skills, 'skillUpdate')");
-    expect(content).toContain("decodeActivePreset(message.activePreset, 'activePresetUpdate')");
-    expect(content).toContain("sendRuntimeMessageStrict<unknown>({ type: 'GET_SKILLS' })");
-    expect(content).toContain("{ type: 'GET_ACTIVE_PRESET' },");
-    expect(content).toContain("(value) => decodeActivePreset(value, 'activePresetResponse')");
+    expect(content).toMatch(/decodeSkillLibrary\(message\.skills,\s*['"]skillUpdate['"]\)/);
+    expect(content).toMatch(/decodeActivePreset\(message\.activePreset,\s*['"]activePresetUpdate['"]\)/);
+    expect(content).toMatch(/sendRuntimeMessageStrict<unknown>\(\{\s*type:\s*['"]GET_SKILLS['"],?\s*\}\)/);
+    expect(content).toMatch(/\{\s*type:\s*['"]GET_ACTIVE_PRESET['"]\s*\},/);
+    expect(content).toMatch(/\(value\) =>\s*decodeActivePreset\(value,\s*['"]activePresetResponse['"]\)/);
     expect(content).not.toContain("sendRuntimeMessage<Skill[]>({ type: 'GET_SKILLS' })");
   });
 

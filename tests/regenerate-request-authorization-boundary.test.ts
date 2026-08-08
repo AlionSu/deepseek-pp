@@ -8,7 +8,7 @@ describe('regenerate request authorization boundary', () => {
     const handlerStart = source.indexOf('async function handleAugmentRequestBody');
     const handlerEnd = source.indexOf('\nasync function resolveProjectContextForRequestBody', handlerStart);
     const handler = source.slice(handlerStart, handlerEnd);
-    const regenerateStart = handler.indexOf("if (decodedRequest.route === 'regenerate')");
+    const regenerateStart = handler.search(/if \(decodedRequest\.route === ['"]regenerate['"]\)/);
     const promptStart = handler.indexOf('const decodedBody = decodedRequest.body', regenerateStart);
     const regenerateBranch = handler.slice(regenerateStart, promptStart);
 
@@ -46,8 +46,9 @@ describe('regenerate request authorization boundary', () => {
   });
 
   it('captures the response scope before terminal cleanup can close its grant', () => {
-    const responseCase = source.indexOf("case 'RESPONSE_COMPLETE'");
-    const terminalCase = source.indexOf("case 'REQUEST_TERMINAL'", responseCase);
+    const responseCase = source.search(/case ['"]RESPONSE_COMPLETE['"]/);
+    const terminalOffset = source.slice(responseCase).search(/case ['"]REQUEST_TERMINAL['"]/);
+    const terminalCase = terminalOffset < 0 ? -1 : responseCase + terminalOffset;
     const responseHandler = source.slice(responseCase, terminalCase);
     const rememberIndex = responseHandler.indexOf('rememberRegenerateAuthorizationScope(complete)');
     const pendingExecutionsIndex = responseHandler.indexOf('await waitForPendingToolExecutions');
@@ -58,7 +59,9 @@ describe('regenerate request authorization boundary', () => {
     expect(rememberIndex).toBeGreaterThanOrEqual(0);
     expect(pendingExecutionsIndex).toBeGreaterThan(rememberIndex);
     expect(continuationIndex).toBeGreaterThan(rememberIndex);
-    expect(source.slice(terminalCase, source.indexOf("case 'RESPONSE_TOKEN_SPEED'", terminalCase)))
+    const tokenSpeedOffset = source.slice(terminalCase).search(/case ['"]RESPONSE_TOKEN_SPEED['"]/);
+    const tokenSpeedCase = tokenSpeedOffset < 0 ? source.length : terminalCase + tokenSpeedOffset;
+    expect(source.slice(terminalCase, tokenSpeedCase))
       .toContain('closeContentToolAuthorization(requestId)');
   });
 });
