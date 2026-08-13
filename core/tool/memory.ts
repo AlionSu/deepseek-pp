@@ -21,6 +21,8 @@ export const MEMORY_TOOL_NAMES = ['memory_save', 'memory_update', 'memory_delete
 
 export type MemoryToolName = typeof MEMORY_TOOL_NAMES[number];
 
+export const MEMORY_TOOL_PROVIDER_ID = 'memory' as const;
+
 export interface MemoryToolSaveConfirmation {
   id: number;
 }

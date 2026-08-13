@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createArtifactToolDescriptors } from '../core/artifact';
+import { createMemoryToolDescriptors } from '../core/tool/memory';
 import type { InlineAgentStartPayload } from '../core/inline-agent/types';
 import type { ToolExecutionRecord } from '../core/types';
 
@@ -536,6 +537,39 @@ describe('runInlineAgentLoop', () => {
       finalText: expect.stringContaining('让我再抓取'),
     }));
   });
+
+  it('completes with a final reply after a memory-only tool round', async () => {
+    // Issue #566: a memory_save round used to end without a final reply because
+    // the continuation policy filtered local:memory out. Once the loop runs, the
+    // pi engine naturally produces the final answer after the memory result.
+    adapterMocks.submitPromptStreaming.mockImplementationOnce(async (_input, handlers) => {
+      handlers.onTextChunk('已为你记下这条偏好，后续会沿用。');
+      return {
+        assistantText: '',
+        responseMessageId: 102,
+        requestMessageId: 101,
+        finished: true,
+      };
+    });
+
+    const post = vi.fn();
+
+    await runInlineAgentLoop({
+      ...createPayload(),
+      toolExecutions: [MEMORY_SAVE_EXECUTION],
+      toolDescriptors: createMemoryToolDescriptors('en'),
+    }, {
+      post,
+      executeTool: vi.fn(),
+      signal: new AbortController().signal,
+    });
+
+    expect(adapterMocks.submitPromptStreaming).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('AGENT_LOOP_COMPLETE', expect.objectContaining({
+      finalText: '已为你记下这条偏好，后续会沿用。',
+      totalTools: 1,
+    }));
+  });
 });
 
 function createPayload(): InlineAgentStartPayload {
@@ -569,5 +603,20 @@ const SUCCESS_EXECUTION: ToolExecutionRecord = {
     ok: true,
     summary: 'Search completed',
     output: [{ title: 'Result', url: 'https://example.com' }],
+  },
+};
+
+const MEMORY_SAVE_EXECUTION: ToolExecutionRecord = {
+  name: 'memory_save',
+  provider: {
+    kind: 'local',
+    id: 'memory',
+    displayName: 'DeepSeek++ Memory',
+    transport: 'in_process',
+  },
+  result: {
+    ok: true,
+    summary: '已保存',
+    output: { id: 1 },
   },
 };
