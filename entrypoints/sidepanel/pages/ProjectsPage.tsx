@@ -23,6 +23,7 @@ import { decodeMemoryList } from '../controllers/library-controller';
 import { isSidepanelRuntimeEvent } from '../runtime-event-codec';
 import { getRuntimeErrorMessage } from '../runtime-response';
 import {
+  SidepanelRuntimeError,
   sidepanelRuntimeClient,
   type AnyTypedRuntimeCommandRequest,
 } from '../runtime-client';
@@ -337,6 +338,12 @@ export default function ProjectsPage() {
   }
 
   function showProjectError(error: unknown) {
+    if (error instanceof SidepanelRuntimeError
+      && error.kind === 'transport'
+      && error.retryable) {
+      banner.show('error', t('sidepanel.projectsPage.backendStarting'));
+      return;
+    }
     banner.show('error', t('sidepanel.projectsPage.operationFailed', { error: getRuntimeErrorMessage(error) }));
   }
 

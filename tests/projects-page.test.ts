@@ -257,6 +257,27 @@ describe('ProjectsPage', () => {
     expect(container.textContent).toContain('Newest project');
     expect(container.textContent).not.toContain('Stale project');
   });
+
+  it('surfaces a friendly starting-up hint instead of a raw cold-start transport error', async () => {
+    vi.useFakeTimers();
+    const sendMessage = vi.fn(async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    });
+
+    await renderProjectsPage(sendMessage);
+    // default retry: 3 attempts at 400ms backoff; advance both gaps
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    await settle();
+
+    expect(container.textContent).toContain('扩展后台正在启动');
+    expect(container.textContent).not.toContain('Receiving end does not exist');
+    // each initial load request retried through the transient transport failure
+    expect(sendMessage.mock.calls.length).toBeGreaterThan(3);
+    vi.useRealTimers();
+  });
 });
 
 async function renderProjectsPage(sendMessage: ReturnType<typeof vi.fn>) {
