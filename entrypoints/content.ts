@@ -30,6 +30,10 @@ import {
   normalizePromptInjectionSettings,
 } from "../core/prompt/settings";
 import { normalizeBackgroundConfig } from "../core/background/config";
+import {
+  buildBackgroundStyleSheet,
+  computeBackgroundTokens,
+} from "../core/background/styles";
 import { decodePersistedMemoryRecord } from "../core/memory/codec";
 import { decodeActivePreset } from "../core/preset/codec";
 import { decodeSkillLibrary } from "../core/skill/codec";
@@ -82,6 +86,7 @@ import {
 } from "../core/inline-agent/native-history";
 import {
   INCOMPLETE_TOOL_CALL_ERROR_CODE,
+  selectContinuableToolDescriptors,
   selectContinuableToolExecutions,
 } from "../core/inline-agent/execution-policy";
 import {
@@ -182,10 +187,7 @@ import {
 import { PendingRequestRegistry } from "../core/tool/pending-request-registry";
 import { PendingAuthorizationCorrelations } from "../core/tool/pending-authorization-correlations";
 import { shouldRequestWebFetchPermission } from "../core/tool/web-fetch-permission";
-import {
-  MCP_CAPABILITY_TOOL_PROVIDER_ID,
-  isMcpCapabilityDescriptor,
-} from "../core/mcp/capability-contract";
+import { isMcpCapabilityDescriptor } from "../core/mcp/capability-contract";
 import {
   BACKGROUND_RUNTIME_PATHNAMES,
   createExtensionRuntimeMessageContext,
@@ -1236,7 +1238,7 @@ function startBackgroundCapability(
         scope.active &&
         document.body.classList.contains("dpp-bg-active") &&
         mutations.some((mutation) => mutation.type === "childList"),
-      handle: patchContainerBackgrounds,
+      handle: scheduleContainerBackgroundPatch,
     }),
   );
   void sendRuntimeMessage<BackgroundConfig | null>({
@@ -4513,16 +4515,7 @@ async function startInlineAgentIfNeeded(
       thinkingEnabled: complete.promptOptions.thinkingEnabled,
       refFileIds: complete.promptOptions.refFileIds,
     },
-    toolDescriptors: authorization.descriptors.filter(
-      (d) =>
-        d.provider?.kind === "mcp" ||
-        d.provider?.id === MCP_CAPABILITY_TOOL_PROVIDER_ID ||
-        d.provider?.id === "web" ||
-        d.provider?.id === "browser_control" ||
-        d.name === "web_search" ||
-        d.name === "web_fetch" ||
-        d.name.startsWith("browser_"),
-    ),
+    toolDescriptors: selectContinuableToolDescriptors(authorization.descriptors),
     locale: currentContentLocale,
     powWasmUrl: chrome.runtime.getURL(DEEPSEEK_POW_WASM_PATH),
   };
@@ -9098,6 +9091,19 @@ function isTightPromptInputFrame(
   );
 }
 
+// Coalesce mutation-driven re-patching so rapid DOM churn (streaming messages, layout
+// reflows) can't trigger a per-batch layout pass each frame — the source of the intermittent
+// "probability"-style spillover when the full two-level force-transparent rules were active.
+let backgroundPatchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleContainerBackgroundPatch() {
+  if (backgroundPatchTimer) return;
+  backgroundPatchTimer = globalThis.setTimeout(() => {
+    backgroundPatchTimer = null;
+    patchContainerBackgrounds();
+  }, 96);
+}
+
 function patchContainerBackgrounds() {
   if (!document.body.classList.contains("dpp-bg-active")) return;
   const root = document.getElementById("root");
@@ -9135,6 +9141,8 @@ function removeBackground() {
   document.body.classList.remove("dpp-bg-active");
   document.body.style.removeProperty("--dpp-overlay-light");
   document.body.style.removeProperty("--dpp-overlay-dark");
+  document.body.style.removeProperty("--dpp-surface-light");
+  document.body.style.removeProperty("--dpp-surface-dark");
   document.body.style.removeProperty("--dpp-blur");
   document
     .querySelectorAll("[data-dpp-transparent]")
@@ -9809,17 +9817,16 @@ function applyBackground(config: BackgroundConfig | null) {
 
   document.body.classList.add("dpp-bg-active");
 
-  const overlayAlpha = (1 - normalizedConfig.opacity).toFixed(3);
-  const blurPx = ((1 - normalizedConfig.opacity) * 8).toFixed(1);
-  document.body.style.setProperty(
-    "--dpp-overlay-light",
-    `rgba(255, 255, 255, ${overlayAlpha})`,
-  );
-  document.body.style.setProperty(
-    "--dpp-overlay-dark",
-    `rgba(30, 30, 30, ${overlayAlpha})`,
-  );
-  document.body.style.setProperty("--dpp-blur", `blur(${blurPx}px)`);
+  // Theme-linked translucent surface tint, not a hard-coded white/dark-gray wash (issue
+  // #565). Light / dark values are both computed up front and the injected stylesheet
+  // selects the active one through the same body theme class + prefers-color-scheme rules
+  // used by the rest of the extension, so a theme switch while enabled stays coherent.
+  const tokens = computeBackgroundTokens(normalizedConfig.opacity);
+  document.body.style.setProperty("--dpp-overlay-light", tokens.overlayLight);
+  document.body.style.setProperty("--dpp-overlay-dark", tokens.overlayDark);
+  document.body.style.setProperty("--dpp-surface-light", tokens.surfaceLight);
+  document.body.style.setProperty("--dpp-surface-dark", tokens.surfaceDark);
+  document.body.style.setProperty("--dpp-blur", tokens.blur);
 
   const topOffset = getToolbarBottom();
 
@@ -9842,47 +9849,7 @@ function applyBackground(config: BackgroundConfig | null) {
 
   const styleEl = existingStyle || document.createElement("style");
   styleEl.id = "dpp-bg-style";
-  styleEl.textContent = `
-    #dpp-bg::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: var(--dpp-overlay-light);
-      backdrop-filter: var(--dpp-blur);
-      -webkit-backdrop-filter: var(--dpp-blur);
-      pointer-events: none;
-    }
-
-    body.dpp-bg-active,
-    body.dpp-bg-active #root,
-    body.dpp-bg-active #__next {
-      background: transparent !important;
-    }
-
-    body.dpp-bg-active #root > div,
-    body.dpp-bg-active #__next > div {
-      background: transparent !important;
-    }
-
-    body.dpp-bg-active #root > div > div,
-    body.dpp-bg-active #__next > div > div {
-      background: transparent !important;
-    }
-
-    body.dpp-bg-active [data-dpp-transparent] {
-      background: transparent !important;
-    }
-
-    body.dpp-theme-dark #dpp-bg::after {
-      background: var(--dpp-overlay-dark);
-    }
-
-    @media (prefers-color-scheme: dark) {
-      body:not(.dpp-theme-light) #dpp-bg::after {
-        background: var(--dpp-overlay-dark);
-      }
-    }
-  `;
+  styleEl.textContent = buildBackgroundStyleSheet();
   if (!existingStyle) document.head.appendChild(styleEl);
 
   patchContainerBackgrounds();
