@@ -1,13 +1,13 @@
 export const RUNTIME_TOPOLOGY = {
-  liveCommands: 129,
-  declaredActions: 98,
-  shared: 96,
+  liveCommands: 131,
+  declaredActions: 100,
+  shared: 98,
   liveOnly: 33,
   declaredOnly: 2,
-  readsPayload: 85,
-  ignoresPayload: 44,
+  readsPayload: 86,
+  ignoresPayload: 45,
   directPayloadCasts: 0,
-  decodedPayloads: 85,
+  decodedPayloads: 86,
   delegatedPayloads: 0,
 } as const;
 
@@ -194,6 +194,7 @@ export const RUNTIME_NOTIFICATION_TYPES = [
   'BACKGROUND_UPDATED',
   'PET_UPDATED',
   'THEME_UPDATED',
+  'MCP_REQUEST_TIMEOUT_UPDATED',
   'MCP_SERVERS_UPDATED',
   'TOOL_DESCRIPTORS_UPDATED',
   'BROWSER_CONTROL_UPDATED',

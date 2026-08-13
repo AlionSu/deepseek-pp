@@ -3,6 +3,7 @@ import {
   MULTIMODAL_MCP_SERVER_NAME,
   createMultimodalMcpPresetInput,
 } from '../../../core/multimodal';
+import { getMcpRequestTimeoutMs } from '../../../core/mcp/config';
 import { decodeMcpCapabilitySettings } from '../../../core/mcp/capability-settings';
 import { decodeMcpStorageState, MCP_STORAGE_VERSION } from '../../../core/mcp/storage-codec';
 import { getMcpOriginPattern } from '../../../core/mcp/transports';
@@ -248,8 +249,12 @@ export class McpPermissionError extends Error {
   }
 }
 
-export function getMcpPresetInput(kind: McpPresetKind): McpServerCreateInput {
-  return kind === 'shell' ? createShellMcpPresetInput() : createMultimodalMcpPresetInput();
+export async function getMcpPresetInput(kind: McpPresetKind): Promise<McpServerCreateInput> {
+  if (kind === 'shell') {
+    const requestMs = await getMcpRequestTimeoutMs();
+    return createShellMcpPresetInput({ requestMs });
+  }
+  return createMultimodalMcpPresetInput();
 }
 
 export function findMcpPreset(

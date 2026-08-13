@@ -11,6 +11,7 @@ import type {
   McpToolCacheEntry,
 } from './types';
 import { MCP_DEFAULT_LIMITS, MCP_DEFAULT_TIMEOUTS } from './constants';
+import { getMcpRequestTimeoutMs } from './config';
 import { createSerialOperationQueue } from '../persistence/serial-operation-queue';
 import {
   decodeMcpStorageState,
@@ -57,6 +58,10 @@ export async function createMcpServer(input: McpServerCreateInput): Promise<McpS
   return mcpStorageOperations.run(async () => {
     const state = await readStateAlreadyOwned();
     const now = Date.now();
+    // When a server does not declare its own request timeout, the globally
+    // configured MCP request timeout (default 120s) becomes the fallback so a
+    // single Settings change widens every un-configured server.
+    const defaultRequestMs = await getMcpRequestTimeoutMs();
     const server = normalizeServerForMutation({
       version: MCP_SERVER_CONFIG_VERSION,
       id: crypto.randomUUID(),
@@ -65,7 +70,7 @@ export async function createMcpServer(input: McpServerCreateInput): Promise<McpS
       transport: input.transport,
       headers: input.headers ?? [],
       secrets: input.secrets ?? [],
-      timeouts: input.timeouts ?? MCP_DEFAULT_TIMEOUTS,
+      timeouts: input.timeouts ?? { ...MCP_DEFAULT_TIMEOUTS, requestMs: defaultRequestMs },
       limits: input.limits ?? MCP_DEFAULT_LIMITS,
       allowlist: input.allowlist ?? {
         mode: 'all',
@@ -80,7 +85,7 @@ export async function createMcpServer(input: McpServerCreateInput): Promise<McpS
       lastError: null,
       createdAt: now,
       updatedAt: now,
-    });
+    }, defaultRequestMs);
 
     await writeStateAlreadyOwned({
       ...state,
@@ -99,6 +104,7 @@ export async function updateMcpServer(
     const state = await readStateAlreadyOwned();
     let updated: McpServerConfig | null = null;
     const cacheInvalidations = new Set<McpServerId>();
+    const defaultRequestMs = await getMcpRequestTimeoutMs();
     const servers = state.servers.map((server) => {
       if (server.id !== id) return server;
       const nextPatch: McpServerUpdateInput = patch.secrets
@@ -109,7 +115,7 @@ export async function updateMcpServer(
         ...nextPatch,
         updatedAt: Date.now(),
         status: resolvePatchedServerStatus(server, nextPatch),
-      });
+      }, defaultRequestMs);
       if (shouldInvalidateMcpToolCache(server, nextServer)) {
         cacheInvalidations.add(server.id);
         updated = {
@@ -276,7 +282,10 @@ async function writeStateAlreadyOwned(state: McpServerStorageState): Promise<voi
   });
 }
 
-function normalizeServerForMutation(raw: unknown): McpServerConfig {
+function normalizeServerForMutation(
+  raw: unknown,
+  defaultRequestMs: number = MCP_DEFAULT_TIMEOUTS.requestMs,
+): McpServerConfig {
   const value = raw && typeof raw === 'object' ? raw as Partial<McpServerConfig> : {};
   const now = Date.now();
   const enabled = value.enabled !== false;
@@ -299,7 +308,10 @@ function normalizeServerForMutation(raw: unknown): McpServerConfig {
     secrets: secretArrayValue(value.secrets),
     timeouts: {
       connectMs: positiveNumber(value.timeouts?.connectMs, MCP_DEFAULT_TIMEOUTS.connectMs),
-      requestMs: positiveNumber(value.timeouts?.requestMs, MCP_DEFAULT_TIMEOUTS.requestMs),
+      // Servers that do not explicitly set requestMs fall back to the globally
+      // configured MCP request timeout (default 120s) so a single Settings
+      // change widens every un-configured server.
+      requestMs: positiveNumber(value.timeouts?.requestMs, defaultRequestMs),
       discoveryMs: positiveNumber(value.timeouts?.discoveryMs, MCP_DEFAULT_TIMEOUTS.discoveryMs),
     },
     limits: {

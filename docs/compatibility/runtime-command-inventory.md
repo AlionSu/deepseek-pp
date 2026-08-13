@@ -23,7 +23,7 @@ GET_CONFIG
 WHATS_NEW_DISMISSED
 ```
 
-### R4.1 / #360 — Persistence, library, and local preferences (61)
+### R4.1 / #360 — Persistence, library, and local preferences (63)
 
 ```text
 GET_MEMORIES
@@ -87,6 +87,8 @@ CLEAR_BACKGROUND
 GET_PET
 SAVE_PET
 CLEAR_PET
+GET_MCP_REQUEST_TIMEOUT
+SET_MCP_REQUEST_TIMEOUT
 ```
 
 ### R4.2 / #361 — MCP, tool, browser control, and sandbox (32)
@@ -172,7 +174,7 @@ EXPORT_DIAGNOSTIC_LOGS
 
 `TOOL_CALL_EXECUTED` and `MEMORIES_UPDATED` remain declared-only compatibility records. They are not counted in the 129 live command owners and R3.1 must classify them explicitly rather than invent handlers.
 
-## Live Background Router — 129
+## Live Background Router — 131
 
 ```text
 GET_MEMORIES
@@ -280,6 +282,8 @@ CLEAR_BACKGROUND
 GET_PET
 SAVE_PET
 CLEAR_PET
+GET_MCP_REQUEST_TIMEOUT
+SET_MCP_REQUEST_TIMEOUT
 GET_SYNC_CONFIG
 SAVE_SYNC_CONFIG
 WEBDAV_TEST
@@ -306,7 +310,7 @@ RUN_AUTOMATION_NOW
 SCENARIOS_UPDATED
 ```
 
-## Declared `MessageAction` Union — 98
+## Declared `MessageAction` Union — 100
 
 ```text
 GET_MEMORIES
@@ -407,6 +411,8 @@ CLEAR_BACKGROUND
 GET_PET
 SAVE_PET
 CLEAR_PET
+GET_MCP_REQUEST_TIMEOUT
+SET_MCP_REQUEST_TIMEOUT
 ```
 
 ## Live Router Only — 33

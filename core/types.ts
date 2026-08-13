@@ -664,7 +664,9 @@ export type MessageAction =
   | { type: 'CLEAR_BACKGROUND' }
   | { type: 'GET_PET' }
   | { type: 'SAVE_PET'; payload: PetConfig }
-  | { type: 'CLEAR_PET' };
+  | { type: 'CLEAR_PET' }
+  | { type: 'GET_MCP_REQUEST_TIMEOUT' }
+  | { type: 'SET_MCP_REQUEST_TIMEOUT'; payload: { requestTimeoutMs: number } };
 
 export interface PromptConfig {
   memoryTokenBudget: number;

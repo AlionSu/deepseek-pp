@@ -179,6 +179,7 @@ export const sidepanel = {
     emptyMemories: '还没有项目记忆。',
     backendUnavailable: '项目后端不可用，请重新加载扩展后再试。',
     operationFailed: '项目操作失败：{error}',
+    backendStarting: '扩展后台正在启动，数据是安全的，请稍后再试。',
   },
   savedPage: {
     title: '保存项',
@@ -365,6 +366,9 @@ export const sidepanel = {
     modelVision: '识图',
     sidepanelChat: '侧边栏对话',
     sidepanelChatDescription: '在侧边栏显示对话标签，支持网页登录或官方 API Key',
+    mcpSection: 'MCP 客户端',
+    mcpSectionDescription: '默认请求超时，应用于未单独配置超时的 MCP 服务。',
+    mcpRequestTimeout: 'MCP 请求超时',
     apiKeyDescription: '配置后右键场景可在普通网页使用',
     configured: '已配置',
     notConfigured: '未配置',

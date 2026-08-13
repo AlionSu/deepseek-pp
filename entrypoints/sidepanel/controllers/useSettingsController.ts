@@ -13,6 +13,10 @@ import {
   clampPetSize,
   normalizePetConfig,
 } from '../../../core/pet/config';
+import {
+  DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+  clampMcpRequestTimeout,
+} from '../../../core/mcp/config';
 import type {
   BackgroundConfig,
   GDriveSyncConfig,
@@ -189,6 +193,9 @@ export function useSettingsController() {
   const [petOpacity, setPetOpacity] = useState(DEFAULT_PET_CONFIG.opacity);
   const [petMotion, setPetMotion] = useState(DEFAULT_PET_CONFIG.motion);
 
+  // --- MCP ---
+  const [mcpRequestTimeoutMs, setMcpRequestTimeoutMs] = useState(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+
   // --- sync ---
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(DEFAULT_WEBDAV_CONFIG);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
@@ -258,7 +265,7 @@ export function useSettingsController() {
     let cancelled = false;
     const initialPetLoadGeneration = ++petLoadGenerationRef.current;
     (async () => {
-      const [chatOn, floatingState, keyStatus, mmStatus, memories, cfg, syncCfg, modelType, bgCfg, petCfg] = await Promise.all([
+      const [chatOn, floatingState, keyStatus, mmStatus, memories, cfg, syncCfg, modelType, bgCfg, petCfg, mcpRequestTimeout] = await Promise.all([
         getChatEnabled().catch((error) => {
           console.error('DeepSeek++ failed to read sidepanel chat setting', error);
           return false;
@@ -288,6 +295,8 @@ export function useSettingsController() {
           .catch(settingsLoadFallback('background', null)),
         sidepanelRuntimeClient.request({ type: 'GET_PET' })
           .catch(settingsLoadFallback('pet', null)),
+        sidepanelRuntimeClient.request({ type: 'GET_MCP_REQUEST_TIMEOUT' })
+          .catch(settingsLoadFallback('MCP request timeout', undefined)),
       ]);
       if (cancelled) return;
       setChatEnabledState(chatOn);
@@ -314,20 +323,32 @@ export function useSettingsController() {
       if (petLoadGenerationRef.current === initialPetLoadGeneration) {
         syncPetState(normalizePetConfig(petCfg as PetConfig | null));
       }
+      if (typeof mcpRequestTimeout === 'number' && Number.isFinite(mcpRequestTimeout)) {
+        setMcpRequestTimeoutMs(clampMcpRequestTimeout(mcpRequestTimeout));
+      }
       setLoading(false);
     })();
 
-    const handlePetUpdate = (message: { type?: string; config?: PetConfig | null }) => {
+    const handleSettingsUpdate = (message: {
+      type?: string;
+      config?: PetConfig | null;
+      requestTimeoutMs?: number;
+    }) => {
       if (message.type === 'PET_UPDATED') {
         petLoadGenerationRef.current += 1;
         syncPetState(normalizePetConfig(message.config));
       }
+      if (message.type === 'MCP_REQUEST_TIMEOUT_UPDATED'
+        && typeof message.requestTimeoutMs === 'number'
+        && Number.isFinite(message.requestTimeoutMs)) {
+        setMcpRequestTimeoutMs(clampMcpRequestTimeout(message.requestTimeoutMs));
+      }
     };
-    chrome.runtime.onMessage.addListener(handlePetUpdate);
+    chrome.runtime.onMessage.addListener(handleSettingsUpdate);
     return () => {
       cancelled = true;
       petLoadGenerationRef.current += 1;
-      chrome.runtime.onMessage.removeListener(handlePetUpdate);
+      chrome.runtime.onMessage.removeListener(handleSettingsUpdate);
     };
   }, [loadSyncConfigValue, syncBgState, syncPetState, syncMultimodalStatus]);
 
@@ -636,6 +657,15 @@ export function useSettingsController() {
     },
     [savePetConfig],
   );
+
+  const handleMcpRequestTimeoutChange = useCallback((value: number) => {
+    const requestTimeoutMs = clampMcpRequestTimeout(value);
+    setMcpRequestTimeoutMs(requestTimeoutMs);
+    void sidepanelRuntimeClient.request({
+      type: 'SET_MCP_REQUEST_TIMEOUT',
+      payload: { requestTimeoutMs },
+    });
+  }, []);
 
   // --- sync ---
   const updateSyncField = useCallback((field: string, value: string) => {
@@ -1033,6 +1063,9 @@ export function useSettingsController() {
     handlePetSizeChange,
     handlePetOpacityChange,
     handlePetMotionToggle,
+    // mcp
+    mcpRequestTimeoutMs,
+    handleMcpRequestTimeoutChange,
     // sync
     syncConfig,
     captureSyncTarget,

@@ -179,6 +179,7 @@ export const sidepanel = {
     emptyMemories: 'No project memories yet.',
     backendUnavailable: 'Project backend is unavailable. Reload the extension and try again.',
     operationFailed: 'Project action failed: {error}',
+    backendStarting: 'The extension background is still starting. Your data is safe — try again in a moment.',
   },
   savedPage: {
     title: 'Saved items',
@@ -365,6 +366,9 @@ export const sidepanel = {
     modelVision: 'Vision',
     sidepanelChat: 'Sidepanel chat',
     sidepanelChatDescription: 'Show the chat tab in the sidepanel with webpage login or official API Key support',
+    mcpSection: 'MCP clients',
+    mcpSectionDescription: 'Default request timeout applied to MCP servers that do not configure their own timeout.',
+    mcpRequestTimeout: 'MCP request timeout',
     apiKeyDescription: 'After configuration, context menu scenarios can run on regular webpages',
     configured: 'Configured',
     notConfigured: 'Not configured',

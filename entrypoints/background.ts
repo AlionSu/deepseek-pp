@@ -43,6 +43,11 @@ import { getModelType, setModelType } from '../core/model/store';
 import { getDeepSeekTheme, saveDeepSeekTheme } from '../core/theme/store';
 import { getBackgroundConfig, saveBackgroundConfig, clearBackgroundConfig } from '../core/background/store';
 import { getPetConfig, savePetConfig, clearPetConfig } from '../core/pet/store';
+import {
+  getMcpRequestTimeoutMs,
+  saveMcpRequestTimeoutMs,
+  clearMcpRequestTimeoutMs,
+} from '../core/mcp/config';
 import { clearUsageRecords, getUsageSummary, recordUsageTurn } from '../core/usage/store';
 import { getExtensionVersion } from '../core/version';
 import {
@@ -502,6 +507,10 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         savePetConfig,
         clearPetConfig,
         broadcastPetUpdate,
+        getMcpRequestTimeoutMs,
+        saveMcpRequestTimeoutMs,
+        clearMcpRequestTimeoutMs,
+        broadcastMcpRequestTimeoutUpdate,
       },
     }),
     ...createToolRuntimeHandlers({
@@ -941,7 +950,8 @@ async function ensureBuiltInMcpPresets() {
   const servers = await getAllMcpServers();
   const shellServer = servers.find(isShellMcpServer);
   if (!shellServer) {
-    await createMcpServer(createShellMcpPresetInput({ enabled: false }));
+    const requestMs = await getMcpRequestTimeoutMs();
+    await createMcpServer(createShellMcpPresetInput({ enabled: false, requestMs }));
   } else {
     await ensureShellMcpCompatibility(shellServer);
   }
@@ -1059,6 +1069,10 @@ async function broadcastBackgroundUpdate(config: BackgroundConfig | null) {
 
 async function broadcastPetUpdate(config: PetConfig) {
   await broadcastToTabs({ type: 'PET_UPDATED', config });
+}
+
+async function broadcastMcpRequestTimeoutUpdate(requestTimeoutMs: number) {
+  await broadcastToTabs({ type: 'MCP_REQUEST_TIMEOUT_UPDATED', requestTimeoutMs });
 }
 
 async function broadcastThemeUpdate(theme: DeepSeekTheme, excludeTabId?: number) {

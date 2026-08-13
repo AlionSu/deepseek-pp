@@ -29,13 +29,15 @@ describe('runtime command registry', () => {
       ...CLIENT_ONLY_RUNTIME_COMMAND_TYPES,
     ];
 
-    expect(TYPED_RUNTIME_COMMAND_TYPES).toHaveLength(129);
+    expect(TYPED_RUNTIME_COMMAND_TYPES).toHaveLength(131);
     expect(TYPED_RUNTIME_COMMAND_TYPES).toEqual(expect.arrayContaining([
       'GET_MEMORIES',
       'GET_ARTIFACT',
       'GET_CONFIG',
       'WHATS_NEW_DISMISSED',
       'CLEAR_PET',
+      'GET_MCP_REQUEST_TIMEOUT',
+      'SET_MCP_REQUEST_TIMEOUT',
       'GET_MCP_SERVERS',
       'GET_MCP_CAPABILITY_SETTINGS',
       'UPDATE_MCP_CAPABILITY_SETTINGS',
@@ -47,7 +49,7 @@ describe('runtime command registry', () => {
       'EXPORT_DIAGNOSTIC_LOGS',
     ]));
     expect(CLIENT_ONLY_RUNTIME_COMMAND_TYPES).toEqual(['TOOL_CALL_EXECUTED', 'MEMORIES_UPDATED']);
-    expect(new Set(allTypes).size).toBe(131);
+    expect(new Set(allTypes).size).toBe(133);
     for (const type of TYPED_RUNTIME_COMMAND_TYPES) {
       expect(getRuntimeCommandOwner(type)).toBe('typed-handler');
     }

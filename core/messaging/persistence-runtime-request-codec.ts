@@ -344,6 +344,11 @@ export const PERSISTENCE_RUNTIME_PAYLOAD_DECODERS: PersistenceRuntimePayloadDeco
     booleanValue(payload.motion, 'SAVE_PET.payload.motion');
     return typedPayload<'SAVE_PET'>(payload);
   },
+  SET_MCP_REQUEST_TIMEOUT(value) {
+    const payload = recordValue(value, 'SET_MCP_REQUEST_TIMEOUT.payload');
+    finiteNumber(payload.requestTimeoutMs, 'SET_MCP_REQUEST_TIMEOUT.payload.requestTimeoutMs');
+    return typedPayload<'SET_MCP_REQUEST_TIMEOUT'>(payload);
+  },
 };
 
 export function decodePersistenceRuntimePayload<

@@ -147,10 +147,10 @@ describe('R4.1 persistence runtime handler ownership', () => {
       localPreference: createLocalPreferenceDependencies(),
     });
     const types = handlers.map((handler) => handler.type);
-    const expected = readInventoryCommands('R4.1 / #360 — Persistence, library, and local preferences (61)');
+    const expected = readInventoryCommands('R4.1 / #360 — Persistence, library, and local preferences (63)');
 
-    expect(types).toHaveLength(61);
-    expect(new Set(types).size).toBe(61);
+    expect(types).toHaveLength(63);
+    expect(new Set(types).size).toBe(63);
     expect([...types].sort()).toEqual([...expected].sort());
     for (const type of types) expect(getRuntimeCommandOwner(type)).toBe('typed-handler');
     const decodedTypes = Object.entries(RUNTIME_COMMAND_CONTRACTS)
@@ -447,6 +447,27 @@ describe('Project and local preference handlers', () => {
       .toHaveBeenCalledBefore(vi.mocked(dependencies.getPetConfig));
     expect(dependencies.broadcastPetUpdate).toHaveBeenCalledWith(pet);
   });
+
+  it('gets and sets the global MCP request timeout through local preferences', async () => {
+    const dependencies = createLocalPreferenceDependencies();
+    const handlers = createLocalPreferenceRuntimeHandlers(dependencies);
+
+    vi.mocked(dependencies.getMcpRequestTimeoutMs).mockResolvedValueOnce(180_000);
+    await expect(dispatch(handlers, { type: 'GET_MCP_REQUEST_TIMEOUT' }))
+      .resolves.toBe(180_000);
+
+    await expect(dispatch(handlers, {
+      type: 'SET_MCP_REQUEST_TIMEOUT',
+      payload: { requestTimeoutMs: 240_000 },
+    })).resolves.toEqual({ ok: true });
+    expect(dependencies.saveMcpRequestTimeoutMs).toHaveBeenCalledWith(240_000);
+
+    await expect(dispatch(handlers, {
+      type: 'SET_MCP_REQUEST_TIMEOUT',
+      payload: { requestTimeoutMs: 'not-a-number' },
+    })).rejects.toThrow('SET_MCP_REQUEST_TIMEOUT.payload.requestTimeoutMs must be a finite number');
+    expect(dependencies.saveMcpRequestTimeoutMs).toHaveBeenCalledTimes(1);
+  });
 });
 
 function createMemoryDependencies(): MemoryRuntimeHandlerDependencies {
@@ -589,6 +610,10 @@ function createLocalPreferenceDependencies(): LocalPreferenceRuntimeHandlerDepen
     savePetConfig: vi.fn(async () => undefined),
     clearPetConfig: vi.fn(async () => undefined),
     broadcastPetUpdate: vi.fn(async () => undefined),
+    getMcpRequestTimeoutMs: vi.fn(async () => 120_000),
+    saveMcpRequestTimeoutMs: vi.fn(async () => undefined),
+    clearMcpRequestTimeoutMs: vi.fn(async () => undefined),
+    broadcastMcpRequestTimeoutUpdate: vi.fn(async () => undefined),
   };
 }
 

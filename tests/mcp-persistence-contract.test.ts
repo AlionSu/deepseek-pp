@@ -17,6 +17,10 @@ import {
   migrateMcpStorageState,
 } from '../core/mcp/storage-codec';
 import {
+  DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+  MCP_REQUEST_TIMEOUT_STORAGE_KEY,
+} from '../core/mcp/config';
+import {
   MCP_CACHE_ENTRY,
   MCP_SERVER_IDS,
   MCP_STORAGE_CORRUPT_SERVER,
@@ -85,6 +89,33 @@ describe('MCP persisted-config contract', () => {
 
     expect(encodeMcpStorageState(decodeMcpStorageState(raw))).toEqual(raw);
     expect(raw).toEqual(MCP_STORAGE_V2);
+  });
+
+  it('falls back to the globally configured request timeout when a server omits requestMs', async () => {
+    storage[MCP_REQUEST_TIMEOUT_STORAGE_KEY] = 300_000;
+    const server = await createMcpServer({
+      displayName: 'Global timeout server',
+      transport: { kind: 'native_messaging', nativeHost: 'com.example.global_timeout' },
+    });
+    expect(server.timeouts.requestMs).toBe(300_000);
+  });
+
+  it('keeps the generic default request timeout when the server sets one explicitly', async () => {
+    const server = await createMcpServer({
+      displayName: 'Explicit timeout server',
+      transport: { kind: 'native_messaging', nativeHost: 'com.example.explicit_timeout' },
+      timeouts: { connectMs: 5_000, requestMs: 90_000, discoveryMs: 10_000 },
+    });
+    expect(server.timeouts.requestMs).toBe(90_000);
+  });
+
+  it('uses the default request timeout when no global timeout is stored', async () => {
+    delete storage[MCP_REQUEST_TIMEOUT_STORAGE_KEY];
+    const server = await createMcpServer({
+      displayName: 'Default timeout server',
+      transport: { kind: 'native_messaging', nativeHost: 'com.example.default_timeout' },
+    });
+    expect(server.timeouts.requestMs).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
 
   it('normalizes a released manual execution mode to auto at decode without rewriting storage', () => {

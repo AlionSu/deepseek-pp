@@ -27,6 +27,10 @@ export interface LocalPreferenceRuntimeHandlerDependencies {
   savePetConfig(config: PetConfig): Promise<void>;
   clearPetConfig(): Promise<void>;
   broadcastPetUpdate(config: PetConfig): Promise<void>;
+  getMcpRequestTimeoutMs(): Promise<number>;
+  saveMcpRequestTimeoutMs(requestTimeoutMs: number): Promise<void>;
+  clearMcpRequestTimeoutMs(): Promise<void>;
+  broadcastMcpRequestTimeoutUpdate(requestTimeoutMs: number): Promise<void>;
 }
 
 export function createLocalPreferenceRuntimeHandlers(
@@ -80,6 +84,15 @@ export function createLocalPreferenceRuntimeHandlers(
     definePayloadlessRuntimeCommandHandler('CLEAR_PET', async () => {
       await dependencies.clearPetConfig();
       await dependencies.broadcastPetUpdate(await dependencies.getPetConfig());
+      return { ok: true as const };
+    }),
+    definePayloadlessRuntimeCommandHandler('GET_MCP_REQUEST_TIMEOUT', async () => (
+      dependencies.getMcpRequestTimeoutMs()
+    )),
+    definePersistencePayloadRuntimeCommandHandler('SET_MCP_REQUEST_TIMEOUT', async (payload) => {
+      await dependencies.saveMcpRequestTimeoutMs(payload.requestTimeoutMs);
+      const saved = await dependencies.getMcpRequestTimeoutMs();
+      await dependencies.broadcastMcpRequestTimeoutUpdate(saved);
       return { ok: true as const };
     }),
   ]);

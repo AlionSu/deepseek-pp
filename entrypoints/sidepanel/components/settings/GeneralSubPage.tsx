@@ -1,7 +1,7 @@
 import type { LocalePreference } from '../../../../core/i18n';
 import type { ModelType } from '../../../../core/types';
 import { useI18n } from '../../i18n';
-import { SettingsSection, ToggleRow } from './primitives';
+import { SettingsSection, Slider, ToggleRow } from './primitives';
 import type { SettingsState } from '../../controllers/useSettingsController';
 
 export default function GeneralSubPage({ state }: { state: SettingsState }) {
@@ -102,6 +102,21 @@ export default function GeneralSubPage({ state }: { state: SettingsState }) {
             onToggle={state.handleChatToggle}
           />
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('sidepanel.settings.mcpSection')}
+        description={t('sidepanel.settings.mcpSectionDescription')}
+      >
+        <Slider
+          label={t('sidepanel.settings.mcpRequestTimeout')}
+          value={state.mcpRequestTimeoutMs / 1000}
+          min={10}
+          max={600}
+          step={10}
+          format={(v) => v + "s"}
+          onChange={(seconds) => state.handleMcpRequestTimeoutChange(seconds * 1000)}
+        />
       </SettingsSection>
     </div>
   );

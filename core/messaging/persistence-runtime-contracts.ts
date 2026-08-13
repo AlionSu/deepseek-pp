@@ -278,4 +278,12 @@ export interface PersistenceRuntimeCommandContracts {
     request: DeclaredRuntimeRequest<'CLEAR_PET'>;
     response: Ack;
   };
+  GET_MCP_REQUEST_TIMEOUT: {
+    request: DeclaredRuntimeRequest<'GET_MCP_REQUEST_TIMEOUT'>;
+    response: number;
+  };
+  SET_MCP_REQUEST_TIMEOUT: {
+    request: DeclaredRuntimeRequest<'SET_MCP_REQUEST_TIMEOUT'>;
+    response: Ack;
+  };
 }

@@ -5,6 +5,7 @@ import {
   DEFAULT_SHELL_MCP_ALLOWLIST_TOOL_NAMES,
   isShellMcpServer,
 } from '../core/shell/policy';
+import { DEFAULT_MCP_REQUEST_TIMEOUT_MS } from '../core/mcp/config';
 import { SHELL_TOOL_NAMES } from '../core/shell/contracts';
 
 describe('createShellMcpPresetInput', () => {
@@ -14,6 +15,13 @@ describe('createShellMcpPresetInput', () => {
     expect(preset.enabled).toBe(false);
     expect(preset.allowlist).toEqual({ mode: 'allow', toolNames: [...DEFAULT_SHELL_MCP_ALLOWLIST_TOOL_NAMES] });
     expect(preset.execution).toEqual({ enabled: false, mode: 'auto' });
+  });
+
+  it('uses the default MCP request timeout unless explicitly overridden', () => {
+    expect(createShellMcpPresetInput().timeouts?.requestMs)
+      .toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    expect(createShellMcpPresetInput({ requestMs: 300_000 }).timeouts?.requestMs)
+      .toBe(300_000);
   });
 
   it('keeps shell_exec and the persistent session tools out of the default allowlist', () => {

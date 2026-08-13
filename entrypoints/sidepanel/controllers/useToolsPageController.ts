@@ -106,7 +106,7 @@ export function useToolsPageController(t: Translator) {
         setPythonMessage(t('sidepanel.toolsPage.shellExists'));
         return;
       }
-      await mcpToolsController.createServer(getMcpPresetInput('shell'));
+      await mcpToolsController.createServer(await getMcpPresetInput('shell'));
       setPythonMessageTone('success');
       setPythonMessage(t('sidepanel.toolsPage.shellCreated'));
       await loadPythonTool();

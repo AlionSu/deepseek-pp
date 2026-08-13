@@ -161,6 +161,8 @@ export const RUNTIME_COMMAND_CONTRACTS = {
   GET_PET: typedCommand('none', 'value'),
   SAVE_PET: typedCommand('payload-decoded', 'ack'),
   CLEAR_PET: typedCommand('none', 'ack'),
+  GET_MCP_REQUEST_TIMEOUT: typedCommand('none', 'value'),
+  SET_MCP_REQUEST_TIMEOUT: typedCommand('payload-decoded', 'ack'),
   GET_SYNC_CONFIG: typedCommand('none', 'nullable-value'),
   SAVE_SYNC_CONFIG: typedCommand('payload-decoded', 'status-or-domain-error'),
   WEBDAV_TEST: typedCommand('payload-decoded', 'status-or-domain-error'),

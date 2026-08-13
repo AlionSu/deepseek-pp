@@ -152,7 +152,7 @@ export function useMcpPageController(t: Translator, confirm: Confirm) {
       return;
     }
     try {
-      const server = await mcpToolsController.createServer(getMcpPresetInput(kind));
+      const server = await mcpToolsController.createServer(await getMcpPresetInput(kind));
       setSelectedId(server.id);
       showBanner('success', t(kind === 'shell'
         ? 'sidepanel.mcpPage.messages.shellCreated'

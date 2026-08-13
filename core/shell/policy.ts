@@ -1,10 +1,15 @@
 import type { McpServerConfig, McpServerCreateInput, McpToolAllowlist } from '../mcp/types';
+import { DEFAULT_MCP_REQUEST_TIMEOUT_MS } from '../mcp/config';
 import { SHELL_MCP_NATIVE_HOST, SHELL_MCP_SERVER_NAME } from './contracts';
 
 export interface ShellMcpPresetOptions {
   nativeHost?: string;
   enabled?: boolean;
   executionEnabled?: boolean;
+  // When provided, overrides the default request timeout on the preset. The
+  // caller (e.g. background startup) typically passes the globally configured
+  // MCP request timeout so the Shell local preset does not hardcode 120s.
+  requestMs?: number;
 }
 
 export const DEFAULT_SHELL_MCP_ALLOWLIST_TOOL_NAMES = [
@@ -39,7 +44,7 @@ export function createShellMcpPresetInput(
     secrets: [],
     timeouts: {
       connectMs: 5_000,
-      requestMs: 120_000,
+      requestMs: options.requestMs ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS,
       discoveryMs: 10_000,
     },
     limits: {
